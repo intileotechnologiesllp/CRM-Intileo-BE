@@ -27,6 +27,8 @@ const ContactSyncHistory = require("./contact/contactSyncHistoryModel");
 const ContactChangeLog = require("./contact/contactChangeLogModel");
 const ContactSyncMapping = require("./contact/contactSyncMappingModel");
 const CompanySettings = require("./company/companySettingsModel");
+const Meeting = require("./meeting/meetingModel");
+const SchedulingLink = require("./meeting/schedulingLinkModel");
 
 // GroupVisibility.belongsTo(Person, { as: "GroupPerson", foreignKey: "personId" });
 // Person.hasMany(GroupVisibility, { foreignKey: "personId", as: "GroupVisibility" });
@@ -294,4 +296,6 @@ module.exports = {
   ContactChangeLog,
   ContactSyncMapping,
   CompanySettings,
+  Meeting,
+  SchedulingLink,
 };

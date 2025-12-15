@@ -3,6 +3,7 @@ const ProductVariation = require("../../models/product/productVariationModel");
 const DealProduct = require("../../models/product/dealProductModel");
 const MasterUser = require("../../models/master/masterUserModel");
 const { Op } = require("sequelize");
+const GroupVisibility = require("../../models/admin/groupVisibilityModel");
 const multer = require("multer");
 const path = require("path");
 const fs = require("fs");
@@ -208,6 +209,7 @@ exports.getProducts = async (req, res) => {
       isActive,
       sortBy = "createdAt",
       sortOrder = "DESC",
+      groupId
     } = req.query;
 
     const offset = (page - 1) * limit;
@@ -251,7 +253,7 @@ exports.getProducts = async (req, res) => {
         {
           model: MasterUser,
           as: "owner",
-          attributes: ["masterUserID","name", "email"],
+          attributes: ["masterUserID", "name", "email"],
         },
       ],
       limit: parseInt(limit),
@@ -259,10 +261,57 @@ exports.getProducts = async (req, res) => {
       order: [[sortBy, sortOrder.toUpperCase()]],
     });
 
+    const findGroup = await GroupVisibility.findOne({
+      where: {
+        groupId: groupId
+      },
+    });
+
+    let filterProducts = [];
+
+    if (findGroup?.lead?.toLowerCase() == "visibilitygroup") {
+      let findParentGroup = null;
+      if (findGroup?.parentGroupId) {
+        findParentGroup = await GroupVisibility.findOne({
+          where: {
+            groupId: findGroup?.parentGroupId,
+          },
+        });
+      }
+
+      const Filter = products.filter(
+        (idx) =>
+          idx?.ownerId == req.adminId ||
+          idx?.visibilityGroupId == groupId ||
+          idx?.visibilityGroup == findGroup?.parentGroupId ||
+          findParentGroup.memberIds?.split(",").includes(req.adminId.toString())
+      );
+      filterProducts = Filter;
+    } else if (findGroup?.lead?.toLowerCase() == "owner") {
+      let findParentGroup = null;
+      if (findGroup?.parentGroupId) {
+        findParentGroup = await GroupVisibility.findOne({
+          where: {
+            groupId: findGroup?.parentGroupId,
+          },
+        });
+      }
+
+      const Filter = products.filter(
+        (idx) =>
+          idx?.ownerId == req.adminId ||
+          idx?.visibilityGroup == findGroup?.parentGroupId ||
+          findParentGroup.memberIds?.split(",").includes(req.adminId.toString())
+      );
+
+      filterProducts = Filter;
+    } else {
+      filterProducts = products;
+    }
     res.status(200).json({
       status: "success",
       data: {
-        products,
+        products: filterProducts,
         pagination: {
           total: count,
           page: parseInt(page),
@@ -492,7 +541,7 @@ exports.addProductToDeal = async (req, res) => {
   try {
     console.log("🔵 [ADD PRODUCT TO DEAL] Request received");
     console.log("🔵 Request body:", JSON.stringify(req.body, null, 2));
-    
+
     const {
       dealId,
       productId,
@@ -510,14 +559,20 @@ exports.addProductToDeal = async (req, res) => {
       notes,
     } = req.body;
 
-    console.log("🔵 Parsed values:", { dealId, productId, quantity, unitPrice });
+    console.log("🔵 Parsed values:", {
+      dealId,
+      productId,
+      quantity,
+      unitPrice,
+    });
 
     // Validate required fields
     if (!dealId || !productId || !quantity || !unitPrice) {
       console.log("❌ Missing required fields");
       return res.status(400).json({
         status: "error",
-        message: "Missing required fields: dealId, productId, quantity, unitPrice",
+        message:
+          "Missing required fields: dealId, productId, quantity, unitPrice",
       });
     }
 
@@ -629,7 +684,10 @@ exports.getDealProducts = async (req, res) => {
           as: "variation",
         },
       ],
-      order: [["sortOrder", "ASC"], ["createdAt", "ASC"]],
+      order: [
+        ["sortOrder", "ASC"],
+        ["createdAt", "ASC"],
+      ],
     });
 
     // Calculate totals and revenue metrics
@@ -647,7 +705,7 @@ exports.getDealProducts = async (req, res) => {
 
         // Calculate revenue metrics based on billing frequency
         const billingFrequency = dp.billingFrequency;
-        
+
         if (billingFrequency === "monthly") {
           acc.monthlyRecurringRevenue += total;
           acc.annualRecurringRevenue += total * 12;
@@ -669,9 +727,10 @@ exports.getDealProducts = async (req, res) => {
         if (dp.billingStartDate && dp.billingEndDate) {
           const startDate = new Date(dp.billingStartDate);
           const endDate = new Date(dp.billingEndDate);
-          const monthsDiff = (endDate.getFullYear() - startDate.getFullYear()) * 12 
-            + (endDate.getMonth() - startDate.getMonth());
-          
+          const monthsDiff =
+            (endDate.getFullYear() - startDate.getFullYear()) * 12 +
+            (endDate.getMonth() - startDate.getMonth());
+
           if (billingFrequency === "monthly" && monthsDiff > 0) {
             acc.totalContractValue += total * monthsDiff;
           } else if (billingFrequency === "quarterly" && monthsDiff > 0) {
@@ -696,7 +755,8 @@ exports.getDealProducts = async (req, res) => {
     );
 
     // Annual Contract Value (ACV) = ARR + One-time revenue
-    calculations.annualContractValue = calculations.annualRecurringRevenue + calculations.oneTimeRevenue;
+    calculations.annualContractValue =
+      calculations.annualRecurringRevenue + calculations.oneTimeRevenue;
 
     // Format summary for frontend
     const summary = {
@@ -772,12 +832,14 @@ exports.updateDealProduct = async (req, res) => {
       // Recalculate tax
       const amountAfterDiscount = subtotal - discountAmount;
       const taxType = updateData.taxType || dealProduct.taxType;
-      const taxPercentage = updateData.taxPercentage || dealProduct.taxPercentage;
+      const taxPercentage =
+        updateData.taxPercentage || dealProduct.taxPercentage;
       let taxAmount = 0;
       let total = amountAfterDiscount;
 
       if (taxType === "tax-exclusive") {
-        taxAmount = (amountAfterDiscount * parseFloat(taxPercentage || 0)) / 100;
+        taxAmount =
+          (amountAfterDiscount * parseFloat(taxPercentage || 0)) / 100;
         total = amountAfterDiscount + taxAmount;
       } else if (taxType === "tax-inclusive") {
         taxAmount =
@@ -869,7 +931,8 @@ exports.updateDealTaxSettings = async (req, res) => {
       let total = amountAfterDiscount;
 
       if (taxType === "tax-exclusive") {
-        taxAmount = (amountAfterDiscount * parseFloat(taxPercentage || 0)) / 100;
+        taxAmount =
+          (amountAfterDiscount * parseFloat(taxPercentage || 0)) / 100;
         total = amountAfterDiscount + taxAmount;
       } else if (taxType === "tax-inclusive") {
         taxAmount =

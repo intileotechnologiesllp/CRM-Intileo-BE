@@ -8030,6 +8030,55 @@ exports.getPersonsAndOrganizations = async (req, res) => {
       filteredOrganizations = filterDataByColumnPreference(organizations, orgColumnPref, 'organization');
     }
 
+    // const filterPerson = personsWithTimeline.filter(person => person?.visibilityGroupId == groupId)
+
+    // const filterOrganization = filteredOrganizations.filter(org => org?.visibilityGroupId == groupId)
+
+     const findGroup = await GroupVisibility.findOne({
+          where:{
+            groupId: 1 //groupId
+          }
+        })
+    
+        let filterPerson = [];
+        let filterOrganization = [];
+    
+        if(findGroup?.lead?.toLowerCase() == "visibilitygroup"){
+          let findParentGroup = null; 
+          if(findGroup?.parentGroupId){
+            findParentGroup = await GroupVisibility.findOne({
+              where: {
+                groupId: findGroup?.parentGroupId
+              }
+            })
+          }
+          
+          const filterDeals = personsWithTimeline.filter((idx)=> idx?.ownerId == req.adminId || idx?.visibilityGroupId == groupId ||  idx?.visibilityGroupId == findGroup?.parentGroupId || findParentGroup.memberIds?.split(",").includes(req.adminId.toString()));
+          
+          const filterorg = filteredOrganizations.filter((idx)=> idx?.ownerId == req.adminId || idx?.visibilityGroupId == groupId ||  idx?.visibilityGroupId == findGroup?.parentGroupId || findParentGroup.memberIds?.split(",").includes(req.adminId.toString()));
+    
+          filterPerson = filterDeals;
+          filterOrganization = filterorg;
+        }
+        else if(findGroup?.lead?.toLowerCase() == "owner"){
+          let findParentGroup = null; 
+          if(findGroup?.parentGroupId){
+            findParentGroup = await GroupVisibility.findOne({
+              where: {
+                groupId: findGroup?.parentGroupId
+              }
+            })
+          }
+    
+          const filterFields = personsWithTimeline.filter((idx)=> idx?.ownerId == req.adminId || idx?.visibilityGroup == findGroup?.parentGroupId);
+          const filterOrg = filteredOrganizations.filter((idx)=> idx?.ownerId == req.adminId || idx?.visibilityGroup == findGroup?.parentGroupId );
+    
+          filterPerson = filterFields;
+          filterOrganization = filterOrg;
+        }else{
+          filterPerson = personsWithTimeline;
+          filterOrganization = filteredOrganizations;
+        }
     // Return both filtered datasets in separate arrays with proper pagination metadata
     res.status(200).json({
       // Pagination metadata based on actual database counts
@@ -8045,8 +8094,8 @@ exports.getPersonsAndOrganizations = async (req, res) => {
         limit: orgLimit
       },
       
-      persons: personsWithTimeline, // Filtered person data with entity: 'person' and timeline activities
-      organizations: filteredOrganizations, // Filtered organization data with entity: 'organization'
+      persons: filterPerson,//personsWithTimeline, // Filtered person data with entity: 'person' and timeline activities
+      organizations: filterOrganization, //filteredOrganizations, // Filtered organization data with entity: 'organization'
       activityFilters: activityFilters, // Active timeline filters
       timelineEnabled: includeTimeline, // Whether timeline data was included
       timelineRange: includeTimeline ? { startDate: timelineStartDate, endDate: timelineEndDate } : null,
@@ -8731,6 +8780,7 @@ const multer = require('multer');
 const path = require('path');
 const fs = require('fs').promises;
 const { fn, col } = require('sequelize');
+const GroupVisibility = require("../../models/admin/groupVisibilityModel");
 
 // Configure multer for entity files (unified for both person and organization)
 const entityFileStorage = multer.diskStorage({

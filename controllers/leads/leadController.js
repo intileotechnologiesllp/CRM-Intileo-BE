@@ -41,6 +41,7 @@ const csv = require('csv-parser');
 const fs = require('fs');
 const path = require('path');
 const multer = require('multer');
+const GroupVisibility = require("../../models/admin/groupVisibilityModel");
 
 // Configure multer for file uploads
 const upload = multer({
@@ -425,6 +426,7 @@ exports.createLead = async (req, res) => {
       visibilityGroupId: userGroup ? userGroup.groupId : null,
       valueCurrency: req.body.valueCurrency || "INR",
       proposalValueCurrency: req.body.proposalValueCurrency || "INR",
+      groupId: req.body.groupId || null,
     });
 
     // 🔔 Send Notification - Lead Created
@@ -767,6 +769,7 @@ exports.getLeads = async (req, res) => {
     favoriteFilterId, // Add favoriteFilterId parameter for applying favorite filters
     filterId,
     labels, // Add labels parameter for filtering by labels
+    groupId
   } = req.query;
   console.log(req.role, "role of the user............");
 
@@ -928,16 +931,12 @@ exports.getLeads = async (req, res) => {
         .filter((col) => col.check && leadDetailsFields.includes(col.key) && !col.isCustomField)
         .map((col) => col.key);
     }
-
-    console.log("leadAttributes from preferences:", leadAttributes);
-    console.log("leadDetailsAttributes from preferences:", leadDetailsAttributes);
     
     // Debug: Check if currency fields are included
     if (leadAttributes) {
       const currencyFields = leadAttributes.filter(attr => 
         attr.includes('Currency') || attr.includes('currency')
       );
-      console.log("✅ Currency fields included in leadAttributes:", currencyFields);
     }
 
     let whereClause = {};
@@ -1098,18 +1097,18 @@ exports.getLeads = async (req, res) => {
       }
     }
 
-    console.log("→ Query params:", req.query);
-    console.log("→ queryMasterUserID:", queryMasterUserID);
-    console.log("→ favoriteId:", favoriteId);
-    console.log("→ favoriteFilterId:", favoriteFilterId);
-    console.log("→ effectiveMasterUserID:", effectiveMasterUserID);
-    console.log("→ effectiveFilterId:", effectiveFilterId);
-    console.log("→ req.adminId:", req.adminId);
-    console.log("→ req.role:", req.role);
+    // console.log("→ Query params:", req.query);
+    // console.log("→ queryMasterUserID:", queryMasterUserID);
+    // console.log("→ favoriteId:", favoriteId);
+    // console.log("→ favoriteFilterId:", favoriteFilterId);
+    // console.log("→ effectiveMasterUserID:", effectiveMasterUserID);
+    // console.log("→ effectiveFilterId:", effectiveFilterId);
+    // console.log("→ req.adminId:", req.adminId);
+    // console.log("→ req.role:", req.role);
 
     //................................................................//filter
     if (effectiveFilterId) {
-      console.log("Processing filter with effectiveFilterId:", effectiveFilterId);
+      // console.log("Processing filter with effectiveFilterId:", effectiveFilterId);
 
       // Fetch the saved filter
       const filter = await LeadFilter.findByPk(effectiveFilterId);
@@ -1117,14 +1116,14 @@ exports.getLeads = async (req, res) => {
         return res.status(404).json({ message: "Filter not found." });
       }
 
-      console.log("Found filter:", filter.filterName);
+      // console.log("Found filter:", filter.filterName);
 
       const filterConfig =
         typeof filter.filterConfig === "string"
           ? JSON.parse(filter.filterConfig)
           : filter.filterConfig;
 
-      console.log("Filter config:", JSON.stringify(filterConfig, null, 2));
+      // console.log("Filter config:", JSON.stringify(filterConfig, null, 2));
 
       const { all = [], any = [] } = filterConfig;
       const leadFields = Object.keys(Lead.rawAttributes);
@@ -1140,15 +1139,15 @@ exports.getLeads = async (req, res) => {
       let activityWhere = {};
       let customFieldsConditions = { all: [], any: [] };
 
-      console.log("Available lead fields:", leadFields);
-      console.log("Available leadDetails fields:", leadDetailsFields);
-      console.log("Available person fields:", personFields);
-      console.log("Available organization fields:", organizationFields);
-      console.log("Available activity fields:", activityFields);
+      // console.log("Available lead fields:", leadFields);
+      // console.log("Available leadDetails fields:", leadDetailsFields);
+      // console.log("Available person fields:", personFields);
+      // console.log("Available organization fields:", organizationFields);
+      // console.log("Available activity fields:", activityFields);
 
       // --- Your new filter logic for all ---
       if (all.length > 0) {
-        console.log("Processing 'all' conditions:", all);
+        // console.log("Processing 'all' conditions:", all);
 
         filterWhere[Op.and] = [];
         leadDetailsWhere[Op.and] = [];
@@ -1401,7 +1400,7 @@ exports.getLeads = async (req, res) => {
 
       // Handle label filtering in filtered queries too
       if (labels) {
-        console.log("→ Labels parameter received in filtered query:", labels);
+        // console.log("→ Labels parameter received in filtered query:", labels);
         
         // Parse labels - could be comma-separated string or array
         let labelArray;
@@ -1413,10 +1412,10 @@ exports.getLeads = async (req, res) => {
           labelArray = [];
         }
         
-        console.log("→ Parsed label array in filtered query:", labelArray);
+        // console.log("→ Parsed label array in filtered query:", labelArray);
         
         if (labelArray.length > 0) {
-          console.log("→ Searching for labels in filtered query:", labelArray);
+          // console.log("→ Searching for labels in filtered query:", labelArray);
           
           // Since valueLabels contains label names directly, we can filter by names
           // But let's also check if labels exist in the Label table for validation
@@ -1429,11 +1428,11 @@ exports.getLeads = async (req, res) => {
             raw: true
           });
           
-          console.log("→ Found labels in database for filtered query:", validLabels);
+          // console.log("→ Found labels in database for filtered query:", validLabels);
           
           // Use the provided label names for filtering (regardless of Label table)
           // since the valueLabels column stores names directly
-          console.log("→ Filtering by label names directly from valueLabels column in filtered query");
+          // console.log("→ Filtering by label names directly from valueLabels column in filtered query");
           
           // Create OR conditions for each label name with proper LIKE patterns
           const labelOrConditions = [];
@@ -1452,7 +1451,7 @@ exports.getLeads = async (req, res) => {
             );
           });
           
-          console.log("→ Label OR conditions for filtered query:", labelOrConditions);
+          // console.log("→ Label OR conditions for filtered query:", labelOrConditions);
           
           // Combine with existing where conditions more carefully
           if (whereClause[Op.and]) {
@@ -1472,37 +1471,37 @@ exports.getLeads = async (req, res) => {
             whereClause[Op.or] = labelOrConditions;
           }
           
-          console.log("→ Label filtering applied successfully using label names in filtered query");
+          // console.log("→ Label filtering applied successfully using label names in filtered query");
         } else {
-          console.log("→ No valid label names provided in filtered query, no filtering applied");
+          // console.log("→ No valid label names provided in filtered query, no filtering applied");
         }
       }
 
-      console.log("→ Built filterWhere:", JSON.stringify(filterWhere));
-      console.log(
-        "→ Built leadDetailsWhere:",
-        JSON.stringify(leadDetailsWhere)
-      );
-      console.log("→ Built personWhere:", JSON.stringify(personWhere));
-      console.log(
-        "→ Built organizationWhere:",
-        JSON.stringify(organizationWhere)
-      );
-      console.log("→ Built activityWhere:", activityWhere);
-      console.log(
-        "→ Activity where object keys length:",
-        Object.keys(activityWhere).length
-      );
-      console.log(
-        "→ Activity where object symbols length:",
-        Object.getOwnPropertySymbols(activityWhere).length
-      );
-      console.log(
-        "→ All activity where properties:",
-        Object.getOwnPropertyNames(activityWhere).concat(
-          Object.getOwnPropertySymbols(activityWhere)
-        )
-      );
+      // console.log("→ Built filterWhere:", JSON.stringify(filterWhere));
+      // console.log(
+      //   "→ Built leadDetailsWhere:",
+      //   JSON.stringify(leadDetailsWhere)
+      // );
+      // console.log("→ Built personWhere:", JSON.stringify(personWhere));
+      // console.log(
+      //   "→ Built organizationWhere:",
+      //   JSON.stringify(organizationWhere)
+      // );
+      // console.log("→ Built activityWhere:", activityWhere);
+      // console.log(
+      //   "→ Activity where object keys length:",
+      //   Object.keys(activityWhere).length
+      // );
+      // console.log(
+      //   "→ Activity where object symbols length:",
+      //   Object.getOwnPropertySymbols(activityWhere).length
+      // );
+      // console.log(
+      //   "→ All activity where properties:",
+      //   Object.getOwnPropertyNames(activityWhere).concat(
+      //     Object.getOwnPropertySymbols(activityWhere)
+      //   )
+      // );
 
       // Fix: Check for both regular keys and Symbol properties (Sequelize operators are Symbols)
       hasActivityFiltering =
@@ -1518,31 +1517,31 @@ exports.getLeads = async (req, res) => {
         Object.getOwnPropertySymbols(organizationWhere).length > 0;
 
       if (hasActivityFiltering) {
-        console.log("→ Activity filtering will be applied:");
+        // console.log("→ Activity filtering will be applied:");
         if (activityWhere[Op.and]) {
-          console.log(
-            "  - AND conditions count:",
-            activityWhere[Op.and].length
-          );
+          // console.log(
+          //   "  - AND conditions count:",
+          //   activityWhere[Op.and].length
+          // );
         }
         if (activityWhere[Op.or]) {
-          console.log("  - OR conditions count:", activityWhere[Op.or].length);
+          // console.log("  - OR conditions count:", activityWhere[Op.or].length);
         }
 
         // Quick database check for debugging
         try {
           const totalActivities = await Activity.count();
-          console.log("→ Total activities in database:", totalActivities);
+          // console.log("→ Total activities in database:", totalActivities);
 
           const activitiesWithType = await Activity.count({
             where: { type: "Meeting" },
           });
-          console.log("→ Activities with type='Meeting':", activitiesWithType);
+          // console.log("→ Activities with type='Meeting':", activitiesWithType);
 
           const activitiesWithLeads = await Activity.count({
             where: { leadId: { [Op.not]: null } },
           });
-          console.log("→ Activities linked to leads:", activitiesWithLeads);
+          // console.log("→ Activities linked to leads:", activitiesWithLeads);
 
           const leadsWithActivities = await Lead.count({
             include: [
@@ -1553,9 +1552,9 @@ exports.getLeads = async (req, res) => {
               },
             ],
           });
-          console.log("→ Leads that have activities:", leadsWithActivities);
+          // console.log("→ Leads that have activities:", leadsWithActivities);
         } catch (debugError) {
-          console.log("→ Debug query error:", debugError.message);
+          // console.log("→ Debug query error:", debugError.message);
         }
       }
 
@@ -1575,12 +1574,12 @@ exports.getLeads = async (req, res) => {
       }
 
       if (hasPersonFiltering) {
-        console.log("→ Person filtering will be applied:");
+        // console.log("→ Person filtering will be applied:");
         if (personWhere[Op.and]) {
-          console.log("  - AND conditions count:", personWhere[Op.and].length);
+          // console.log("  - AND conditions count:", personWhere[Op.and].length);
         }
         if (personWhere[Op.or]) {
-          console.log("  - OR conditions count:", personWhere[Op.or].length);
+          // console.log("  - OR conditions count:", personWhere[Op.or].length);
         }
 
         include.push({
@@ -1598,18 +1597,18 @@ exports.getLeads = async (req, res) => {
       }
 
       if (hasOrganizationFiltering) {
-        console.log("→ Organization filtering will be applied:");
+        // console.log("→ Organization filtering will be applied:");
         if (organizationWhere[Op.and]) {
-          console.log(
-            "  - AND conditions count:",
-            organizationWhere[Op.and].length
-          );
+          // console.log(
+          //   "  - AND conditions count:",
+          //   organizationWhere[Op.and].length
+          // );
         }
         if (organizationWhere[Op.or]) {
-          console.log(
-            "  - OR conditions count:",
-            organizationWhere[Op.or].length
-          );
+          // console.log(
+          //   "  - OR conditions count:",
+          //   organizationWhere[Op.or].length
+          // );
         }
 
         include.push({
@@ -1627,39 +1626,39 @@ exports.getLeads = async (req, res) => {
       }
 
       if (hasActivityFiltering) {
-        console.log("==========================================");
-        console.log("🔥 ACTIVITY FILTERING DETECTED!");
-        console.log(
-          "🔥 Activity where clause:",
-          JSON.stringify(activityWhere, null, 2)
-        );
-        console.log("🔥 Activity where keys:", Object.keys(activityWhere));
-        console.log(
-          "🔥 Activity where symbols:",
-          Object.getOwnPropertySymbols(activityWhere)
-        );
+        // console.log("==========================================");
+        // console.log("🔥 ACTIVITY FILTERING DETECTED!");
+        // console.log(
+        //   "🔥 Activity where clause:",
+        //   JSON.stringify(activityWhere, null, 2)
+        // );
+        // console.log("🔥 Activity where keys:", Object.keys(activityWhere));
+        // console.log(
+        //   "🔥 Activity where symbols:",
+        //   Object.getOwnPropertySymbols(activityWhere)
+        // );
 
         // Debug: Show the actual condition structure
         if (activityWhere[Op.and]) {
-          console.log("🔥 AND conditions details:", activityWhere[Op.and]);
+          // console.log("🔥 AND conditions details:", activityWhere[Op.and]);
           activityWhere[Op.and].forEach((condition, index) => {
-            console.log(
-              `🔥 Condition ${index}:`,
-              JSON.stringify(condition, null, 2)
-            );
-            console.log(`🔥 Condition ${index} keys:`, Object.keys(condition));
-            console.log(
-              `🔥 Condition ${index} symbols:`,
-              Object.getOwnPropertySymbols(condition)
-            );
+            // console.log(
+            //   `🔥 Condition ${index}:`,
+            //   JSON.stringify(condition, null, 2)
+            // );
+            // console.log(`🔥 Condition ${index} keys:`, Object.keys(condition));
+            // console.log(
+            //   `🔥 Condition ${index} symbols:`,
+            //   Object.getOwnPropertySymbols(condition)
+            // );
 
             // Check each field in the condition
             Object.keys(condition).forEach((field) => {
-              console.log(`🔥 Field '${field}' value:`, condition[field]);
-              console.log(
-                `🔥 Field '${field}' symbols:`,
-                Object.getOwnPropertySymbols(condition[field])
-              );
+              // console.log(`🔥 Field '${field}' value:`, condition[field]);
+              // console.log(
+              //   `🔥 Field '${field}' symbols:`,
+              //   Object.getOwnPropertySymbols(condition[field])
+              // );
 
               // Show Symbol values
               Object.getOwnPropertySymbols(condition[field]).forEach(
@@ -1673,10 +1672,10 @@ exports.getLeads = async (req, res) => {
             });
           });
         }
-        console.log("==========================================");
+        // console.log("==========================================");
 
         // NEW APPROACH: Rebuild the activity condition from scratch to avoid Symbol loss
-        console.log("🔧 REBUILDING ACTIVITY CONDITIONS FROM SCRATCH...");
+        // console.log("🔧 REBUILDING ACTIVITY CONDITIONS FROM SCRATCH...");
 
         // Find the activity conditions from the filter config and rebuild them
         let rebuiltActivityWhere = null;
@@ -1685,7 +1684,7 @@ exports.getLeads = async (req, res) => {
           const conditions = [];
 
           activityWhere[Op.and].forEach((condition, index) => {
-            console.log(`🔧 Rebuilding condition ${index}:`, condition);
+            // console.log(`🔧 Rebuilding condition ${index}:`, condition);
 
             // Extract the field name and value from the original condition
             Object.keys(condition).forEach((fieldName) => {
@@ -1705,11 +1704,11 @@ exports.getLeads = async (req, res) => {
                 // Rebuild the condition with fresh Symbols
                 if (symbol === Op.eq) {
                   const rebuiltCondition = { [fieldName]: { [Op.eq]: value } };
-                  console.log(`🔧 Rebuilt condition:`, rebuiltCondition);
-                  console.log(
-                    `🔧 Rebuilt condition symbols:`,
-                    Object.getOwnPropertySymbols(rebuiltCondition[fieldName])
-                  );
+                  // console.log(`🔧 Rebuilt condition:`, rebuiltCondition);
+                  // console.log(
+                  //   `🔧 Rebuilt condition symbols:`,
+                  //   Object.getOwnPropertySymbols(rebuiltCondition[fieldName])
+                  // );
                   conditions.push(rebuiltCondition);
                 }
                 // Add other operators as needed (Op.ne, Op.like, etc.)
@@ -1719,31 +1718,31 @@ exports.getLeads = async (req, res) => {
 
           if (conditions.length > 0) {
             rebuiltActivityWhere = { [Op.and]: conditions };
-            console.log("� REBUILT ACTIVITY WHERE:", rebuiltActivityWhere);
-            console.log(
-              "� Rebuilt symbols:",
-              Object.getOwnPropertySymbols(rebuiltActivityWhere)
-            );
+            // console.log("� REBUILT ACTIVITY WHERE:", rebuiltActivityWhere);
+            // console.log(
+            //   "� Rebuilt symbols:",
+            //   Object.getOwnPropertySymbols(rebuiltActivityWhere)
+            // );
 
             if (rebuiltActivityWhere[Op.and]) {
-              console.log(
-                "� Rebuilt AND conditions:",
-                rebuiltActivityWhere[Op.and]
-              );
+              // console.log(
+              //   "� Rebuilt AND conditions:",
+              //   rebuiltActivityWhere[Op.and]
+              // );
               rebuiltActivityWhere[Op.and].forEach((condition, index) => {
-                console.log(`� Rebuilt condition ${index}:`, condition);
+                // console.log(`� Rebuilt condition ${index}:`, condition);
                 Object.keys(condition).forEach((field) => {
-                  console.log(
-                    `🔧 Field '${field}' symbols:`,
-                    Object.getOwnPropertySymbols(condition[field])
-                  );
+                  // console.log(
+                  //   `🔧 Field '${field}' symbols:`,
+                  //   Object.getOwnPropertySymbols(condition[field])
+                  // );
                   Object.getOwnPropertySymbols(condition[field]).forEach(
                     (symbol) => {
-                      console.log(
-                        `� Rebuilt field '${field}' symbol ${symbol.toString()} = ${
-                          condition[field][symbol]
-                        }`
-                      );
+                      // console.log(
+                      //   `� Rebuilt field '${field}' symbol ${symbol.toString()} = ${
+                      //     condition[field][symbol]
+                      //   }`
+                      // );
                     }
                   );
                 });
@@ -1755,11 +1754,11 @@ exports.getLeads = async (req, res) => {
         // Use the rebuilt condition if available, otherwise try direct approach
         const finalActivityWhere = rebuiltActivityWhere || { type: "Meeting" };
 
-        console.log("🔧 FINAL ACTIVITY WHERE CONDITION:", finalActivityWhere);
-        console.log(
-          "🔧 Final condition symbols:",
-          Object.getOwnPropertySymbols(finalActivityWhere)
-        );
+        // console.log("🔧 FINAL ACTIVITY WHERE CONDITION:", finalActivityWhere);
+        // console.log(
+        //   "🔧 Final condition symbols:",
+        //   Object.getOwnPropertySymbols(finalActivityWhere)
+        // );
 
         include.push({
           model: Activity,
@@ -1768,26 +1767,26 @@ exports.getLeads = async (req, res) => {
           where: finalActivityWhere,
         });
 
-        console.log("🔥 ACTIVITY FILTERING APPLIED WITH REBUILT CONDITIONS");
-        console.log(
-          "🔥 This should now generate SQL: INNER JOIN activities ON activities.leadId = leads.leadId WHERE activities.type = 'Meeting'"
-        );
+        // console.log("🔥 ACTIVITY FILTERING APPLIED WITH REBUILT CONDITIONS");
+        // console.log(
+        //   "🔥 This should now generate SQL: INNER JOIN activities ON activities.leadId = leads.leadId WHERE activities.type = 'Meeting'"
+        // );
 
         // FINAL DEBUG: Check what's actually in the include array
         const finalActivityInclude = include[include.length - 1];
-        console.log("🔍 FINAL ACTIVITY INCLUDE IN ARRAY:");
-        console.log("🔍 Model:", finalActivityInclude.model.name);
-        console.log("🔍 As:", finalActivityInclude.as);
-        console.log("🔍 Required:", finalActivityInclude.required);
-        console.log("🔍 Where clause:", finalActivityInclude.where);
-        console.log(
-          "🔍 Where keys:",
-          Object.keys(finalActivityInclude.where || {})
-        );
-        console.log(
-          "🔍 Where symbols:",
-          Object.getOwnPropertySymbols(finalActivityInclude.where || {})
-        );
+        // console.log("🔍 FINAL ACTIVITY INCLUDE IN ARRAY:");
+        // console.log("🔍 Model:", finalActivityInclude.model.name);
+        // console.log("🔍 As:", finalActivityInclude.as);
+        // console.log("🔍 Required:", finalActivityInclude.required);
+        // console.log("🔍 Where clause:", finalActivityInclude.where);
+        // console.log(
+        //   "🔍 Where keys:",
+        //   Object.keys(finalActivityInclude.where || {})
+        // );
+        // console.log(
+        //   "🔍 Where symbols:",
+        //   Object.getOwnPropertySymbols(finalActivityInclude.where || {})
+        // );
 
         if (
           finalActivityInclude.where &&
@@ -1809,13 +1808,13 @@ exports.getLeads = async (req, res) => {
           );
         }
 
-        console.log("==========================================");
+        // console.log("==========================================");
       } else {
-        console.log("==========================================");
-        console.log(
-          "🔵 NO ACTIVITY FILTERING - ADDING DEFAULT ACTIVITY INCLUDE"
-        );
-        console.log("==========================================");
+        // console.log("==========================================");
+        // console.log(
+        //   "🔵 NO ACTIVITY FILTERING - ADDING DEFAULT ACTIVITY INCLUDE"
+        // );
+        // console.log("==========================================");
         include.push({
           model: Activity,
           as: "Activities",
@@ -1823,20 +1822,20 @@ exports.getLeads = async (req, res) => {
         });
       }
 
-      console.log(
-        "→ Updated include with LeadDetails where:",
-        JSON.stringify(leadDetailsWhere)
-      );
+      // console.log(
+      //   "→ Updated include with LeadDetails where:",
+      //   JSON.stringify(leadDetailsWhere)
+      // );
 
       // Handle custom field filtering
       if (
         customFieldsConditions.all.length > 0 ||
         customFieldsConditions.any.length > 0
       ) {
-        console.log(
-          "Processing custom field conditions:",
-          customFieldsConditions
-        );
+        // console.log(
+        //   "Processing custom field conditions:",
+        //   customFieldsConditions
+        // );
 
         // Debug: Show all custom fields in the database
         const allCustomFields = await CustomField.findAll({
@@ -1857,23 +1856,23 @@ exports.getLeads = async (req, res) => {
           ],
         });
 
-        console.log(
-          "All custom fields in database:",
-          allCustomFields.map((f) => ({
-            fieldId: f.fieldId,
-            fieldName: f.fieldName,
-            entityType: f.entityType,
-            fieldSource: f.fieldSource,
-            isActive: f.isActive,
-          }))
-        );
+        // console.log(
+        //   "All custom fields in database:",
+        //   allCustomFields.map((f) => ({
+        //     fieldId: f.fieldId,
+        //     fieldName: f.fieldName,
+        //     entityType: f.entityType,
+        //     fieldSource: f.fieldSource,
+        //     isActive: f.isActive,
+        //   }))
+        // );
 
         const customFieldFilters = await buildCustomFieldFilters(
           customFieldsConditions,
           req.adminId
         );
 
-        console.log("Built custom field filters:", customFieldFilters);
+        // console.log("Built custom field filters:", customFieldFilters);
 
         if (customFieldFilters.length > 0) {
           // Apply custom field filtering by finding leads that match the custom field conditions
@@ -1882,10 +1881,10 @@ exports.getLeads = async (req, res) => {
             req.adminId
           );
 
-          console.log(
-            "Matching lead IDs from custom field filtering:",
-            matchingLeadIds
-          );
+          // console.log(
+          //   "Matching lead IDs from custom field filtering:",
+          //   matchingLeadIds
+          // );
 
           if (matchingLeadIds.length > 0) {
             // If we already have other conditions, combine them
@@ -1904,13 +1903,13 @@ exports.getLeads = async (req, res) => {
             }
           } else {
             // No leads match the custom field conditions, so return empty result
-            console.log("No matching leads found, setting empty result");
+            // console.log("No matching leads found, setting empty result");
             filterWhere.leadId = { [Op.in]: [] };
           }
         } else {
-          console.log(
-            "No custom field filters found, possibly field not found"
-          );
+          // console.log(
+          //   "No custom field filters found, possibly field not found"
+          // );
         }
 
         whereClause = filterWhere;
@@ -1928,15 +1927,15 @@ exports.getLeads = async (req, res) => {
           { email: { [Op.like]: `%${search}%` } },
           { phone: { [Op.like]: `%${search}%` } },
         ];
-        console.log(
-          "→ Search applied, whereClause[Op.or]:",
-          whereClause[Op.or]
-        );
+        // console.log(
+        //   "→ Search applied, whereClause[Op.or]:",
+        //   whereClause[Op.or]
+        // );
       }
 
       // Handle label filtering
       if (labels) {
-        console.log("→ Labels parameter received:", labels);
+        // console.log("→ Labels parameter received:", labels);
         
         // Parse labels - could be comma-separated string or array
         let labelArray;
@@ -1948,10 +1947,10 @@ exports.getLeads = async (req, res) => {
           labelArray = [];
         }
         
-        console.log("→ Parsed label array:", labelArray);
+        // console.log("→ Parsed label array:", labelArray);
         
         if (labelArray.length > 0) {
-          console.log("→ Searching for labels:", labelArray);
+          // console.log("→ Searching for labels:", labelArray);
           
           // Since valueLabels contains label names directly, we can filter by names
           // But let's also check if labels exist in the Label table for validation
@@ -1964,11 +1963,11 @@ exports.getLeads = async (req, res) => {
             raw: true
           });
           
-          console.log("→ Found labels in database:", validLabels);
+          // console.log("→ Found labels in database:", validLabels);
           
           // Use the provided label names for filtering (regardless of Label table)
           // since the valueLabels column stores names directly
-          console.log("→ Filtering by label names directly from valueLabels column");
+          // console.log("→ Filtering by label names directly from valueLabels column");
           
           // Create OR conditions for each label name with proper LIKE patterns
           const labelOrConditions = [];
@@ -1987,7 +1986,7 @@ exports.getLeads = async (req, res) => {
             );
           });
           
-          console.log("→ Label OR conditions:", labelOrConditions);
+          // console.log("→ Label OR conditions:", labelOrConditions);
           
           // Combine with existing where conditions more carefully
           if (whereClause[Op.and]) {
@@ -2007,9 +2006,9 @@ exports.getLeads = async (req, res) => {
             whereClause[Op.or] = labelOrConditions;
           }
           
-          console.log("→ Label filtering applied successfully using label names");
+          // console.log("→ Label filtering applied successfully using label names");
         } else {
-          console.log("→ No valid label names provided, no filtering applied");
+          // console.log("→ No valid label names provided, no filtering applied");
         }
       }
 
@@ -2023,10 +2022,10 @@ exports.getLeads = async (req, res) => {
 
     // Pagination
     const offset = (page - 1) * limit;
-    console.log("→ Final whereClause:", JSON.stringify(whereClause));
-    console.log("→ Final include:", JSON.stringify(include));
-    console.log("→ Pagination: limit =", limit, "offset =", offset);
-    console.log("→ Order:", sortBy, order);
+    // console.log("→ Final whereClause:", JSON.stringify(whereClause));
+    // console.log("→ Final include:", JSON.stringify(include));
+    // console.log("→ Pagination: limit =", limit, "offset =", offset);
+    // console.log("→ Order:", sortBy, order);
     // Always include Person and Organization
     if (!include.some((i) => i.as === "LeadPerson")) {
       include.push({
@@ -2060,19 +2059,19 @@ exports.getLeads = async (req, res) => {
 
     // Always exclude leads that have a dealId (converted leads)
     whereClause.dealId = null;
-    console.log("🔍 Applied dealId = null (excluding converted leads)");
+    // console.log("🔍 Applied dealId = null (excluding converted leads)");
 
-    console.log("==========================================");
-    console.log("🚀 FINAL QUERY EXECUTION STARTING");
-    console.log("🚀 Total include array length:", include.length);
+    // console.log("==========================================");
+    // console.log("🚀 FINAL QUERY EXECUTION STARTING");
+    // console.log("🚀 Total include array length:", include.length);
 
     // Check if Activity filtering is active
-    console.log("🚀 Activity include details:");
+    // console.log("🚀 Activity include details:");
     const activityInclude = include.find((i) => i.as === "Activities");
     if (activityInclude) {
-      console.log("  🎯 Activity include found:");
-      console.log("    - Required:", activityInclude.required);
-      console.log("    - Has where clause:", !!activityInclude.where);
+      // console.log("  🎯 Activity include found:");
+      // console.log("    - Required:", activityInclude.required);
+      // console.log("    - Has where clause:", !!activityInclude.where);
       if (activityInclude.where) {
         console.log(
           "    - Where clause:",
@@ -2080,32 +2079,32 @@ exports.getLeads = async (req, res) => {
         );
       }
     } else {
-      console.log("  ❌ NO Activity include found!");
+      // console.log("  ❌ NO Activity include found!");
     }
 
     // Check if Person filtering is active
     console.log("🚀 Person include details:");
     const personInclude = include.find((i) => i.as === "LeadPerson");
     if (personInclude) {
-      console.log("  👤 Person include found:");
-      console.log("    - Required:", personInclude.required);
-      console.log("    - Has where clause:", !!personInclude.where);
+      // console.log("  👤 Person include found:");
+      // console.log("    - Required:", personInclude.required);
+      // console.log("    - Has where clause:", !!personInclude.where);
       if (personInclude.where) {
-        console.log("    - Where clause:", JSON.stringify(personInclude.where));
+        // console.log("    - Where clause:", JSON.stringify(personInclude.where));
       }
     } else {
-      console.log("  ❌ NO Person include found!");
+      // console.log("  ❌ NO Person include found!");
     }
 
     // Check if Organization filtering is active
-    console.log("🚀 Organization include details:");
+    // console.log("🚀 Organization include details:");
     const organizationInclude = include.find(
       (i) => i.as === "LeadOrganization"
     );
     if (organizationInclude) {
-      console.log("  🏢 Organization include found:");
-      console.log("    - Required:", organizationInclude.required);
-      console.log("    - Has where clause:", !!organizationInclude.where);
+      // console.log("  🏢 Organization include found:");
+      // console.log("    - Required:", organizationInclude.required);
+      // console.log("    - Has where clause:", !!organizationInclude.where);
       if (organizationInclude.where) {
         console.log(
           "    - Where clause:",
@@ -2113,9 +2112,9 @@ exports.getLeads = async (req, res) => {
         );
       }
     } else {
-      console.log("  ❌ NO Organization include found!");
+      // console.log("  ❌ NO Organization include found!");
     }
-    console.log("==========================================");
+    // console.log("==========================================");
 
     // Fetch leads with pagination, filtering, sorting, searching, and leadDetails
     const leads = await Lead.findAndCountAll({
@@ -2130,60 +2129,60 @@ exports.getLeads = async (req, res) => {
           : undefined,
     });
 
-    console.log("==========================================");
-    console.log("🎉 QUERY EXECUTED SUCCESSFULLY!");
-    console.log("🎉 Total records found:", leads.count);
+    // console.log("==========================================");
+    // console.log("🎉 QUERY EXECUTED SUCCESSFULLY!");
+    // console.log("🎉 Total records found:", leads.count);
 
     // Debug Activity filtering results
     if (filterId && activityInclude && activityInclude.required) {
-      console.log("🎯 ACTIVITY FILTER RESULTS:");
-      console.log("  - Leads found with Activity filter:", leads.count);
+      // console.log("🎯 ACTIVITY FILTER RESULTS:");
+      // console.log("  - Leads found with Activity filter:", leads.count);
       if (leads.rows.length > 0) {
-        console.log(
-          "  - First lead activities:",
-          leads.rows[0].Activities
-            ? leads.rows[0].Activities.length
-            : "No Activities"
-        );
+        // console.log(
+        //   "  - First lead activities:",
+        //   leads.rows[0].Activities
+        //     ? leads.rows[0].Activities.length
+        //     : "No Activities"
+        // );
         if (leads.rows[0].Activities && leads.rows[0].Activities.length > 0) {
-          console.log(
-            "  - First activity type:",
-            leads.rows[0].Activities[0].type
-          );
+          // console.log(
+          //   "  - First activity type:",
+          //   leads.rows[0].Activities[0].type
+          // );
         }
       }
     }
 
     // Debug Person filtering results
     if (filterId && hasPersonFiltering) {
-      console.log("👤 PERSON FILTER RESULTS:");
-      console.log("  - Leads found with Person filter:", leads.count);
+      // console.log("👤 PERSON FILTER RESULTS:");
+      // console.log("  - Leads found with Person filter:", leads.count);
       if (leads.rows.length > 0) {
-        console.log(
-          "  - First lead person:",
-          leads.rows[0].LeadPerson
-            ? leads.rows[0].LeadPerson.firstName +
-                " " +
-                leads.rows[0].LeadPerson.lastName
-            : "No Person"
-        );
+        // console.log(
+        //   "  - First lead person:",
+        //   leads.rows[0].LeadPerson
+        //     ? leads.rows[0].LeadPerson.firstName +
+        //         " " +
+        //         leads.rows[0].LeadPerson.lastName
+        //     : "No Person"
+        // );
       }
     }
 
     // Debug Organization filtering results
     if (filterId && hasOrganizationFiltering) {
-      console.log("🏢 ORGANIZATION FILTER RESULTS:");
-      console.log("  - Leads found with Organization filter:", leads.count);
+      // console.log("🏢 ORGANIZATION FILTER RESULTS:");
+      // console.log("  - Leads found with Organization filter:", leads.count);
       if (leads.rows.length > 0) {
-        console.log(
-          "  - First lead organization:",
-          leads.rows[0].LeadOrganization
-            ? leads.rows[0].LeadOrganization.organizationName
-            : "No Organization"
-        );
+        // console.log(
+        //   "  - First lead organization:",
+        //   leads.rows[0].LeadOrganization
+        //     ? leads.rows[0].LeadOrganization.organizationName
+        //     : "No Organization"
+        // );
       }
     }
-    console.log("==========================================");
+    // console.log("==========================================");
 
     // Get custom field values for leads (only for checked custom fields from column preferences)
     const leadIds = leads.rows.map((lead) => lead.leadId);
@@ -2209,18 +2208,18 @@ exports.getLeads = async (req, res) => {
         return !standardFields.includes(key) || (column && column.isCustomField);
       });
       
-      console.log("🔍 === DEBUGGING 'source' CUSTOM FIELD ===");
-      console.log("🔍 All checked column keys:", checkedColumnKeys);
-      console.log("🔍 'source' in checked column keys:", checkedColumnKeys.includes('source'));
-      console.log("🔍 Checked custom field names from preferences:", checkedCustomFieldNames);
-      console.log("🔍 'source' in checked custom field names:", checkedCustomFieldNames.includes('source'));
+      // console.log("🔍 === DEBUGGING 'source' CUSTOM FIELD ===");
+      // console.log("🔍 All checked column keys:", checkedColumnKeys);
+      // console.log("🔍 'source' in checked column keys:", checkedColumnKeys.includes('source'));
+      // console.log("🔍 Checked custom field names from preferences:", checkedCustomFieldNames);
+      // console.log("🔍 'source' in checked custom field names:", checkedCustomFieldNames.includes('source'));
       
       // Check specifically for 'source' column in preferences
       const sourceColumn = columns.find(col => col.key === 'source');
       if (sourceColumn) {
-        console.log("✅ 'source' column found in preferences:", sourceColumn);
+        // console.log("✅ 'source' column found in preferences:", sourceColumn);
       } else {
-        console.log("❌ 'source' column NOT found in column preferences");
+        // console.log("❌ 'source' column NOT found in column preferences");
       }
     }
     
@@ -2251,20 +2250,20 @@ exports.getLeads = async (req, res) => {
         ],
       });
       
-      console.log("🔍 Custom field values fetched:", customFieldValues.length);
+      // console.log("🔍 Custom field values fetched:", customFieldValues.length);
       
       // Check specifically for 'source' field values
       const sourceValues = customFieldValues.filter(val => val.CustomField?.fieldName === 'source');
-      console.log("🔍 'source' field values found:", sourceValues.length);
+      // console.log("🔍 'source' field values found:", sourceValues.length);
       
       if (sourceValues.length > 0) {
-        console.log("✅ First 'source' value:", {
-          entityId: sourceValues[0].entityId,
-          value: sourceValues[0].value,
-          fieldName: sourceValues[0].CustomField.fieldName
-        });
+        // console.log("✅ First 'source' value:", {
+        //   entityId: sourceValues[0].entityId,
+        //   value: sourceValues[0].value,
+        //   fieldName: sourceValues[0].CustomField.fieldName
+        // });
       } else {
-        console.log("❌ No 'source' values found - checking why...");
+        // console.log("❌ No 'source' values found - checking why...");
         
         // Check if 'source' field exists in CustomField table
         const sourceFieldExists = await CustomField.findOne({
@@ -2278,7 +2277,7 @@ exports.getLeads = async (req, res) => {
         });
         
         if (sourceFieldExists) {
-          console.log("✅ 'source' field exists in CustomField table:", sourceFieldExists);
+          // console.log("✅ 'source' field exists in CustomField table:", sourceFieldExists);
           
           // Check if 'source' values exist for ANY leads
           const anySourceValues = await CustomFieldValue.findAll({
@@ -2294,29 +2293,29 @@ exports.getLeads = async (req, res) => {
             limit: 5
           });
           
-          console.log("🔍 Any 'source' values in database (limit 5):", anySourceValues.length);
+          // console.log("🔍 Any 'source' values in database (limit 5):", anySourceValues.length);
           if (anySourceValues.length > 0) {
-            console.log("🔍 Sample source values:", anySourceValues.map(v => ({
-              entityId: v.entityId,
-              value: v.value
-            })));
+            // console.log("🔍 Sample source values:", anySourceValues.map(v => ({
+            //   entityId: v.entityId,
+            //   value: v.value
+            // })));
             
             // Check if any match current lead IDs
             const currentLeadIds = leadIds;
             const matchingIds = anySourceValues.filter(v => currentLeadIds.includes(v.entityId));
-            console.log("🔍 Source values matching current lead IDs:", matchingIds.length);
+            // console.log("🔍 Source values matching current lead IDs:", matchingIds.length);
           }
         } else {
-          console.log("❌ 'source' field does NOT exist in CustomField table");
+          // console.log("❌ 'source' field does NOT exist in CustomField table");
         }
       }
     } else {
-      console.log("❌ No custom fields are checked in column preferences, skipping custom field query");
+      // console.log("❌ No custom fields are checked in column preferences, skipping custom field query");
     }
 
     // Group custom field values by leadId
     const customFieldsByLead = {};
-    console.log("🔍 Grouping", customFieldValues.length, "custom field values by leadId");
+    // console.log("🔍 Grouping", customFieldValues.length, "custom field values by leadId");
     
     customFieldValues.forEach((value) => {
       if (!value.CustomField) return;
@@ -2339,18 +2338,18 @@ exports.getLeads = async (req, res) => {
       };
     });
     
-    console.log("🔍 Total leads with custom fields:", Object.keys(customFieldsByLead).length);
+    // console.log("🔍 Total leads with custom fields:", Object.keys(customFieldsByLead).length);
     
     // Check if any lead has 'source' field
     const leadsWithSource = Object.entries(customFieldsByLead).filter(([leadId, fields]) => 
       fields.hasOwnProperty('source')
     );
-    console.log("🔍 Leads with 'source' field:", leadsWithSource.length);
+    // console.log("🔍 Leads with 'source' field:", leadsWithSource.length);
     if (leadsWithSource.length > 0) {
-      console.log("✅ First lead with source field:", {
-        leadId: leadsWithSource[0][0],
-        sourceValue: leadsWithSource[0][1].source.value
-      });
+      // console.log("✅ First lead with source field:", {
+      //   leadId: leadsWithSource[0][0],
+      //   sourceValue: leadsWithSource[0][1].source.value
+      // });
     }
 
     // Fetch currency descriptions for valid currency IDs found in leads
@@ -2360,10 +2359,10 @@ exports.getLeads = async (req, res) => {
     const isProposalValueCurrencyChecked = checkedColumnKeys.includes('proposalValueCurrency');
     const isCurrencyChecked = checkedColumnKeys.includes('currency');
     
-    console.log("🔍 Currency field preferences:");
-    console.log("  - valueCurrency checked:", isValueCurrencyChecked);
-    console.log("  - proposalValueCurrency checked:", isProposalValueCurrencyChecked);
-    console.log("  - currency checked:", isCurrencyChecked);
+    // console.log("🔍 Currency field preferences:");
+    // console.log("  - valueCurrency checked:", isValueCurrencyChecked);
+    // console.log("  - proposalValueCurrency checked:", isProposalValueCurrencyChecked);
+    // console.log("  - currency checked:", isCurrencyChecked);
     
     leads.rows.forEach((lead) => {
       const leadObj = lead.toJSON();
@@ -2511,7 +2510,7 @@ exports.getLeads = async (req, res) => {
     });
     
     // Fetch and enrich label details for all leads
-    console.log("🔍 === ENRICHING LABEL DETAILS ===");
+    // console.log(flatLeads,"🔍 === ENRICHING LABEL DETAILS ===");
     
     // Collect all unique label names from all leads
     const allLabelNames = new Set();
@@ -2523,7 +2522,7 @@ exports.getLeads = async (req, res) => {
       }
     });
     
-    console.log("🔍 All unique label names found:", Array.from(allLabelNames));
+    // console.log("🔍 All unique label names found:", Array.from(allLabelNames));
     
     // Fetch label details for all unique label names
     let labelDetailsMap = {};
@@ -2547,7 +2546,7 @@ exports.getLeads = async (req, res) => {
         };
       });
       
-      console.log("🔍 Label details map created:", labelDetailsMap);
+      // console.log("🔍 Label details map created:", labelDetailsMap);
     }
     
     // Enrich each lead with full label details
@@ -2571,55 +2570,55 @@ exports.getLeads = async (req, res) => {
       delete lead.labelNames;
     });
     
-    console.log("🔍 === LABEL ENRICHMENT COMPLETE ===");
+    // console.log("🔍 === LABEL ENRICHMENT COMPLETE ===");
     
     // DEBUG: Final verification of 'source' field
-    console.log("🔍 === FINAL 'source' FIELD VERIFICATION ===");
+    // console.log("🔍 === FINAL 'source' FIELD VERIFICATION ===");
     if (flatLeads.length > 0) {
       const firstLead = flatLeads[0];
       
-      console.log("🔍 All fields in first processed lead:", Object.keys(firstLead).length, "fields");
-      console.log("🔍 'source' field in final lead object:", firstLead.hasOwnProperty('source'));
+      // console.log("🔍 All fields in first processed lead:", Object.keys(firstLead).length, "fields");
+      // console.log("🔍 'source' field in final lead object:", firstLead.hasOwnProperty('source'));
       
       if (firstLead.source !== undefined) {
-        console.log("✅ SUCCESS: 'source' field found in final response with value:", firstLead.source);
+        // console.log("✅ SUCCESS: 'source' field found in final response with value:", firstLead.source);
       } else {
-        console.log("❌ FAIL: 'source' field NOT found in final response");
-        console.log("🔍 Available custom fields in response:", 
-          Object.keys(firstLead).filter(key => 
-            !['leadId', 'contactPerson', 'organization', 'title', 'email', 'phone', 'createdAt', 'updatedAt'].includes(key)
-          )
-        );
+        // console.log("❌ FAIL: 'source' field NOT found in final response");
+        // console.log("🔍 Available custom fields in response:", 
+        //   Object.keys(firstLead).filter(key => 
+        //     !['leadId', 'contactPerson', 'organization', 'title', 'email', 'phone', 'createdAt', 'updatedAt'].includes(key)
+        //   )
+        // );
       }
       
-      console.log("🔍 === END 'source' CUSTOM FIELD DEBUG ===");
+      // console.log("🔍 === END 'source' CUSTOM FIELD DEBUG ===");
       
       const currencyFieldsInLead = Object.keys(firstLead).filter(key => 
         key.includes('Currency') || key.includes('currency')
       );
-      console.log("🔍 Currency fields in processed lead:", currencyFieldsInLead);
+      // console.log("🔍 Currency fields in processed lead:", currencyFieldsInLead);
       
       // Log currency values only if they exist
       if (firstLead.proposalValueCurrency) {
-        console.log("🔍 proposalValueCurrency value:", firstLead.proposalValueCurrency);
-        console.log("🔍 proposalValueCurrency_desc value:", firstLead.proposalValueCurrency_desc);
+        // console.log("🔍 proposalValueCurrency value:", firstLead.proposalValueCurrency);
+        // console.log("🔍 proposalValueCurrency_desc value:", firstLead.proposalValueCurrency_desc);
       } else if (isProposalValueCurrencyChecked) {
-        console.log("🔍 proposalValueCurrency: Checked in preferences but not present (empty/null value)");
+        // console.log("🔍 proposalValueCurrency: Checked in preferences but not present (empty/null value)");
       } else {
-        console.log("🔍 proposalValueCurrency: Not checked in column preferences");
+        // console.log("🔍 proposalValueCurrency: Not checked in column preferences");
       }
       
       if (firstLead.valueCurrency) {
-        console.log("🔍 valueCurrency value:", firstLead.valueCurrency);
-        console.log("🔍 valueCurrency_desc value:", firstLead.valueCurrency_desc);
+        // console.log("🔍 valueCurrency value:", firstLead.valueCurrency);
+        // console.log("🔍 valueCurrency_desc value:", firstLead.valueCurrency_desc);
       } else if (isValueCurrencyChecked) {
-        console.log("🔍 valueCurrency: Checked in preferences but not present (empty/null value)");
+        // console.log("🔍 valueCurrency: Checked in preferences but not present (empty/null value)");
       } else {
-        console.log("🔍 valueCurrency: Not checked in column preferences");
+        // console.log("🔍 valueCurrency: Not checked in column preferences");
       }
       
-      console.log("✅ Currency fields included based on column preferences and validity");
-      console.log("✅ Currency fields respect leadColumnPreference table settings");
+      // console.log("✅ Currency fields included based on column preferences and validity");
+      // console.log("✅ Currency fields respect leadColumnPreference table settings");
     }
     
     // Extract unique persons and leadOrganizations from flatLeads
@@ -2766,7 +2765,7 @@ exports.getLeads = async (req, res) => {
       leadCount: orgLeadCountMap[o.leadOrganizationId] || 0,
       persons: orgPersonsMap[o.leadOrganizationId] || [], // <-- add this line
     }));
-    console.log(req.role, "role of the user............");
+    // console.log(req.role, "role of the user............");
 
     // Get total count of unconverted leads (leads without dealId)
     let totalLeadCountWhere = { dealId: null };
@@ -2855,23 +2854,58 @@ exports.getLeads = async (req, res) => {
       where: totalLeadCountWhere,
     });
 
-    // Console logging for debugging leads array length
-    console.log("🔍 === FINAL LEADS RESPONSE DEBUG ===");
-    console.log("🔍 flatLeads array length:", flatLeads.length);
-    console.log("🔍 totalRecords (leads.count):", leads.count);
-    console.log("🔍 totalLeadCount:", totalLeadCount);
-    console.log("🔍 totalPages:", Math.ceil(leads.count / limit));
-    console.log("🔍 currentPage:", parseInt(page));
-    console.log("🔍 === END LEADS RESPONSE DEBUG ===");
+    // console.log("==========================================", flatLeads, "ambagfahfhh");
+
+
+    // const filterFields = flatLeads.filter((idx)=> idx?.visibilityGroupId == groupId);
+    
+    const findGroup = await GroupVisibility.findOne({
+      where:{
+        groupId: 1 //groupId
+      }
+    })
+
+    let filterLeads = [];
+
+    if(findGroup?.lead?.toLowerCase() == "visibilitygroup"){
+      let findParentGroup = null; 
+      if(findGroup?.parentGroupId){
+        findParentGroup = await GroupVisibility.findOne({
+          where: {
+            groupId: findGroup?.parentGroupId
+          }
+        })
+      }
+      
+      const filterFields = flatLeads.filter((idx)=> idx?.ownerId == req.adminId || idx?.visibilityGroupId == groupId ||  idx?.visibilityGroupId == findGroup?.parentGroupId || findParentGroup.memberIds?.split(",").includes(req.adminId.toString()));
+
+      filterLeads = filterFields
+    }
+    else if(findGroup?.lead?.toLowerCase() == "owner"){
+      let findParentGroup = null; 
+      if(findGroup?.parentGroupId){
+        findParentGroup = await GroupVisibility.findOne({
+          where: {
+            groupId: findGroup?.parentGroupId
+          }
+        })
+      }
+
+      const filterFields = flatLeads.filter((idx)=> idx?.ownerId == req.adminId || idx?.visibilityGroupId == findGroup?.parentGroupId || findParentGroup.memberIds?.split(",").includes(req.adminId.toString()));
+
+      filterLeads = filterFields;
+    }else{
+      filterLeads = flatLeads;
+    }
 
     res.status(200).json({
       message: "Leads fetched successfully",
       totalRecords: leads.count,
-      totalLeadCount, // Total unconverted leads count
+      totalLeadCount, // Total unconverted leads count  
       totalPages: Math.ceil(leads.count / limit),
       currentPage: parseInt(page),
       // leads: leads.rows,
-      leads: flatLeads, // Return flattened leads with leadDetails merged
+      leads: filterLeads, //flatLeads, // Return flattened leads with leadDetails merged
       persons,
       organizations,
       personsFromLeads, // Persons associated with current page leads
