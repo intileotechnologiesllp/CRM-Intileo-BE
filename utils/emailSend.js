@@ -8,7 +8,8 @@ async function sendEmail(adminEmail, { from, to, subject, text }) {
   // Fetch user credentials from DB
   const userCredential = await UserCredential.findOne({ where: { email: adminEmail } });
   if (!userCredential) {
-    throw new Error(`UserCredential not found for: ${adminEmail}`);
+    console.log(`⚠️ UserCredential not found for: ${adminEmail} - Email will not be sent`);
+    return { success: false, message: `UserCredential not found for: ${adminEmail}` };
   }
 //   console.log("userCredential", userCredential);
   

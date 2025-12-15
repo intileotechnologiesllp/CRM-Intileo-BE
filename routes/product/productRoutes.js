@@ -8,7 +8,7 @@ const Product = require("../../models/product/productModel");
 
 // Product CRUD routes
 // Permission 29: Add products
-router.post("/create", verifyToken, validatePrivilege("29", "create"), productController.createProduct);
+router.post("/create", verifyToken, validatePrivilege("29", "create"), productController.uploadProductImage, productController.createProduct);
 
 // Get products - no special permission required (users can see products they have access to)
 router.get("/get", verifyToken, productController.getProducts);
@@ -16,7 +16,7 @@ router.get("/get/:id", verifyToken, productController.getProductById);
 
 // Permission 30: Edit products owned by other users (includes ownership check)
 // Permission 31: Edit the owner on a product owned by other users
-router.post("/update/:id", verifyToken, validatePrivilege("30", "edit_others", { checkOwnership: true, ownershipModel: Product }), productController.updateProduct);
+router.post("/update/:id", verifyToken, validatePrivilege("30", "edit_others", { checkOwnership: true, ownershipModel: Product }), productController.uploadProductImage, productController.updateProduct);
 
 // Permission 32: Delete products
 router.post("/delete/:id", verifyToken, validatePrivilege("32", "delete"), productController.deleteProduct);

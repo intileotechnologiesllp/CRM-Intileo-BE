@@ -8,13 +8,15 @@ const LeadFilter = require("../../models/leads/leadFiltersModel");
 const ActivityColumnPreference = require("../../models/activity/activityColumnModel"); // Adjust path as needed
 const Lead = require("../../models/leads/leadsModel");
 const LeadDetails = require("../../models/leads/leadDetailsModel");
+const NotificationTriggers = require("../../services/notification/notificationTriggers");
+const MasterUser = require("../../models/master/masterUserModel"); // 🔔 For notification user details
 const Deal = require("../../models/deals/dealsModels");
 const DealDetails = require("../../models/deals/dealsDetailModel");
 const DealColumn = require("../../models/deals/dealColumnModel");
 const sequelize = require("../../config/db");
 const CustomFieldValue = require("../../models/customFieldValueModel");
 const CustomField = require("../../models/customFieldModel");
-const MasterUser = require("../../models/master/masterUserModel"); // Add MasterUser model
+// const MasterUser = require("../../models/master/masterUserModel"); // Add MasterUser model
 //const Organizations = require("../../models/leads/leadOrganizationModel"); // Adjust path as needed
 
 exports.createActivity = async (req, res) => {
@@ -57,7 +59,7 @@ exports.createActivity = async (req, res) => {
     let contactPerson = null;
     let email = null;
     let allContactPersons = [];
-    let finalPersonId = personId;
+    let finalPersonId = personId; 
 
     if (finalContactPersons && Array.isArray(finalContactPersons)) {
       console.log('Creating activity with multiple contact persons:', finalContactPersons);
@@ -211,6 +213,29 @@ exports.createActivity = async (req, res) => {
       activityTypeFlag,
       allContactPersons: allContactPersonsValue
     });
+
+    // 🔔 Send Notification - Activity Created
+    try {
+      // Get creator details for notification
+      const creator = await MasterUser.findByPk(req.adminId, {
+        attributes: ['masterUserID', 'name']
+      });
+      
+      await NotificationTriggers.activityCreated(
+        {
+          activityId: activity.activityId,
+          assignedTo: assignedTo || req.adminId,
+          activityTitle: subject,
+          dueDate: endDateTime
+        },
+        {
+          userId: req.adminId,
+          name: creator ? creator.name : 'Unknown User'
+        }
+      );
+    } catch (notifError) {
+      console.error('Failed to send activity created notification:', notifError);
+    }
 
     // Update nextActivity in Lead if leadId is present
     if (validatedLeadId) {
@@ -2077,6 +2102,31 @@ exports.updateActivity = async (req, res) => {
     }
 
     await activity.update(updateFields);
+
+    // 🔔 Send Notification - Activity Assigned (if assignedTo changed)
+    if (updateFields.assignedTo && updateFields.assignedTo !== activity.assignedTo) {
+      try {
+        // Get assigner details for notification
+        const assigner = await MasterUser.findByPk(req.adminId, {
+          attributes: ['masterUserID', 'name']
+        });
+        
+        await NotificationTriggers.activityAssigned(
+          {
+            activityId: activity.activityId,
+            activityTitle: activity.subject,
+            dueDate: activity.endDateTime || activity.dueDate
+          },
+          updateFields.assignedTo,
+          {
+            userId: req.adminId,
+            name: assigner ? assigner.name : 'Unknown User'
+          }
+        );
+      } catch (notifError) {
+        console.error('Failed to send activity assigned notification:', notifError);
+      }
+    }
 
     // Update next activity date for the lead if this activity is linked to a lead
     // and if the update affects scheduling (startDateTime, isDone, etc.)

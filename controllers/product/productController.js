@@ -4,6 +4,80 @@ const DealProduct = require("../../models/product/dealProductModel");
 const MasterUser = require("../../models/master/masterUserModel");
 const { Op } = require("sequelize");
 const GroupVisibility = require("../../models/admin/groupVisibilityModel");
+const multer = require("multer");
+const path = require("path");
+const fs = require("fs");
+
+// Configure multer for product image uploads
+const storage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    const uploadDir = path.join(__dirname, "../../uploads/products");
+    // Create directory if it doesn't exist
+    if (!fs.existsSync(uploadDir)) {
+      fs.mkdirSync(uploadDir, { recursive: true });
+    }
+    cb(null, uploadDir);
+  },
+  filename: (req, file, cb) => {
+    // Generate unique filename: timestamp-originalname
+    const uniqueSuffix = Date.now() + "-" + Math.round(Math.random() * 1e9);
+    const ext = path.extname(file.originalname);
+    const nameWithoutExt = path.basename(file.originalname, ext);
+    cb(null, `${nameWithoutExt}-${uniqueSuffix}${ext}`);
+  },
+});
+
+const upload = multer({
+  storage: storage,
+  limits: {
+    fileSize: 5 * 1024 * 1024, // 5MB limit
+  },
+  fileFilter: (req, file, cb) => {
+    // Accept only image files
+    const allowedTypes = ["image/jpeg", "image/jpg", "image/png", "image/gif", "image/webp"];
+    if (allowedTypes.includes(file.mimetype)) {
+      cb(null, true);
+    } else {
+      cb(new Error("Invalid file type. Only JPEG, PNG, GIF, and WebP images are allowed."));
+    }
+  },
+});
+
+// Export the upload middleware for use in routes - make it optional
+exports.uploadProductImage = (req, res, next) => {
+  // Check if request has multipart/form-data content type
+  const contentType = req.get('content-type') || '';
+  
+  if (!contentType.includes('multipart/form-data')) {
+    // Skip file upload for non-multipart requests (JSON requests)
+    console.log('Skipping file upload - not multipart/form-data');
+    return next();
+  }
+  
+  // Use multer for multipart requests
+  const uploadSingle = upload.single("productImage");
+  
+  uploadSingle(req, res, (err) => {
+    if (err instanceof multer.MulterError) {
+      if (err.code === 'LIMIT_UNEXPECTED_FILE') {
+        // Field name mismatch - continue without file
+        console.log('No productImage field found, continuing without file upload');
+        return next();
+      }
+      return res.status(400).json({
+        status: "error",
+        message: `File upload error: ${err.message}`,
+        code: err.code,
+      });
+    } else if (err) {
+      return res.status(400).json({
+        status: "error",
+        message: err.message,
+      });
+    }
+    next();
+  });
+};
 
 // Create a new product
 exports.createProduct = async (req, res) => {
@@ -25,12 +99,20 @@ exports.createProduct = async (req, res) => {
       discountValue,
       hasVariations,
       visibilityGroup,
-      imageUrl,
       metadata,
       variations, // Array of variation objects
     } = req.body;
 
     const ownerId = req.adminId;
+
+    // Handle image upload
+    let imageUrl = req.body.imageUrl || null;
+    if (req.file) {
+      // Generate URL for the uploaded image
+      const baseURL = process.env.BASE_URL || `${req.protocol}://${req.get("host")}`;
+      imageUrl = `${baseURL}/uploads/products/${req.file.filename}`;
+      console.log("Product image uploaded:", imageUrl);
+    }
 
     // Create product
     const product = await Product.create({
@@ -97,6 +179,17 @@ exports.createProduct = async (req, res) => {
     });
   } catch (error) {
     console.error("Error creating product:", error);
+    
+    // Clean up uploaded file if product creation failed
+    if (req.file && req.file.path) {
+      try {
+        fs.unlinkSync(req.file.path);
+        console.log("Cleaned up uploaded file after error");
+      } catch (unlinkError) {
+        console.error("Error cleaning up file:", unlinkError);
+      }
+    }
+    
     res.status(500).json({
       status: "error",
       message: "Failed to create product",
@@ -294,6 +387,29 @@ exports.updateProduct = async (req, res) => {
       });
     }
 
+    // Handle image upload
+    if (req.file) {
+      // Generate URL for the uploaded image
+      const baseURL = process.env.BASE_URL || `${req.protocol}://${req.get("host")}`;
+      updateData.imageUrl = `${baseURL}/uploads/products/${req.file.filename}`;
+      console.log("Product image updated:", updateData.imageUrl);
+      
+      // Delete old image file if exists
+      if (product.imageUrl) {
+        try {
+          const oldImagePath = product.imageUrl.replace(`${baseURL}/uploads/products/`, '');
+          const fullPath = path.join(__dirname, "../../uploads/products", oldImagePath);
+          if (fs.existsSync(fullPath)) {
+            fs.unlinkSync(fullPath);
+            console.log("Old product image deleted:", oldImagePath);
+          }
+        } catch (deleteError) {
+          console.error("Error deleting old image:", deleteError);
+          // Continue with update even if old image deletion fails
+        }
+      }
+    }
+
     // Update product
     await product.update(updateData);
 
@@ -329,7 +445,7 @@ exports.updateProduct = async (req, res) => {
         {
           model: MasterUser,
           as: "owner",
-          attributes: ["masterUserId", "firstName", "lastName", "email"],
+          attributes: ["masterUserID", "name", "email"],
         },
       ],
     });
@@ -341,6 +457,17 @@ exports.updateProduct = async (req, res) => {
     });
   } catch (error) {
     console.error("Error updating product:", error);
+    
+    // Clean up uploaded file if product update failed
+    if (req.file && req.file.path) {
+      try {
+        fs.unlinkSync(req.file.path);
+        console.log("Cleaned up uploaded file after error");
+      } catch (unlinkError) {
+        console.error("Error cleaning up file:", unlinkError);
+      }
+    }
+    
     res.status(500).json({
       status: "error",
       message: "Failed to update product",
