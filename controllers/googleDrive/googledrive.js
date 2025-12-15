@@ -93,6 +93,27 @@ exports.listDriveFiles = async (req, res) => {
   }
 };
 
+exports.deletefile = async (req, res) => {
+  try {
+    const userId = req.adminId; // Authenticated CRM user
+    const oauth2Client = await createOAuthClient(userId);
+
+    const drive = google.drive({ version: "v3", auth: oauth2Client });
+
+
+    await drive.files.delete({
+     fileId: req.params.id,
+    });
+
+    res.json({
+      message: "file deleted successfully",
+    });
+  } catch (error) {
+    console.log("Drive File Fetch Error:", error);
+    res.status(500).json({ error: error.message });
+  }
+};
+
 const createOAuthClient = async (userId) => {
   const oauth2Client = new google.auth.OAuth2(
     CLIENT_ID,

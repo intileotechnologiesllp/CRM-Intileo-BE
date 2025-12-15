@@ -18,6 +18,8 @@ const upload = multer({ storage });
 router.get("/connect", verifyToken, googleDriveController.connectDrive);
 router.get("/callback", verifyToken, googleDriveController.googleCallback);
 
+router.delete("/delete-file/:id", verifyToken, googleDriveController.deletefile);
+
 router.post(
   "/upload",
   verifyToken,
