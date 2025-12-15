@@ -65,6 +65,8 @@ const mongodbRoutes = require('./routes/mongodb/mongodbRoutes.js'); // Import Mo
 //const contactSyncRoutes = require('./routes/contact/contactSyncRoutes.js'); // Import contact sync routes
 const userInterfacePreferencesRoutes = require('./routes/userInterfacePreferencesRoutes.js'); // Import user interface preferences routes
 const googleDriveRoutes  = require('./routes/google-drive/googledrive.js'); // Import Google Drive routes
+const meetingRoutes = require('./routes/meeting/meetingRoutes.js'); // Import meeting routes
+const schedulingLinkRoutes = require('./routes/meeting/schedulingLinkRoutes.js'); // Import scheduling link routes
 
 const { loadPrograms } = require("./utils/programCache");
 const imapIdleManager = require('./services/imapIdleManager'); // IMAP IDLE for real-time sync
@@ -155,7 +157,15 @@ app.use('/api/mongodb', mongodbRoutes); // Register MongoDB analytics routes
 app.use('/api/interface-preferences', userInterfacePreferencesRoutes); // Register user interface preferences routes
 app.use('/api/contact-sync', contactSyncRoutes); // Register contact sync routes
 app.use('/api/user-sessions', userSessionRoutes); // Register user session/device management routes
-app.use('/api/drive', googleDriveRoutes); // Register user session/device management routes
+app.use('/api/drive', googleDriveRoutes); // Register Google Drive routes
+app.use('/api/meetings', meetingRoutes); // Register meeting routes
+app.use('/api/meetings/scheduling-links', schedulingLinkRoutes); // Register scheduling link routes
+
+// Public scheduling link routes (must be registered separately for public access)
+const schedulingLinkController = require('./controllers/meeting/schedulingLinkController');
+app.get('/api/meetings/scheduling/:token', schedulingLinkController.getLinkDetailsPublic);
+app.get('/api/meetings/scheduling/:token/available-slots', schedulingLinkController.getAvailableSlotsPublic);
+app.post('/api/meetings/scheduling/:token/book', schedulingLinkController.bookMeeting);
 
 // Notification routes (will be added next)
 const notificationRoutes = require('./routes/notification/notificationRoutes.js'); // Import notification routes
