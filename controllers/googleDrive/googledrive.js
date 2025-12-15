@@ -18,11 +18,8 @@ exports.googleCallback = async (req, res) => {
   const userId = req.adminId; // assume JWT auth
   const { code } = req.query;
 
-  console.log("code here", code);
   const oauth2Client = await createOAuthClient();
-  console.log("oauth2Client", oauth2Client);
   const { tokens } = await oauth2Client.getToken(code);
-  console.log("TOKENS", userId, tokens);
   await saveTokens(userId, tokens);
 
   res.send("Google Drive Connected Successfully!");
@@ -105,7 +102,11 @@ const createOAuthClient = async (userId) => {
 
   if (!userId) return oauth2Client;
 
-  const userToken = await UserGoogleToken.findByPk(userId);
+  const userToken = await UserGoogleToken.findOne({
+    where:{
+      userId: userId,
+    }
+  });
   if (userToken) {
     oauth2Client.setCredentials({
       access_token: userToken.accessToken,

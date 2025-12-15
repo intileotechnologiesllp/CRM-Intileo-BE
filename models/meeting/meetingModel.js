@@ -11,153 +11,186 @@ const Meeting = sequelize.define(
       primaryKey: true,
       autoIncrement: true,
     },
+
     activityId: {
       type: DataTypes.INTEGER,
       allowNull: false,
       unique: true,
-      references: { model: "Activities", key: "activityId" },
-      onDelete: "CASCADE",
+      references: {
+        model: "Activities",
+        key: "activityId",
+      },
+      // onDelete: "CASCADE",
+      // onUpdate: "CASCADE",
     },
+
     timezone: {
       type: DataTypes.STRING(100),
       allowNull: false,
       defaultValue: "UTC",
-      comment: "Timezone for the meeting (e.g., 'America/New_York', 'Asia/Kolkata')",
+      comment:
+        "Timezone for the meeting (e.g., 'America/New_York', 'Asia/Kolkata')",
     },
+
     meetingStatus: {
-      type: DataTypes.ENUM("scheduled", "confirmed", "cancelled", "completed", "no_show"),
+      type: DataTypes.ENUM(
+        "scheduled",
+        "confirmed",
+        "cancelled",
+        "completed",
+        "no_show"
+      ),
       allowNull: false,
       defaultValue: "scheduled",
       comment: "Current status of the meeting",
     },
+
     recurrenceRule: {
       type: DataTypes.TEXT,
       allowNull: true,
-      comment: "iCal RRULE format string for recurring meetings (e.g., 'FREQ=DAILY;INTERVAL=1;COUNT=5')",
+      comment:
+        "iCal RRULE format string (e.g., 'FREQ=WEEKLY;INTERVAL=1;COUNT=5')",
     },
+
     recurrenceEndDate: {
       type: DataTypes.DATE,
       allowNull: true,
       comment: "End date for recurring meetings",
     },
+
     reminderMinutes: {
-      type: DataTypes.TEXT,
+      type: DataTypes.JSON,
       allowNull: true,
-      comment: "JSON array of reminder times in minutes before meeting (e.g., '[15, 60]')",
+      comment: "Array of reminder times in minutes (e.g., [15, 60])",
     },
+
     meetingUrl: {
       type: DataTypes.STRING(500),
       allowNull: true,
-      comment: "URL for video conference (Zoom, Teams, Google Meet, etc.)",
+      comment: "Video conference URL",
     },
+
     organizerEmail: {
       type: DataTypes.STRING(255),
       allowNull: false,
       comment: "Email of the meeting organizer",
     },
+
     organizerName: {
       type: DataTypes.STRING(255),
       allowNull: false,
       comment: "Name of the meeting organizer",
     },
+
     icsUid: {
       type: DataTypes.STRING(255),
       allowNull: true,
       unique: true,
-      comment: "Unique identifier for calendar invite (ICS UID)",
+      comment: "Unique calendar invite UID (ICS)",
     },
+
     sendInvites: {
       type: DataTypes.BOOLEAN,
       allowNull: false,
       defaultValue: true,
-      comment: "Whether to send email invites to attendees",
+      comment: "Whether email invites should be sent",
     },
+
     lastSentAt: {
       type: DataTypes.DATE,
       allowNull: true,
-      comment: "When invites were last sent",
+      comment: "Last time calendar invites were sent",
     },
+
     cancelledAt: {
       type: DataTypes.DATE,
       allowNull: true,
       comment: "When the meeting was cancelled",
     },
+
     cancelledBy: {
       type: DataTypes.INTEGER,
       allowNull: true,
-      references: { model: "masterusers", key: "masterUserID" },
+      references: {
+        model: "masterusers",
+        key: "masterUserID",
+      },
+      // onDelete: "SET NULL",
+      // onUpdate: "CASCADE",
       comment: "User who cancelled the meeting",
     },
+
     cancellationReason: {
       type: DataTypes.TEXT,
       allowNull: true,
       comment: "Reason for cancellation",
     },
+
     externalAttendees: {
-      type: DataTypes.TEXT,
+      type: DataTypes.JSON,
       allowNull: true,
-      comment: "JSON array of external attendees not in CRM (e.g., [{\"name\": \"John\", \"email\": \"john@example.com\"}])",
+      comment:
+        "External attendees (e.g., [{ name: 'John', email: 'john@example.com' }])",
     },
+
     meetingNotes: {
       type: DataTypes.TEXT,
       allowNull: true,
       comment: "Post-meeting notes and follow-ups",
     },
+
     followUpRequired: {
       type: DataTypes.BOOLEAN,
       allowNull: false,
       defaultValue: false,
       comment: "Whether a follow-up is required",
     },
+
     masterUserID: {
       type: DataTypes.INTEGER,
       allowNull: false,
-      references: { model: "masterusers", key: "masterUserID" },
-      onDelete: "CASCADE",
+      references: {
+        model: "masterusers",
+        key: "masterUserID",
+      },
+      // onDelete: "CASCADE",
+      // onUpdate: "CASCADE",
     },
   },
   {
     tableName: "Meetings",
     timestamps: true,
     indexes: [
-      {
-        fields: ["activityId"],
-        unique: true,
-      },
-      {
-        fields: ["meetingStatus"],
-      },
-      {
-        fields: ["masterUserID"],
-      },
-      {
-        fields: ["icsUid"],
-      },
+      { fields: ["activityId"], unique: true },
+      { fields: ["meetingStatus"] },
+      { fields: ["masterUserID"] },
+      { fields: ["icsUid"] },
     ],
   }
 );
 
-// Associations
-Meeting.belongsTo(Activity, {
-  foreignKey: "activityId",
-  as: "activity",
-  onDelete: "CASCADE",
-});
+/* =======================
+   Associations
+======================= */
 
-Activity.hasOne(Meeting, {
-  foreignKey: "activityId",
-  as: "meeting",
-});
+// Meeting.belongsTo(Activity, {
+//   foreignKey: "activityId",
+//   as: "activity",
+// });
 
-Meeting.belongsTo(MasterUser, {
-  foreignKey: "masterUserID",
-  as: "owner",
-});
+// Activity.hasOne(Meeting, {
+//   foreignKey: "activityId",
+//   as: "meeting",
+// });
 
-Meeting.belongsTo(MasterUser, {
-  foreignKey: "cancelledBy",
-  as: "cancelledByUser",
-});
+// Meeting.belongsTo(MasterUser, {
+//   foreignKey: "masterUserID",
+//   as: "owner",
+// });
 
-module.exports = Meeting;
+// Meeting.belongsTo(MasterUser, {
+//   foreignKey: "cancelledBy",
+//   as: "cancelledByUser",
+// });
 
+// module.exports = Meeting;  

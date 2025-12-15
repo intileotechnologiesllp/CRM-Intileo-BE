@@ -15,8 +15,8 @@ const storage = multer.diskStorage({
 
 const upload = multer({ storage });
 
-router.get("/connect", googleDriveController.connectDrive);
-router.get("/callback", googleDriveController.googleCallback);
+router.get("/connect", verifyToken, googleDriveController.connectDrive);
+router.get("/callback", verifyToken, googleDriveController.googleCallback);
 
 router.post(
   "/upload",
