@@ -7,6 +7,7 @@ const GroupVisibility = require("../../models/admin/groupVisibilityModel");
 const multer = require("multer");
 const path = require("path");
 const fs = require("fs");
+const { ProductColumn } = require("../../models");
 
 // Configure multer for product image uploads
 const storage = multer.diskStorage({
@@ -34,11 +35,21 @@ const upload = multer({
   },
   fileFilter: (req, file, cb) => {
     // Accept only image files
-    const allowedTypes = ["image/jpeg", "image/jpg", "image/png", "image/gif", "image/webp"];
+    const allowedTypes = [
+      "image/jpeg",
+      "image/jpg",
+      "image/png",
+      "image/gif",
+      "image/webp",
+    ];
     if (allowedTypes.includes(file.mimetype)) {
       cb(null, true);
     } else {
-      cb(new Error("Invalid file type. Only JPEG, PNG, GIF, and WebP images are allowed."));
+      cb(
+        new Error(
+          "Invalid file type. Only JPEG, PNG, GIF, and WebP images are allowed."
+        )
+      );
     }
   },
 });
@@ -46,22 +57,24 @@ const upload = multer({
 // Export the upload middleware for use in routes - make it optional
 exports.uploadProductImage = (req, res, next) => {
   // Check if request has multipart/form-data content type
-  const contentType = req.get('content-type') || '';
-  
-  if (!contentType.includes('multipart/form-data')) {
+  const contentType = req.get("content-type") || "";
+
+  if (!contentType.includes("multipart/form-data")) {
     // Skip file upload for non-multipart requests (JSON requests)
-    console.log('Skipping file upload - not multipart/form-data');
+    console.log("Skipping file upload - not multipart/form-data");
     return next();
   }
-  
+
   // Use multer for multipart requests
   const uploadSingle = upload.single("productImage");
-  
+
   uploadSingle(req, res, (err) => {
     if (err instanceof multer.MulterError) {
-      if (err.code === 'LIMIT_UNEXPECTED_FILE') {
+      if (err.code === "LIMIT_UNEXPECTED_FILE") {
         // Field name mismatch - continue without file
-        console.log('No productImage field found, continuing without file upload');
+        console.log(
+          "No productImage field found, continuing without file upload"
+        );
         return next();
       }
       return res.status(400).json({
@@ -109,7 +122,8 @@ exports.createProduct = async (req, res) => {
     let imageUrl = req.body.imageUrl || null;
     if (req.file) {
       // Generate URL for the uploaded image
-      const baseURL = process.env.BASE_URL || `${req.protocol}://${req.get("host")}`;
+      const baseURL =
+        process.env.BASE_URL || `${req.protocol}://${req.get("host")}`;
       imageUrl = `${baseURL}/uploads/products/${req.file.filename}`;
       console.log("Product image uploaded:", imageUrl);
     }
@@ -179,7 +193,7 @@ exports.createProduct = async (req, res) => {
     });
   } catch (error) {
     console.error("Error creating product:", error);
-    
+
     // Clean up uploaded file if product creation failed
     if (req.file && req.file.path) {
       try {
@@ -189,7 +203,7 @@ exports.createProduct = async (req, res) => {
         console.error("Error cleaning up file:", unlinkError);
       }
     }
-    
+
     res.status(500).json({
       status: "error",
       message: "Failed to create product",
@@ -209,10 +223,39 @@ exports.getProducts = async (req, res) => {
       isActive,
       sortBy = "createdAt",
       sortOrder = "DESC",
-      groupId
+      groupId,
     } = req.query;
 
     const offset = (page - 1) * limit;
+
+    const pref = await ProductColumn.findOne();
+    let attributes = [];
+
+    if (pref) {
+      const columns =
+        typeof pref.columns === "string"
+          ? JSON.parse(pref.columns)
+          : pref.columns;
+
+      const activityFields = Object.keys(Product.rawAttributes);
+      const dealFields = Object.keys(Product.rawAttributes);
+
+      // Filter Activity columns that are checked
+      columns
+        .filter(
+          (col) =>
+            col.check &&
+            col.entityType === "Activity" &&
+            activityFields.includes(col.key)
+        )
+        .forEach((col) => {
+          attributes.push(col.key);
+        });
+
+     
+
+      if (attributes.length === 0) attributes = undefined;
+    }
 
     // Build where clause
     const where = {};
@@ -256,62 +299,65 @@ exports.getProducts = async (req, res) => {
           attributes: ["masterUserID", "name", "email"],
         },
       ],
+      attributes: attributes,
       limit: parseInt(limit),
       offset: parseInt(offset),
       order: [[sortBy, sortOrder.toUpperCase()]],
     });
 
-    const findGroup = await GroupVisibility.findOne({
-      where: {
-        groupId: groupId
-      },
-    });
-
-    let filterProducts = [];
-
-    if (findGroup?.lead?.toLowerCase() == "visibilitygroup") {
-      let findParentGroup = null;
-      if (findGroup?.parentGroupId) {
-        findParentGroup = await GroupVisibility.findOne({
-          where: {
-            groupId: findGroup?.parentGroupId,
-          },
-        });
+    if(groupId){
+      const findGroup = await GroupVisibility.findOne({
+        where: {
+          groupId: groupId,
+        },
+      });
+  
+      let filterProducts = [];
+  
+      if (findGroup?.lead?.toLowerCase() == "visibilitygroup") {
+        let findParentGroup = null;
+        if (findGroup?.parentGroupId) {
+          findParentGroup = await GroupVisibility.findOne({
+            where: {
+              groupId: findGroup?.parentGroupId,
+            },
+          });
+        }
+  
+        const Filter = products.filter(
+          (idx) =>
+            idx?.ownerId == req.adminId ||
+            idx?.visibilityGroupId == groupId ||
+            idx?.visibilityGroup == findGroup?.parentGroupId ||
+            findParentGroup.memberIds?.split(",").includes(req.adminId.toString())
+        );
+        filterProducts = Filter;
+      } else if (findGroup?.lead?.toLowerCase() == "owner") {
+        let findParentGroup = null;
+        if (findGroup?.parentGroupId) {
+          findParentGroup = await GroupVisibility.findOne({
+            where: {
+              groupId: findGroup?.parentGroupId,
+            },
+          });
+        }
+  
+        const Filter = products.filter(
+          (idx) =>
+            idx?.ownerId == req.adminId ||
+            idx?.visibilityGroup == findGroup?.parentGroupId ||
+            findParentGroup.memberIds?.split(",").includes(req.adminId.toString())
+        );
+  
+        filterProducts = Filter;
+      } else {
+        filterProducts = products;
       }
-
-      const Filter = products.filter(
-        (idx) =>
-          idx?.ownerId == req.adminId ||
-          idx?.visibilityGroupId == groupId ||
-          idx?.visibilityGroup == findGroup?.parentGroupId ||
-          findParentGroup.memberIds?.split(",").includes(req.adminId.toString())
-      );
-      filterProducts = Filter;
-    } else if (findGroup?.lead?.toLowerCase() == "owner") {
-      let findParentGroup = null;
-      if (findGroup?.parentGroupId) {
-        findParentGroup = await GroupVisibility.findOne({
-          where: {
-            groupId: findGroup?.parentGroupId,
-          },
-        });
-      }
-
-      const Filter = products.filter(
-        (idx) =>
-          idx?.ownerId == req.adminId ||
-          idx?.visibilityGroup == findGroup?.parentGroupId ||
-          findParentGroup.memberIds?.split(",").includes(req.adminId.toString())
-      );
-
-      filterProducts = Filter;
-    } else {
-      filterProducts = products;
     }
     res.status(200).json({
       status: "success",
       data: {
-        products: filterProducts,
+        products: groupId ? filterProducts : products,
         pagination: {
           total: count,
           page: parseInt(page),
@@ -390,15 +436,23 @@ exports.updateProduct = async (req, res) => {
     // Handle image upload
     if (req.file) {
       // Generate URL for the uploaded image
-      const baseURL = process.env.BASE_URL || `${req.protocol}://${req.get("host")}`;
+      const baseURL =
+        process.env.BASE_URL || `${req.protocol}://${req.get("host")}`;
       updateData.imageUrl = `${baseURL}/uploads/products/${req.file.filename}`;
       console.log("Product image updated:", updateData.imageUrl);
-      
+
       // Delete old image file if exists
       if (product.imageUrl) {
         try {
-          const oldImagePath = product.imageUrl.replace(`${baseURL}/uploads/products/`, '');
-          const fullPath = path.join(__dirname, "../../uploads/products", oldImagePath);
+          const oldImagePath = product.imageUrl.replace(
+            `${baseURL}/uploads/products/`,
+            ""
+          );
+          const fullPath = path.join(
+            __dirname,
+            "../../uploads/products",
+            oldImagePath
+          );
           if (fs.existsSync(fullPath)) {
             fs.unlinkSync(fullPath);
             console.log("Old product image deleted:", oldImagePath);
@@ -457,7 +511,7 @@ exports.updateProduct = async (req, res) => {
     });
   } catch (error) {
     console.error("Error updating product:", error);
-    
+
     // Clean up uploaded file if product update failed
     if (req.file && req.file.path) {
       try {
@@ -467,7 +521,7 @@ exports.updateProduct = async (req, res) => {
         console.error("Error cleaning up file:", unlinkError);
       }
     }
-    
+
     res.status(500).json({
       status: "error",
       message: "Failed to update product",
@@ -1054,6 +1108,45 @@ exports.deleteProductVariation = async (req, res) => {
       message: "Failed to delete product variation",
       error: error.message,
     });
+  }
+};
+
+exports.updateProductColumnChecks = async (req, res) => {
+  // Expecting: { columns: [ { key: "columnName", check: true/false }, ... ] }
+  const { columns } = req.body;
+
+  if (!Array.isArray(columns)) {
+    return res.status(400).json({ message: "Columns array is required." });
+  }
+
+  try {
+    // Find the global ActivityColumnPreference record
+    let pref = await ProductColumn.findOne();
+    if (!pref) {
+      return res.status(404).json({ message: "Preferences not found." });
+    }
+
+    // Parse columns if stored as string
+    let prefColumns =
+      typeof pref.columns === "string"
+        ? JSON.parse(pref.columns)
+        : pref.columns;
+
+    // Update check status for matching columns
+    prefColumns = prefColumns.map((col) => {
+      const found = columns.find((c) => c.key === col.key);
+      if (found) {
+        return { ...col, check: !!found.check };
+      }
+      return col;
+    });
+
+    pref.columns = prefColumns;
+    await pref.save();
+    res.status(200).json({ message: "Columns updated", columns: pref.columns });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ message: "Error updating columns" });
   }
 };
 

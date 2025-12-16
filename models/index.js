@@ -29,6 +29,7 @@ const ContactSyncMapping = require("./contact/contactSyncMappingModel");
 const CompanySettings = require("./company/companySettingsModel");
 const Meeting = require("./meeting/meetingModel");
 const SchedulingLink = require("./meeting/schedulingLinkModel");
+const ProductColumn = require("./product/customColumnModel");
 
 // GroupVisibility.belongsTo(Person, { as: "GroupPerson", foreignKey: "personId" });
 // Person.hasMany(GroupVisibility, { foreignKey: "personId", as: "GroupVisibility" });
@@ -298,4 +299,5 @@ module.exports = {
   CompanySettings,
   Meeting,
   SchedulingLink,
+  ProductColumn
 };
