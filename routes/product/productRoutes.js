@@ -38,6 +38,12 @@ router.get("/search", verifyToken, productController.searchProducts);
 // Permission 33: Delete product price variations
 router.post("/variation/delete/:variationId", verifyToken, validatePrivilege("33", "delete_variations"), productController.deleteProductVariation);
 
+router.get(
+  "/get-products-fields",
+  verifyToken,
+  productController.getProductsFields
+);
+
 router.post(
   "/check-columns",
   verifyToken,

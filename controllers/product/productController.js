@@ -1111,6 +1111,50 @@ exports.deleteProductVariation = async (req, res) => {
   }
 };
 
+exports.getProductsFields = async (req, res) => {
+  try {
+    // Fetch data from ActivityColumnPreference table
+    const pref = await ProductColumn.findOne();
+    
+    if (!pref || !pref.columns) {
+      return res.status(404).json({ 
+        message: "No column preferences found",
+        fields: []
+      });
+    }
+
+    // Parse columns data if it's stored as JSON string
+    const columns = typeof pref.columns === "string" 
+      ? JSON.parse(pref.columns) 
+      : pref.columns;
+
+    // Transform the data to include labels for better display
+    const fieldsWithLabels = columns.map(column => ({
+      key: column.entityType === 'Deal' ? `deal_${column.key}` : column.key, // Add deal_ prefix for Deal fields
+      label: column.key
+        .replace(/([A-Z])/g, " $1") // Add space before capital letters
+        .replace(/^./, str => str.toUpperCase()), // Capitalize first letter
+      check: column.check,
+      entityType: column.entityType
+    }));
+
+    res.status(200).json({ 
+      success: true,
+      fields: fieldsWithLabels,
+      totalFields: fieldsWithLabels.length,
+      activityFields: fieldsWithLabels.filter(field => field.entityType === 'Activity').length,
+      dealFields: fieldsWithLabels.filter(field => field.entityType === 'Deal').length
+    });
+  } catch (error) {
+    console.error("Error fetching activity fields:", error);
+    res.status(500).json({ 
+      success: false,
+      message: "Error fetching activity fields",
+      error: error.message 
+    });
+  }
+};
+
 exports.updateProductColumnChecks = async (req, res) => {
   // Expecting: { columns: [ { key: "columnName", check: true/false }, ... ] }
   const { columns } = req.body;
