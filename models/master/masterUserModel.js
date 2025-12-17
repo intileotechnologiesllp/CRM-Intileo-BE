@@ -1,6 +1,7 @@
 const { DataTypes } = require("sequelize");
 const sequelize = require("../../config/db");
 const permissionSet = require("../permissionsetModel");
+// const GroupVisibility = require("../admin/groupVisibilityModel");
 
 const MasterUser = sequelize.define("MasterUser", {
   masterUserID: {
@@ -127,9 +128,18 @@ const MasterUser = sequelize.define("MasterUser", {
       key: "permissionSetId",
     },
   },
+  groupId: {
+    type: DataTypes.INTEGER,
+    allowNull: true,
+    references: {
+      model: "groupVisibilities", // table name (auto-pluralized)
+      key: "groupId",
+    },
+  },
 });
 
 const MasterUserPrivileges = require("../privileges/masterUserPrivilegesModel");
+
 
 MasterUser.hasOne(MasterUserPrivileges, {
   foreignKey: "masterUserID",

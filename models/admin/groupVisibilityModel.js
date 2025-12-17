@@ -69,4 +69,5 @@ GroupVisibility.belongsTo(MasterUser, {
   as: "creator",
 });
 
+
 module.exports = GroupVisibility;
