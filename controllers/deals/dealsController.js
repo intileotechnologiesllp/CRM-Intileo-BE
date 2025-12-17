@@ -6476,13 +6476,16 @@ exports.getDealDetail = async (req, res) => {
           attributes: [
             "productId",
             "name",
-            "sku",
+            "code",
             "description",
             "category",
             "unit",
             "imageUrl",
             "isActive",
-            "hasVariations"
+            "hasVariations",
+            "prices",
+            "cost",
+            "costCurrency"
           ]
         },
         {
@@ -6495,6 +6498,8 @@ exports.getDealDetail = async (req, res) => {
             "sku",
             "description",
             "attributes",
+            "prices",
+            "cost",
             "isActive"
           ]
         }
