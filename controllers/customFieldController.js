@@ -261,6 +261,19 @@ const getDefaultFieldsFromModels = async (entityType, masterUserID = null) => {
         leadView: false,
         dealView: false,
       },
+            {
+        fieldName: "groupId",
+        fieldLabel: "Visible To",
+        fieldType: "singleselect",
+        dbColumn: "groupId",
+        isRequired: false,
+        entityType: "leads",
+        isActive: true,
+        isDefault: true,
+        leadView: true,
+        dealView: false,
+        options: leadsLabels
+      },
 
     ],
     deals: [
