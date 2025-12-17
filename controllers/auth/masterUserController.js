@@ -340,6 +340,7 @@ exports.getMasterUsers = async (req, res) => {
           as: "privileges",
           required: false,
         },
+        { model: GroupVisibility, as: "groupVisibility", required: false }
       ],
       order: [['name', 'ASC']]
     });
@@ -462,6 +463,20 @@ exports.getMasterUsers = async (req, res) => {
     res.status(500).json({ message: "Internal server error" });
   }
 };
+
+exports.updateMasterGroupId = async (req, res) =>{
+  try{
+    const { userId, newGroupId } = req.body;
+    await MasterUser.update(
+      { groupId: newGroupId },
+      { where: { masterUserID: userId } }
+    );
+
+  res.status(200).json({ message: "Group ID updated successfully" });
+  }catch(e){
+    res.status(500).json({ message: "Internal server error" });
+  }
+}
 
 // Delete a Master User
 exports.deleteMasterUser = async (req, res) => {

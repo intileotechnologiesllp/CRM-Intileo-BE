@@ -43,6 +43,8 @@ router.post("/create", verifyToken, masterUserController.createMasterUser);
 
 // Get all master users
 router.get("/get", verifyToken, masterUserController.getMasterUsers);
+
+router.patch("/update-groupId", verifyToken, masterUserController.updateMasterGroupId);
 // Toggle Master User Status (Activate/Deactivate)
 router.post("/toggle-status/:masterUserID", verifyToken,masterUserController.toggleMasterUserStatus);
 
