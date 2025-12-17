@@ -441,42 +441,42 @@ exports.createVisibilityGroup = async (req, res) => {
 // Update a visibility group
 exports.updateVisibilityGroup = async (req, res) => {
   const transaction = await sequelize.transaction();
-  
+
   try {
     const { groupId } = req.params;
+
     const {
       groupName,
       description,
-      memberIds, // Can be array [1,2,3] or string "1,2,3"
-      pipelineIds, // Can be array [1,2,3] or string "1,2,3"
-      // isDefault,
+      memberIds,     // array [1,2,3] or string "1,2,3"
+      pipelineIds,   // array [1,2,3] or string "1,2,3"
       isActive,
       lead,
       deal,
       person,
-      organization
+      organization,
+      itemVisibility
     } = req.body;
 
-    // Find the group
+    // 1) Find group
     const group = await GroupVisibility.findByPk(groupId, { transaction });
     if (!group) {
       await transaction.rollback();
-      return res.status(404).json({
-        success: false,
-        error: "Group not found"
-      });
+      return res.status(404).json({ success: false, error: "Group not found" });
     }
 
-    // Prepare update data
     const updateData = {};
 
-    // Handle group name update with uniqueness check
-    if (groupName && groupName !== group.groupName) {
+    // 2) Unique groupName check
+    if (groupName !== undefined && groupName !== null && groupName !== group.groupName) {
       const existingGroup = await GroupVisibility.findOne({
-        where: { groupName, groupId: { [Op.ne]: groupId } },
+        where: {
+          groupName,
+          groupId: { [Op.ne]: groupId } // ensure your PK is actually groupId, else change to id
+        },
         transaction
       });
-      
+
       if (existingGroup) {
         await transaction.rollback();
         return res.status(400).json({
@@ -487,179 +487,203 @@ exports.updateVisibilityGroup = async (req, res) => {
       updateData.groupName = groupName;
     }
 
-    // Handle other simple fields
+    // 3) Simple fields
     if (description !== undefined) updateData.description = description;
-    // if (isDefault !== undefined) updateData.isDefault = isDefault;
     if (isActive !== undefined) updateData.isActive = isActive;
-    if (lead !== undefined) updateData.lead = lead;
-    if (deal !== undefined) updateData.deal = deal;
-    if (person !== undefined) updateData.person = person;
-    if (organization !== undefined) updateData.Organization = organization;
+    if (itemVisibility?.leads !== undefined) updateData.lead = itemVisibility?.leads?.toLowerCase();
+    if (itemVisibility?.deals !== undefined) updateData.deal = itemVisibility?.deals?.toLowerCase();
+    if (itemVisibility?.people !== undefined) updateData.person = itemVisibility?.people?.toLowerCase();
 
-    // Handle memberIds - convert to comma-separated string
-    let finalMemberIds = [];
+    console.log("itemVisibility?.organizations?.toLowerCase()",itemVisibility?.organizations?.toLowerCase())
+    // IMPORTANT FIX: correct attribute name
+    if (itemVisibility?.organizations !== undefined) updateData.Organization = itemVisibility?.organizations?.toLowerCase();
+
+    // 4) Parse + validate memberIds
+    let finalMemberIds = null; // will become array of ints
     if (memberIds !== undefined) {
-      // Parse memberIds properly
-      if (typeof memberIds === 'string') {
-        finalMemberIds = memberIds.split(',').map(id => id.trim()).filter(id => id !== '');
+      let parsed = [];
+
+      if (typeof memberIds === "string") {
+        parsed = memberIds
+          .split(",")
+          .map(x => x.trim())
+          .filter(x => x !== "");
       } else if (Array.isArray(memberIds)) {
-        finalMemberIds = memberIds.map(id => id.toString().trim());
-      } else if (memberIds) {
-        finalMemberIds = [memberIds.toString().trim()];
+        parsed = memberIds.map(x => String(x).trim()).filter(x => x !== "");
+      } else if (memberIds !== null && memberIds !== "") {
+        parsed = [String(memberIds).trim()];
       }
 
-      console.log('Final memberIdsArray for update:', finalMemberIds);
+      // normalize to integers
+      finalMemberIds = parsed
+        .map(x => parseInt(x, 10))
+        .filter(x => !Number.isNaN(x));
 
-      // Validate member IDs exist
+      // Validate members exist
       if (finalMemberIds.length > 0) {
         const existingMembers = await MasterUser.findAll({
           where: { masterUserID: { [Op.in]: finalMemberIds } },
+          attributes: ["masterUserID"],
           transaction
         });
-        
-        if (existingMembers.length !== finalMemberIds.length) {
-          const existingMemberIds = existingMembers.map(user => user.masterUserID);
-          const missingMemberIds = finalMemberIds.filter(id => !existingMemberIds.includes(id));
+
+        const existingIds = new Set(existingMembers.map(u => Number(u.masterUserID)));
+        const missing = finalMemberIds.filter(id => !existingIds.has(id));
+
+        if (missing.length > 0) {
           await transaction.rollback();
           return res.status(400).json({
             success: false,
-            error: `Some members do not exist! Missing member IDs: ${missingMemberIds.join(', ')}`
+            error: `Some members do not exist! Missing member IDs: ${missing.join(", ")}`
           });
         }
       }
 
-      // NEW LOGIC: Remove users from ALL other groups (including current group's previous state)
+      // Remove these members from all OTHER groups
       if (finalMemberIds.length > 0) {
-        // Get ALL groups (we'll handle the current group separately)
         const allGroups = await GroupVisibility.findAll({ transaction });
-        
+
         for (const otherGroup of allGroups) {
-          // Skip if this is the current group and we have no members to process
-          if (otherGroup.groupId.toString() === groupId.toString()) {
-            continue; // We'll handle current group update separately
-          }
-          
-          if (otherGroup.memberIds && otherGroup.memberIds.trim() !== '') {
-            const currentMembers = otherGroup.memberIds.split(',').map(id => id.trim()).filter(id => id !== '');
-            console.log(`Checking group ${otherGroup.groupId} (${otherGroup.groupName}) with members:`, currentMembers);
-            
-            // Check if any of the new memberIds exist in this group
-            const commonMembers = currentMembers.filter(id => 
-              finalMemberIds.includes(id)
-            );
-            
-            if (commonMembers.length > 0) {
-              console.log(`Found common members in group ${otherGroup.groupName}:`, commonMembers);
-              
-              // Remove the common members from this existing group
-              const updatedMemberIds = currentMembers.filter(id => 
-                !finalMemberIds.includes(id)
-              );
-              
-              // Update the existing group
+          if (String(otherGroup.groupId) === String(groupId)) continue;
+
+          if (otherGroup.memberIds && otherGroup.memberIds.trim() !== "") {
+            const currentMembers = otherGroup.memberIds
+              .split(",")
+              .map(x => parseInt(x.trim(), 10))
+              .filter(x => !Number.isNaN(x));
+
+            const common = currentMembers.filter(id => finalMemberIds.includes(id));
+            if (common.length > 0) {
+              const updatedMemberIds = currentMembers.filter(id => !finalMemberIds.includes(id));
+
               await GroupVisibility.update(
-                { 
-                  memberIds: updatedMemberIds.length > 0 ? updatedMemberIds.join(",") : null,
-                  updatedAt: new Date()
+                {
+                  memberIds: updatedMemberIds.length ? updatedMemberIds.join(",") : null
                 },
-                { 
+                {
                   where: { groupId: otherGroup.groupId },
                   transaction
                 }
               );
-              
-              console.log(`Removed members ${commonMembers.join(', ')} from group ${otherGroup.groupName}`);
             }
           }
         }
       }
-      
-      // Convert array to comma-separated string for database storage
-      updateData.memberIds = finalMemberIds.join(',');
+
+      // store memberIds as CSV or null
+      updateData.memberIds = finalMemberIds.length ? finalMemberIds.join(",") : null;
     }
 
-    // Handle pipelineIds - convert to comma-separated string
+    // 5) Parse + validate pipelineIds
+    let finalPipelineIds = null; // array of ints
     if (pipelineIds !== undefined) {
-      let finalPipelineIds = [];
-      
+      let parsed = [];
+
       if (Array.isArray(pipelineIds)) {
-        finalPipelineIds = pipelineIds;
-      } else if (typeof pipelineIds === 'string') {
-        finalPipelineIds = pipelineIds.split(',').map(id => parseInt(id.trim())).filter(id => !isNaN(id));
+        parsed = pipelineIds.map(x => String(x).trim()).filter(x => x !== "");
+      } else if (typeof pipelineIds === "string") {
+        parsed = pipelineIds
+          .split(",")
+          .map(x => x.trim())
+          .filter(x => x !== "");
+      } else if (pipelineIds !== null && pipelineIds !== "") {
+        parsed = [String(pipelineIds).trim()];
       }
-      
-      // Validate pipeline IDs exist
+
+      finalPipelineIds = parsed
+        .map(x => parseInt(x, 10))
+        .filter(x => !Number.isNaN(x));
+
+      // Validate pipelines exist
       if (finalPipelineIds.length > 0) {
         const existingPipelines = await Pipeline.findAll({
           where: { pipelineId: { [Op.in]: finalPipelineIds } },
+          attributes: ["pipelineId"],
           transaction
         });
-        
-        if (existingPipelines.length !== finalPipelineIds.length) {
-          const existingPipelineIds = existingPipelines.map(pipe => pipe.pipelineId);
-          const missingPipelineIds = finalPipelineIds.filter(id => !existingPipelineIds.includes(id));
+
+        const existingIds = new Set(existingPipelines.map(p => Number(p.pipelineId)));
+        const missing = finalPipelineIds.filter(id => !existingIds.has(id));
+
+        if (missing.length > 0) {
           await transaction.rollback();
           return res.status(400).json({
             success: false,
-            error: `Some pipelines do not exist! Missing pipeline IDs: ${missingPipelineIds.join(', ')}`
+            error: `Some pipelines do not exist! Missing pipeline IDs: ${missing.join(", ")}`
           });
         }
       }
-      
-      // Convert array to comma-separated string for database storage
-      updateData.pipelineIds = finalPipelineIds.join(',');
+
+      updateData.pipelineIds = finalPipelineIds.length ? finalPipelineIds.join(",") : null;
     }
 
-    // Update the current group
+    console.log("Update data prepared:", updateData);
+
+    // Optional guard: avoid "update nothing"
+    if (Object.keys(updateData).length === 0) {
+      await transaction.rollback();
+      return res.status(400).json({
+        success: false,
+        error: "No fields provided to update"
+      });
+    }
+
+    // 6) Update group
     await group.update(updateData, { transaction });
 
-    // Commit transaction
+    // 7) Commit
     await transaction.commit();
 
-    // Fetch the updated group with creator details
+    // 8) Fetch updated group + creator details
     const updatedGroup = await GroupVisibility.findByPk(groupId, {
       include: [
         {
           model: MasterUser,
-          as: 'creator',
-          attributes: ['masterUserID', 'name', 'email']
+          as: "creator",
+          attributes: ["masterUserID", "name", "email"]
         }
       ]
     });
 
-    // Get member details for the response
     const groupData = updatedGroup.toJSON();
-    
-    let members = [];
+
+    // Build members in response
     let memberIdArray = [];
+    let members = [];
+
     if (groupData.memberIds) {
-      memberIdArray = groupData.memberIds.split(',').map(id => id.trim()).filter(id => id !== '');
+      memberIdArray = groupData.memberIds
+        .split(",")
+        .map(x => parseInt(x.trim(), 10))
+        .filter(x => !Number.isNaN(x));
+
       if (memberIdArray.length > 0) {
         members = await MasterUser.findAll({
           where: { masterUserID: { [Op.in]: memberIdArray } },
-          attributes: ['masterUserID', 'name', 'email']
+          attributes: ["masterUserID", "name", "email"]
         });
       }
     }
 
-    // Convert pipelineIds to array for response
+    // Build pipelines in response
     let pipelineIdArray = [];
     if (groupData.pipelineIds) {
-      pipelineIdArray = groupData.pipelineIds.split(',').map(id => parseInt(id.trim())).filter(id => !isNaN(id));
+      pipelineIdArray = groupData.pipelineIds
+        .split(",")
+        .map(x => parseInt(x.trim(), 10))
+        .filter(x => !Number.isNaN(x));
     }
-
-    const response = {
-      ...groupData,
-      memberIds: memberIdArray, // Return as array
-      pipelineIds: pipelineIdArray, // Return as array
-      users: members.map(user => user.toJSON()),
-      userCount: members.length
-    };
 
     return res.status(200).json({
       success: true,
       message: "Group updated successfully! Users have been removed from all other groups.",
-      data: response
+      data: {
+        ...groupData,
+        memberIds: memberIdArray,
+        pipelineIds: pipelineIdArray,
+        users: members.map(u => u.toJSON()),
+        userCount: members.length
+      }
     });
 
   } catch (error) {
@@ -672,6 +696,241 @@ exports.updateVisibilityGroup = async (req, res) => {
     });
   }
 };
+
+// exports.updateVisibilityGroup = async (req, res) => {
+//   const transaction = await sequelize.transaction();
+  
+//   try {
+//     const { groupId } = req.params;
+//     const {
+//       groupName,
+//       description,
+//       memberIds, // Can be array [1,2,3] or string "1,2,3"
+//       pipelineIds, // Can be array [1,2,3] or string "1,2,3"
+//       // isDefault,
+//       isActive,
+//       lead,
+//       deal,
+//       person,
+//       organization
+//     } = req.body;
+
+//     // Find the group
+//     const group = await GroupVisibility.findByPk(groupId, { transaction });
+//     if (!group) {
+//       await transaction.rollback();
+//       return res.status(404).json({
+//         success: false,
+//         error: "Group not found"
+//       });
+//     }
+
+//     // Prepare update data
+//     const updateData = {};
+
+//     // Handle group name update with uniqueness check
+//     if (groupName && groupName !== group.groupName) {
+//       const existingGroup = await GroupVisibility.findOne({
+//         where: { groupName, groupId: { [Op.ne]: groupId } },
+//         transaction
+//       });
+      
+//       if (existingGroup) {
+//         await transaction.rollback();
+//         return res.status(400).json({
+//           success: false,
+//           error: `Group with name '${groupName}' already exists!`
+//         });
+//       }
+//       updateData.groupName = groupName;
+//     }
+
+//     // Handle other simple fields
+//     if (description !== undefined) updateData.description = description;
+//     // if (isDefault !== undefined) updateData.isDefault = isDefault;
+//     if (isActive !== undefined) updateData.isActive = isActive;
+//     if (lead !== undefined) updateData.lead = lead;
+//     if (deal !== undefined) updateData.deal = deal;
+//     if (person !== undefined) updateData.person = person;
+//     if (organization !== undefined) updateData.Organization = organization;
+
+//     // Handle memberIds - convert to comma-separated string
+//     let finalMemberIds = [];
+//     if (memberIds !== undefined) {
+//       // Parse memberIds properly
+//       if (typeof memberIds === 'string') {
+//         finalMemberIds = memberIds.split(',').map(id => id.trim()).filter(id => id !== '');
+//       } else if (Array.isArray(memberIds)) {
+//         finalMemberIds = memberIds.map(id => id.toString().trim());
+//       } else if (memberIds) {
+//         finalMemberIds = [memberIds.toString().trim()];
+//       }
+
+//       console.log('Final memberIdsArray for update:', finalMemberIds);
+
+//       // Validate member IDs exist
+//       if (finalMemberIds.length > 0) {
+//         const existingMembers = await MasterUser.findAll({
+//           where: { masterUserID: { [Op.in]: finalMemberIds } },
+//           transaction
+//         });
+        
+//         if (existingMembers.length !== finalMemberIds.length) {
+//           const existingMemberIds = existingMembers.map(user => user.masterUserID);
+//           const missingMemberIds = finalMemberIds.filter(id => !existingMemberIds.includes(id));
+//           await transaction.rollback();
+//           return res.status(400).json({
+//             success: false,
+//             error: `Some members do not exist! Missing member IDs: ${missingMemberIds.join(', ')}`
+//           });
+//         }
+//       }
+
+//       // NEW LOGIC: Remove users from ALL other groups (including current group's previous state)
+//       if (finalMemberIds.length > 0) {
+//         // Get ALL groups (we'll handle the current group separately)
+//         const allGroups = await GroupVisibility.findAll({ transaction });
+        
+//         for (const otherGroup of allGroups) {
+//           // Skip if this is the current group and we have no members to process
+//           if (otherGroup.groupId.toString() === groupId.toString()) {
+//             continue; // We'll handle current group update separately
+//           }
+          
+//           if (otherGroup.memberIds && otherGroup.memberIds.trim() !== '') {
+//             const currentMembers = otherGroup.memberIds.split(',').map(id => id.trim()).filter(id => id !== '');
+//             console.log(`Checking group ${otherGroup.groupId} (${otherGroup.groupName}) with members:`, currentMembers);
+            
+//             // Check if any of the new memberIds exist in this group
+//             const commonMembers = currentMembers.filter(id => 
+//               finalMemberIds.includes(id)
+//             );
+            
+//             if (commonMembers.length > 0) {
+//               console.log(`Found common members in group ${otherGroup.groupName}:`, commonMembers);
+              
+//               // Remove the common members from this existing group
+//               const updatedMemberIds = currentMembers.filter(id => 
+//                 !finalMemberIds.includes(id)
+//               );
+              
+//               // Update the existing group
+//               await GroupVisibility.update(
+//                 { 
+//                   memberIds: updatedMemberIds.length > 0 ? updatedMemberIds.join(",") : null,
+//                   updatedAt: new Date()
+//                 },
+//                 { 
+//                   where: { groupId: otherGroup.groupId },
+//                   transaction
+//                 }
+//               );
+              
+//               console.log(`Removed members ${commonMembers.join(', ')} from group ${otherGroup.groupName}`);
+//             }
+//           }
+//         }
+//       }
+      
+//       // Convert array to comma-separated string for database storage
+//       updateData.memberIds = finalMemberIds.join(',');
+//     }
+
+//     // Handle pipelineIds - convert to comma-separated string
+//     if (pipelineIds !== undefined) {
+//       let finalPipelineIds = [];
+      
+//       if (Array.isArray(pipelineIds)) {
+//         finalPipelineIds = pipelineIds;
+//       } else if (typeof pipelineIds === 'string') {
+//         finalPipelineIds = pipelineIds.split(',').map(id => parseInt(id.trim())).filter(id => !isNaN(id));
+//       }
+      
+//       // Validate pipeline IDs exist
+//       if (finalPipelineIds.length > 0) {
+//         const existingPipelines = await Pipeline.findAll({
+//           where: { pipelineId: { [Op.in]: finalPipelineIds } },
+//           transaction
+//         });
+        
+//         if (existingPipelines.length !== finalPipelineIds.length) {
+//           const existingPipelineIds = existingPipelines.map(pipe => pipe.pipelineId);
+//           const missingPipelineIds = finalPipelineIds.filter(id => !existingPipelineIds.includes(id));
+//           await transaction.rollback();
+//           return res.status(400).json({
+//             success: false,
+//             error: `Some pipelines do not exist! Missing pipeline IDs: ${missingPipelineIds.join(', ')}`
+//           });
+//         }
+//       }
+      
+//       // Convert array to comma-separated string for database storage
+//       updateData.pipelineIds = finalPipelineIds.join(',');
+//     }
+
+//     console.log('Update data prepared:', updateData);
+//     // Update the current group
+//     await group.update(updateData, { transaction });
+
+//     // Commit transaction
+//     await transaction.commit();
+
+//     // Fetch the updated group with creator details
+//     const updatedGroup = await GroupVisibility.findByPk(groupId, {
+//       include: [
+//         {
+//           model: MasterUser,
+//           as: 'creator',
+//           attributes: ['masterUserID', 'name', 'email']
+//         }
+//       ]
+//     });
+
+//     // Get member details for the response
+//     const groupData = updatedGroup.toJSON();
+    
+//     let members = [];
+//     let memberIdArray = [];
+//     if (groupData.memberIds) {
+//       memberIdArray = groupData.memberIds.split(',').map(id => id.trim()).filter(id => id !== '');
+//       if (memberIdArray.length > 0) {
+//         members = await MasterUser.findAll({
+//           where: { masterUserID: { [Op.in]: memberIdArray } },
+//           attributes: ['masterUserID', 'name', 'email']
+//         });
+//       }
+//     }
+
+//     // Convert pipelineIds to array for response
+//     let pipelineIdArray = [];
+//     if (groupData.pipelineIds) {
+//       pipelineIdArray = groupData.pipelineIds.split(',').map(id => parseInt(id.trim())).filter(id => !isNaN(id));
+//     }
+
+//     const response = {
+//       ...groupData,
+//       memberIds: memberIdArray, // Return as array
+//       pipelineIds: pipelineIdArray, // Return as array
+//       users: members.map(user => user.toJSON()),
+//       userCount: members.length
+//     };
+
+//     return res.status(200).json({
+//       success: true,
+//       message: "Group updated successfully! Users have been removed from all other groups.",
+//       data: response
+//     });
+
+//   } catch (error) {
+//     await transaction.rollback();
+//     console.error("Error updating group:", error);
+//     return res.status(500).json({
+//       success: false,
+//       error: "Internal server error",
+//       message: error.message
+//     });
+//   }
+// };
 
 exports.deleteGroup = async (req, res) => {
   try {

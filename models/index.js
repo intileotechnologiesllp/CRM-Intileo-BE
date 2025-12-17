@@ -269,6 +269,17 @@ Person.hasOne(ContactSyncMapping, {
   foreignKey: "personId",
   as: "GoogleMapping",
 });
+MasterUser.belongsTo(GroupVisibility, {
+  foreignKey: "groupId",
+  targetKey: "groupId",
+  as: "groupVisibility",
+});
+
+GroupVisibility.hasMany(MasterUser, {
+  foreignKey: "groupId",
+  sourceKey: "groupId",
+  as: "users",
+});
 
 module.exports = {
   Lead,

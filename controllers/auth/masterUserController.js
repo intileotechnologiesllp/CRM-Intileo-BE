@@ -73,6 +73,7 @@ const { log } = require("console");
 const Program = require("../../models/admin/masters/programModel");
 const MasterUserPrivileges = require("../../models/privileges/masterUserPrivilegesModel"); // Import the MasterUserPrivileges model
 const { permissionSet } = require('../../models');
+const GroupVisibility = require('../../models/admin/groupVisibilityModel');
 // const path = require("path");
 
 // Create a Master User
@@ -323,6 +324,7 @@ exports.getMasterUsers = async (req, res) => {
           as: "privileges",
           required: false,
         },
+         { model: GroupVisibility, as: "groupVisibility", required: false },
       ],
       order: [['name', 'ASC']]
     });
@@ -338,6 +340,7 @@ exports.getMasterUsers = async (req, res) => {
           as: "privileges",
           required: false,
         },
+        { model: GroupVisibility, as: "groupVisibility", required: false }
       ],
       order: [['name', 'ASC']]
     });
@@ -460,6 +463,20 @@ exports.getMasterUsers = async (req, res) => {
     res.status(500).json({ message: "Internal server error" });
   }
 };
+
+exports.updateMasterGroupId = async (req, res) =>{
+  try{
+    const { userId, newGroupId } = req.body;
+    await MasterUser.update(
+      { groupId: newGroupId },
+      { where: { masterUserID: userId } }
+    );
+
+  res.status(200).json({ message: "Group ID updated successfully" });
+  }catch(e){
+    res.status(500).json({ message: "Internal server error" });
+  }
+}
 
 // Delete a Master User
 exports.deleteMasterUser = async (req, res) => {
