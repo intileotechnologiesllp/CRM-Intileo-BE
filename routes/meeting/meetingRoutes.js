@@ -8,7 +8,7 @@ const meetingController = require("../../controllers/meeting/meetingController")
 //  * @desc    Create a new meeting
 //  * @access  Private
 //  */
-// router.post("/", verifyToken, meetingController.createMeeting);
+router.post("/", verifyToken, meetingController.createMeeting);
 
 // /**
 //  * @route   GET /api/meetings

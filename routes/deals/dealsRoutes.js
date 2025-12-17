@@ -93,10 +93,15 @@ router.post(
 );
 
 // ================ BULK CONVERT ROUTES ================
+// router.post(
+//   "/bulk-convert-to-leads",
+//   verifyToken, validatePrivilege(4, "create", { checkOwnership: true, ownershipModel: Deal }),
+//   dealsController.bulkConvertDealsToLeads
+// );
+
 router.post(
   "/bulk-convert-to-leads",
   verifyToken,
-  validatePrivilege(4, "create", { checkOwnership: true, ownershipModel: Deal }),
   dealsController.bulkConvertDealsToLeads
 );
 
