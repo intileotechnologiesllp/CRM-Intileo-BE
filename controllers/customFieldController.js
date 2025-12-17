@@ -272,7 +272,7 @@ const getDefaultFieldsFromModels = async (entityType, masterUserID = null) => {
         isDefault: true,
         leadView: true,
         dealView: false,
-        options: leadsLabels
+        // options: leadsLabels
       },
 
     ],
