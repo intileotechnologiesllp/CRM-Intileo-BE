@@ -264,7 +264,7 @@ const getDefaultFieldsFromModels = async (entityType, masterUserID = null) => {
             {
         fieldName: "groupId",
         fieldLabel: "Visible To",
-        fieldType: "vidibiltyGroup",
+        fieldType: "visibilityGroup",
         dbColumn: "groupId",
         isRequired: false,
         entityType: "leads",
