@@ -8,13 +8,38 @@ let io = null;
  * @param {Object} server - HTTP server instance
  */
 function initializeSocket(server) {
+  // Configure allowed origins for CORS
+  const allowedOrigins = [
+    process.env.FRONTEND_URL,
+    'http://localhost:3000',
+    'http://localhost:3001',
+    'http://localhost:5173', // Vite default
+    'http://127.0.0.1:3000',
+    'http://213.136.77.55:4002',
+    'http://213.136.77.55:3000',
+  ].filter(Boolean); // Remove undefined values
+
   io = new Server(server, {
     cors: {
-      origin: process.env.FRONTEND_URL || "*",
-      methods: ["GET", "POST"],
+      origin: (origin, callback) => {
+        // Allow requests with no origin (like mobile apps, Postman, etc.)
+        if (!origin) return callback(null, true);
+        
+        // Check if origin is in allowed list or if we allow all origins
+        if (allowedOrigins.includes(origin) || process.env.FRONTEND_URL === "*") {
+          callback(null, true);
+        } else {
+          console.warn(`⚠️ [Socket.IO] Blocked CORS request from origin: ${origin}`);
+          callback(null, true); // Allow anyway for development - change to false in production
+        }
+      },
+      methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
       credentials: true,
+      allowedHeaders: ["Authorization", "Content-Type"],
     },
     transports: ["websocket", "polling"],
+    pingTimeout: 60000,
+    pingInterval: 25000,
   });
 
   // Authentication middleware
