@@ -427,6 +427,7 @@ exports.createLead = async (req, res) => {
       valueCurrency: req.body.valueCurrency || "INR",
       proposalValueCurrency: req.body.proposalValueCurrency || "INR",
       groupId: req.body.groupId || null,
+      visibleGroup: req.body.visibleGroup || null,
     });
 
     // 🔔 Send Notification - Lead Created
@@ -2866,37 +2867,50 @@ exports.getLeads = async (req, res) => {
     })
 
     let filterLeads = [];
-
-    if(findGroup?.lead?.toLowerCase() == "visibilitygroup"){
-      let findParentGroup = null; 
-      if(findGroup?.parentGroupId){
-        findParentGroup = await GroupVisibility.findOne({
-          where: {
-            groupId: findGroup?.parentGroupId
-          }
-        })
+    
+    for(let i = 0; i < flatLeads.length; i++){
+      if(flatLeads[i]?.visibleGroup == "owner"){
+        if(flatLeads[i]?.ownerId == req.adminId){
+          filterLeads.push(flatLeads[i]);
+        }
+      }else if(flatLeads[i]?.visibleGroup == "visibilitygroup"){
+        findGroup?.memberIds?.split(",").includes(req.adminId.toString()) && filterLeads.push(flatLeads[i]);
+      }else{
+        filterLeads.push(flatLeads[i]);
       }
+    }
+
+
+    // if(findGroup?.lead?.toLowerCase() == "visibilitygroup"){
+    //   let findParentGroup = null; 
+    //   if(findGroup?.parentGroupId){
+    //     findParentGroup = await GroupVisibility.findOne({
+    //       where: {
+    //         groupId: findGroup?.parentGroupId
+    //       }
+    //     })
+    //   }
       
-      const filterFields = flatLeads.filter((idx)=> idx?.ownerId == req.adminId || idx?.visibilityGroupId == groupId ||  idx?.visibilityGroupId == findGroup?.parentGroupId || findParentGroup.memberIds?.split(",").includes(req.adminId.toString()));
+    //   const filterFields = flatLeads.filter((idx)=> idx?.ownerId == req.adminId || idx?.visibilityGroupId == groupId ||  idx?.visibilityGroupId == findGroup?.parentGroupId || findParentGroup.memberIds?.split(",").includes(req.adminId.toString()));
 
-      filterLeads = filterFields
-    }
-    else if(findGroup?.lead?.toLowerCase() == "owner"){
-      let findParentGroup = null; 
-      if(findGroup?.parentGroupId){
-        findParentGroup = await GroupVisibility.findOne({
-          where: {
-            groupId: findGroup?.parentGroupId
-          }
-        })
-      }
+    //   filterLeads = filterFields
+    // }
+    // else if(findGroup?.lead?.toLowerCase() == "owner"){
+    //   let findParentGroup = null; 
+    //   if(findGroup?.parentGroupId){
+    //     findParentGroup = await GroupVisibility.findOne({
+    //       where: {
+    //         groupId: findGroup?.parentGroupId
+    //       }
+    //     })
+    //   }
 
-      const filterFields = flatLeads.filter((idx)=> idx?.ownerId == req.adminId || idx?.visibilityGroupId == findGroup?.parentGroupId || findParentGroup.memberIds?.split(",").includes(req.adminId.toString()));
+    //   const filterFields = flatLeads.filter((idx)=> idx?.ownerId == req.adminId || idx?.visibilityGroupId == findGroup?.parentGroupId || findParentGroup.memberIds?.split(",").includes(req.adminId.toString()));
 
-      filterLeads = filterFields;
-    }else{
-      filterLeads = flatLeads;
-    }
+    //   filterLeads = filterFields;
+    // }else{
+    //   filterLeads = flatLeads;
+    // }
 
     res.status(200).json({
       message: "Leads fetched successfully",
