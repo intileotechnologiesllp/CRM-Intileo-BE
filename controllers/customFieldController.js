@@ -271,7 +271,7 @@ const getDefaultFieldsFromModels = async (entityType, masterUserID = null) => {
         isActive: true,
         isDefault: true,
         leadView: true,
-        dealView: false,
+        dealView: true,
         // options: leadsLabels
       },
 
@@ -506,6 +506,20 @@ const getDefaultFieldsFromModels = async (entityType, masterUserID = null) => {
         dealView: false,
         personView:false
       },
+                  {
+        fieldName: "groupId",
+        fieldLabel: "Visible To",
+        fieldType: "visibilityGroup",
+        dbColumn: "groupId",
+        isRequired: false,
+        entityType: "person",
+        isActive: true,
+        isDefault: true,
+        leadView: true,
+        dealView: true,
+        personView:true
+        // options: leadsLabels
+      },
     ],
     organization: [
       {
@@ -566,13 +580,27 @@ const getDefaultFieldsFromModels = async (entityType, masterUserID = null) => {
         fieldLabel: "Visible to",
         fieldType: "text",
         dbColumn: "visibleTo",
-        isRequired: false,
+        isRequired: true,
         entityType: "organization",
         isActive: true,
         isDefault: true,
         leadView: false,
         dealView: false,
         organizationView:false
+      },
+                        {
+        fieldName: "groupId",
+        fieldLabel: "Visible To",
+        fieldType: "visibilityGroup",
+        dbColumn: "groupId",
+        isRequired: false,
+     entityType: "organization",
+        isActive: true,
+        isDefault: true,
+        leadView: false,
+        dealView: false,
+        organizationView:true
+        // options: leadsLabels
       },
 
     ],
