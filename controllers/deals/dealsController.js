@@ -32,6 +32,7 @@ const Currency = require("../../models/admin/masters/currencyModel");
 const DealFile = require("../../models/deals/dealFileModel");
 const DealProduct = require("../../models/product/dealProductModel");
 const Product = require("../../models/product/productModel");
+const ProductVariation = require("../../models/product/productVariationModel");
 const NotificationTriggers = require("../../services/notification/notificationTriggers"); // 🔔 Notification triggers
 const multer = require('multer');
 const path = require('path');
@@ -72,7 +73,8 @@ exports.createDeal = async (req, res) => {
       source,
       label,
       // Activity ID to link existing activity (similar to emailID)
-      activityId
+      activityId,
+      visibleGroup
       // Custom fields will be processed from remaining req.body fields
     } = req.body;
     // --- Enhanced validation similar to createLead ---
@@ -380,7 +382,8 @@ exports.createDeal = async (req, res) => {
       source,
       valueCurrency: req.body.valueCurrency || "INR",
       proposalValueCurrency: req.body.proposalValueCurrency || "INR",
-      label
+      label,
+      visibleGroup
       // Add personId, organizationId, etc. as needed
     });
     let responsiblePerson = null;
@@ -1732,38 +1735,51 @@ exports.getDeals = async (req, res) => {
       }
     })
 
+    
     let filterDeals = [];
 
-    if(findGroup?.lead?.toLowerCase() == "visibilitygroup"){
-      let findParentGroup = null; 
-      if(findGroup?.parentGroupId){
-        findParentGroup = await GroupVisibility.findOne({
-          where: {
-            groupId: findGroup?.parentGroupId
-          }
-        })
+    for(let i = 0; i < dealsWithCustomFields.length; i++){
+      if(dealsWithCustomFields[i]?.visibleGroup == "owner"){
+        if(filterDeals[i]?.ownerId == req.adminId){
+          filterDeals.push(flatLeads[i]);
+        }
+      }else if(dealsWithCustomFields[i]?.visibleGroup == "visibilitygroup"){
+        findGroup?.memberIds?.split(",").includes(req.adminId.toString()) && filterDeals.push(flatLeads[i]);
+      }else{
+        filterDeals.push(dealsWithCustomFields[i]);
       }
+    }
+
+    // if(findGroup?.lead?.toLowerCase() == "visibilitygroup"){
+    //   let findParentGroup = null; 
+    //   if(findGroup?.parentGroupId){
+    //     findParentGroup = await GroupVisibility.findOne({
+    //       where: {
+    //         groupId: findGroup?.parentGroupId
+    //       }
+    //     })
+    //   }
       
-      const filterDeals = dealsWithCustomFields.filter((idx)=> idx?.ownerId == req.adminId || idx?.visibilityGroupId == groupId ||  idx?.visibilityGroupId == findGroup?.parentGroupId || findParentGroup.memberIds?.split(",").includes(req.adminId.toString()));
+    //   const filterDeals = dealsWithCustomFields.filter((idx)=> idx?.ownerId == req.adminId || idx?.visibilityGroupId == groupId ||  idx?.visibilityGroupId == findGroup?.parentGroupId || findParentGroup.memberIds?.split(",").includes(req.adminId.toString()));
 
-      filterDeals = filterDeals;
-    }
-    else if(findGroup?.lead?.toLowerCase() == "owner"){
-      let findParentGroup = null; 
-      if(findGroup?.parentGroupId){
-        findParentGroup = await GroupVisibility.findOne({
-          where: {
-            groupId: findGroup?.parentGroupId
-          }
-        })
-      }
+    //   filterDeals = filterDeals;
+    // }
+    // else if(findGroup?.lead?.toLowerCase() == "owner"){
+    //   let findParentGroup = null; 
+    //   if(findGroup?.parentGroupId){
+    //     findParentGroup = await GroupVisibility.findOne({
+    //       where: {
+    //         groupId: findGroup?.parentGroupId
+    //       }
+    //     })
+    //   }
 
-      const filterFields = dealsWithCustomFields.filter((idx)=> idx?.ownerId == req.adminId || idx?.visibilityGroupId == findGroup?.parentGroupId || findParentGroup.memberIds?.split(",").includes(req.adminId.toString()));
+    //   const filterFields = dealsWithCustomFields.filter((idx)=> idx?.ownerId == req.adminId || idx?.visibilityGroupId == findGroup?.parentGroupId || findParentGroup.memberIds?.split(",").includes(req.adminId.toString()));
 
-      filterDeals = filterFields;
-    }else{
-      filterDeals = dealsWithCustomFields;
-    }
+    //   filterDeals = filterFields;
+    // }else{
+    //   filterDeals = dealsWithCustomFields;
+    // }
 
     res.status(200).json({
       message: "Deals fetched successfully",
@@ -6463,6 +6479,150 @@ exports.getDealDetail = async (req, res) => {
       console.log(`👥 [getDealDetail] No activities found for user analytics`);
     }
 
+    // ====== FETCH DEAL PRODUCTS ======
+    console.log(`📦 [getDealDetail] Fetching products for deal ${dealId}`);
+    
+    const dealProducts = await DealProduct.findAll({
+      where: { dealId },
+      include: [
+        {
+          model: Product,
+          as: "product",
+          attributes: [
+            "productId",
+            "name",
+            "code",
+            "description",
+            "category",
+            "unit",
+            "imageUrl",
+            "isActive",
+            "hasVariations",
+            "prices",
+            "cost",
+            "costCurrency"
+          ]
+        },
+        {
+          model: ProductVariation,
+          as: "variation",
+          required: false,
+          attributes: [
+            "variationId",
+            "name",
+            "sku",
+            "description",
+            "attributes",
+            "prices",
+            "cost",
+            "isActive"
+          ]
+        }
+      ],
+      order: [["sortOrder", "ASC"], ["createdAt", "ASC"]]
+    });
+
+    console.log(`📦 [getDealDetail] Found ${dealProducts.length} products for deal ${dealId}`);
+
+    // Calculate product summary and revenue metrics
+    let productSummary = {
+      totalProducts: dealProducts.length,
+      subtotal: 0,
+      totalDiscount: 0,
+      totalTax: 0,
+      grandTotal: 0,
+      revenueMetrics: {
+        monthlyRecurringRevenue: 0,
+        annualRecurringRevenue: 0,
+        annualContractValue: 0,
+        totalContractValue: 0
+      },
+      billingFrequencyBreakdown: {},
+      productsByCategory: {},
+      averageProductValue: 0
+    };
+
+    if (dealProducts.length > 0) {
+      // Calculate financial totals
+      dealProducts.forEach(dp => {
+        const subtotal = parseFloat(dp.subtotal || 0);
+        const discount = parseFloat(dp.discountAmount || 0);
+        const tax = parseFloat(dp.taxAmount || 0);
+        const total = parseFloat(dp.total || 0);
+        const quantity = parseFloat(dp.quantity || 1);
+        const billingFrequency = dp.billingFrequency || 'one-time';
+        
+        productSummary.subtotal += subtotal;
+        productSummary.totalDiscount += discount;
+        productSummary.totalTax += tax;
+        productSummary.grandTotal += total;
+
+        // Revenue metrics based on billing frequency
+        if (billingFrequency === 'monthly') {
+          productSummary.revenueMetrics.monthlyRecurringRevenue += total;
+          productSummary.revenueMetrics.annualRecurringRevenue += total * 12;
+        } else if (billingFrequency === 'quarterly') {
+          productSummary.revenueMetrics.monthlyRecurringRevenue += total / 3;
+          productSummary.revenueMetrics.annualRecurringRevenue += total * 4;
+        } else if (billingFrequency === 'yearly') {
+          productSummary.revenueMetrics.monthlyRecurringRevenue += total / 12;
+          productSummary.revenueMetrics.annualRecurringRevenue += total;
+        } else {
+          // One-time
+          productSummary.revenueMetrics.totalContractValue += total;
+        }
+
+        // Billing frequency breakdown
+        if (!productSummary.billingFrequencyBreakdown[billingFrequency]) {
+          productSummary.billingFrequencyBreakdown[billingFrequency] = {
+            count: 0,
+            total: 0
+          };
+        }
+        productSummary.billingFrequencyBreakdown[billingFrequency].count++;
+        productSummary.billingFrequencyBreakdown[billingFrequency].total += total;
+
+        // Products by category
+        const category = dp.product?.category || 'Uncategorized';
+        if (!productSummary.productsByCategory[category]) {
+          productSummary.productsByCategory[category] = {
+            count: 0,
+            total: 0
+          };
+        }
+        productSummary.productsByCategory[category].count++;
+        productSummary.productsByCategory[category].total += total;
+      });
+
+      // Calculate ACV and TCV
+      productSummary.revenueMetrics.annualContractValue = 
+        productSummary.revenueMetrics.annualRecurringRevenue + 
+        (productSummary.revenueMetrics.totalContractValue / (deal.contractDuration || 1));
+      
+      productSummary.revenueMetrics.totalContractValue = 
+        (productSummary.revenueMetrics.annualRecurringRevenue * (deal.contractDuration || 1)) + 
+        productSummary.revenueMetrics.totalContractValue;
+
+      // Average product value
+      productSummary.averageProductValue = 
+        productSummary.totalProducts > 0 
+          ? productSummary.grandTotal / productSummary.totalProducts 
+          : 0;
+
+      // Round all monetary values to 2 decimal places
+      productSummary.subtotal = Math.round(productSummary.subtotal * 100) / 100;
+      productSummary.totalDiscount = Math.round(productSummary.totalDiscount * 100) / 100;
+      productSummary.totalTax = Math.round(productSummary.totalTax * 100) / 100;
+      productSummary.grandTotal = Math.round(productSummary.grandTotal * 100) / 100;
+      productSummary.averageProductValue = Math.round(productSummary.averageProductValue * 100) / 100;
+      productSummary.revenueMetrics.monthlyRecurringRevenue = Math.round(productSummary.revenueMetrics.monthlyRecurringRevenue * 100) / 100;
+      productSummary.revenueMetrics.annualRecurringRevenue = Math.round(productSummary.revenueMetrics.annualRecurringRevenue * 100) / 100;
+      productSummary.revenueMetrics.annualContractValue = Math.round(productSummary.revenueMetrics.annualContractValue * 100) / 100;
+      productSummary.revenueMetrics.totalContractValue = Math.round(productSummary.revenueMetrics.totalContractValue * 100) / 100;
+
+      console.log(`💰 [getDealDetail] Product summary: ${productSummary.totalProducts} products, Grand Total: ${productSummary.grandTotal}, MRR: ${productSummary.revenueMetrics.monthlyRecurringRevenue}`);
+    }
+
     // Fetch custom field values for this deal
     const customFieldValues = await CustomFieldValue.findAll({
       where: {
@@ -6559,6 +6719,8 @@ exports.getDealDetail = async (req, res) => {
       notes,
       activities,
       files,
+      products: dealProducts,
+      productSummary: productSummary,
       customFields: {
         values: formattedCustomFields,
         fieldsByCategory,

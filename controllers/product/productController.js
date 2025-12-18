@@ -1,6 +1,7 @@
 const Product = require("../../models/product/productModel");
 const ProductVariation = require("../../models/product/productVariationModel");
 const DealProduct = require("../../models/product/dealProductModel");
+const Deal = require("../../models/deals/dealsModels");
 const MasterUser = require("../../models/master/masterUserModel");
 const { Op } = require("sequelize");
 const GroupVisibility = require("../../models/admin/groupVisibilityModel");
@@ -404,9 +405,95 @@ exports.getProductById = async (req, res) => {
       });
     }
 
+    // Fetch connected deals for this product
+    const connectedDeals = await DealProduct.findAll({
+      where: { productId: id },
+      include: [
+        {
+          model: Deal,
+          as: "deal",
+          attributes: [
+            "dealId",
+            "title",
+            "value",
+            "currency",
+            "status",
+            "pipelineStage",
+            "ownerId",
+            "createdAt",
+            "expectedCloseDate"
+          ],
+          include: [
+            {
+              model: MasterUser,
+              as: "DealOwner",
+              attributes: ["masterUserID", "name", "email"],
+              required: false
+            }
+          ]
+        },
+        {
+          model: ProductVariation,
+          as: "variation",
+          attributes: ["variationId", "name", "sku"],
+          required: false
+        }
+      ],
+      order: [["createdAt", "DESC"]]
+    });
+
+    // Format connected deals with summary
+    const formattedDeals = connectedDeals.map(dp => ({
+      dealProductId: dp.dealProductId,
+      dealId: dp.dealId,
+      deal: dp.deal ? {
+        dealId: dp.deal.dealId,
+        title: dp.deal.title,
+        value: dp.deal.value,
+        currency: dp.deal.currency,
+        status: dp.deal.status,
+        pipelineStage: dp.deal.pipelineStage,
+        ownerId: dp.deal.ownerId,
+        ownerName: dp.deal.DealOwner ? dp.deal.DealOwner.name : null,
+        createdAt: dp.deal.createdAt,
+        expectedCloseDate: dp.deal.expectedCloseDate
+      } : null,
+      variation: dp.variation ? {
+        variationId: dp.variation.variationId,
+        name: dp.variation.name,
+        sku: dp.variation.sku
+      } : null,
+      quantity: dp.quantity,
+      unitPrice: dp.unitPrice,
+      currency: dp.currency,
+      subtotal: dp.subtotal,
+      discountAmount: dp.discountAmount,
+      taxAmount: dp.taxAmount,
+      total: dp.total,
+      billingFrequency: dp.billingFrequency,
+      billingStartDate: dp.billingStartDate,
+      billingEndDate: dp.billingEndDate,
+      notes: dp.notes,
+      createdAt: dp.createdAt
+    }));
+
+    // Calculate deal summary
+    const dealSummary = {
+      totalDeals: formattedDeals.length,
+      activeDeals: formattedDeals.filter(d => d.deal?.status === 'open').length,
+      wonDeals: formattedDeals.filter(d => d.deal?.status === 'won').length,
+      lostDeals: formattedDeals.filter(d => d.deal?.status === 'lost').length,
+      totalRevenue: formattedDeals.reduce((sum, d) => sum + parseFloat(d.total || 0), 0),
+      totalQuantitySold: formattedDeals.reduce((sum, d) => sum + parseFloat(d.quantity || 0), 0)
+    };
+
     res.status(200).json({
       status: "success",
-      data: product,
+      data: {
+        product,
+        connectedDeals: formattedDeals,
+        dealSummary
+      }
     });
   } catch (error) {
     console.error("Error fetching product:", error);

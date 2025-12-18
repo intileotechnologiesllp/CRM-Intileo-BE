@@ -10,6 +10,7 @@ const Attachment = require("../../models/email/attachmentModel");
 const { format, subDays, subMonths, subYears } = require("date-fns"); // Use date-fns for date manipulation
 const multer = require("multer");
 const path = require("path");
+const fs = require("fs");
 const Sequelize = require("sequelize");
 const { publishToQueue } = require("../../services/rabbitmqService");
 const { Op } = require("sequelize");
@@ -26,10 +27,23 @@ const PROVIDER_CONFIG = {
   },
   // Add more providers as needed
 };
+
+// Ensure signature upload directory exists
+const signatureDir = path.join(__dirname, "../../uploads/signatures");
+if (!fs.existsSync(signatureDir)) {
+  fs.mkdirSync(signatureDir, { recursive: true });
+  console.log(`[updateSignature] Created signatures directory: ${signatureDir}`);
+}
+
 // Configure storage for signature images
 const storage = multer.diskStorage({
   destination: function (req, file, cb) {
-    cb(null, "uploads/signatures/"); // Make sure this folder exists
+    // Ensure directory exists before saving
+    const uploadsDir = "uploads/signatures/";
+    if (!fs.existsSync(uploadsDir)) {
+      fs.mkdirSync(uploadsDir, { recursive: true });
+    }
+    cb(null, uploadsDir);
   },
   filename: function (req, file, cb) {
     const uniqueSuffix = Date.now() + "-" + Math.round(Math.random() * 1e9);
@@ -1317,11 +1331,34 @@ exports.updateSignature = async (req, res) => {
   const { signature, signatureName } = req.body;
   let signatureImage = req.body.signatureImage;
 
-  // If an image was uploaded, use its path as the image URL
+  // If an image was uploaded via multipart/form-data, use its path
   if (req.file) {
+    // Verify the uploaded file exists
+    const filePath = path.join(__dirname, "../../uploads/signatures", req.file.filename);
+    if (!fs.existsSync(filePath)) {
+      console.error(`[updateSignature] Uploaded file not found: ${filePath}`);
+      return res.status(500).json({ 
+        message: "Failed to save signature image. File not found after upload." 
+      });
+    }
+    
     signatureImage = `${
       process.env.LOCALHOST_URL || "http://localhost:3056"
     }/uploads/signatures/${req.file.filename}`;
+    
+    console.log(`[updateSignature] Signature image uploaded successfully: ${signatureImage}`);
+  } else if (signatureImage) {
+    // If signatureImage is provided in the request body, validate it exists
+    // Extract filename from URL (e.g., "http://localhost:3056/uploads/signatures/123.png" -> "123.png")
+    const urlMatch = signatureImage.match(/\/uploads\/signatures\/([^\/]+)$/);
+    if (urlMatch) {
+      const filename = urlMatch[1];
+      const filePath = path.join(__dirname, "../../uploads/signatures", filename);
+      if (!fs.existsSync(filePath)) {
+        console.warn(`[updateSignature] Signature image file not found: ${filePath}. Setting signatureImage to null.`);
+        signatureImage = null; // Clear invalid image path
+      }
+    }
   }
 
   try {
@@ -1331,9 +1368,17 @@ exports.updateSignature = async (req, res) => {
     if (!userCredential) {
       return res.status(404).json({ message: "User credentials not found." });
     }
+    
     await userCredential.update({ signature, signatureName, signatureImage });
-    res.status(200).json({ message: "Signature updated successfully." });
+    
+    res.status(200).json({ 
+      message: "Signature updated successfully.",
+      signature,
+      signatureName,
+      signatureImage
+    });
   } catch (error) {
+    console.error('[updateSignature] Error:', error);
     res
       .status(500)
       .json({ message: "Failed to update signature.", error: error.message });
@@ -1679,11 +1724,27 @@ exports.getSignature = async (req, res) => {
       return res.status(404).json({ message: "User credentials not found." });
     }
 
+    // Validate signature image file exists if path is set
+    let signatureImage = userCredential.signatureImage;
+    if (signatureImage) {
+      const urlMatch = signatureImage.match(/\/uploads\/signatures\/([^\/]+)$/);
+      if (urlMatch) {
+        const filename = urlMatch[1];
+        const filePath = path.join(__dirname, "../../uploads/signatures", filename);
+        if (!fs.existsSync(filePath)) {
+          console.warn(`[getSignature] Signature image file not found: ${filePath}. Clearing from database.`);
+          // Clear invalid image path from database
+          await userCredential.update({ signatureImage: null });
+          signatureImage = null;
+        }
+      }
+    }
+
     res.status(200).json({
       message: "Signature data fetched successfully.",
       signature: userCredential.signature,
       signatureName: userCredential.signatureName,
-      signatureImage: userCredential.signatureImage,
+      signatureImage: signatureImage,
     });
   } catch (error) {
     res.status(500).json({
