@@ -52,6 +52,7 @@ exports.verifyToken = async (req, res, next) => {
     req.email = decoded.email; // User email from the token
     req.role = decoded.loginType; // Attach admin ID to the request object
     req.sessionId = decoded.sessionId; // Session ID from token for device management
+    req.api_key = decoded.api_key ; // API key from token
     console.log("Decoded Token:", decoded); // Debug log
 
     // Validate session is still active (for device management)

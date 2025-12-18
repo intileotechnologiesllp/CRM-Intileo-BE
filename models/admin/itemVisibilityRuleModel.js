@@ -1,7 +1,8 @@
 const { DataTypes } = require("sequelize");
-const sequelize = require("../../config/db");
 
-const ItemVisibilityRule = sequelize.define(
+
+const createItemVisibilityRuleModel = (sequelizeInstance) => {
+const ItemVisibilityRule = sequelizeInstance.define(
   "ItemVisibilityRule",
   {
     ruleId: {
@@ -13,7 +14,7 @@ const ItemVisibilityRule = sequelize.define(
       type: DataTypes.INTEGER,
       allowNull: false,
       references: {
-        model: "visibility_groups",
+        model: "GroupVisibilities",
         key: "groupId",
       },
     },
@@ -32,7 +33,7 @@ const ItemVisibilityRule = sequelize.define(
       type: DataTypes.INTEGER,
       allowNull: false,
       references: {
-        model: "masterusers",
+        model: "MasterUsers",
         key: "masterUserID",
       },
     },
@@ -83,7 +84,7 @@ const ItemVisibilityRule = sequelize.define(
     },
   },
   {
-    tableName: "item_visibility_rules",
+    tableName: "ItemVisibilityRules",
     timestamps: true,
     indexes: [
       {
@@ -103,5 +104,7 @@ const ItemVisibilityRule = sequelize.define(
     ],
   }
 );
+return ItemVisibilityRule
+}
 
-module.exports = ItemVisibilityRule;
+module.exports = createItemVisibilityRuleModel;

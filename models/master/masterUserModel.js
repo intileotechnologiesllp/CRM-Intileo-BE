@@ -1,156 +1,127 @@
 const { DataTypes } = require("sequelize");
-const sequelize = require("../../config/db");
-const permissionSet = require("../permissionsetModel");
-// const GroupVisibility = require("../admin/groupVisibilityModel");
 
-const MasterUser = sequelize.define("MasterUser", {
-  masterUserID: {
-    type: DataTypes.INTEGER,
-    primaryKey: true,
-    autoIncrement: true,
-  },
-  name: {
-    type: DataTypes.STRING,
-    allowNull: false,
-  },
-  email: {
-    type: DataTypes.STRING,
-    allowNull: false,
-    unique: true,
-    validate: {
-      isEmail: true,
+/**
+ * Factory function to create MasterUser model for a specific database connection
+ * @param {Sequelize} sequelizeInstance - Sequelize connection instance
+ * @returns {Model} MasterUser model
+ */
+const createMasterUserModel = (sequelizeInstance) => {
+  const MasterUser = sequelizeInstance.define("MasterUser", {
+    masterUserID: {
+      type: DataTypes.INTEGER,
+      primaryKey: true,
+      autoIncrement: true,
     },
-  },
-  password: {
-    type: DataTypes.STRING,
-    allowNull: true,
-  },
-  designation: {
-    type: DataTypes.STRING,
-    allowNull: true,
-  },
-  department: {
-    type: DataTypes.STRING,
-    allowNull: true,
-  },
-  creatorId: {
-    type: DataTypes.INTEGER,
-    allowNull: false, // Admin ID who created the user
-  },
-  createdBy: {
-    type: DataTypes.STRING,
-    allowNull: false, // Admin who created the user
-  },
-  status: {
-    type: DataTypes.STRING,
-    allowNull: false,
-    defaultValue: "active", // Default status
-  },
-  resetToken: {
-    type: DataTypes.STRING,
-    allowNull: true,
-  },
-  resetTokenExpiry: {
-    type: DataTypes.DATE,
-    allowNull: true,
-  },
-  loginType: {
-    type: DataTypes.STRING,
-    allowNull: false,
-  },
-  otp: {
-    type: DataTypes.STRING,
-    allowNull: true,
-  },
-  otpExpiration: {
-    type: DataTypes.DATE,
-    allowNull: true,
-  },
-  userType: {
-    type: DataTypes.STRING,
-    allowNull: false, // "admin" or "general"
-  },
-  mobileNumber: {
-    type: DataTypes.STRING,
-    allowNull: false,
-    unique: true,
-  },
-  profileImage: {
-    type: DataTypes.STRING,
-    allowNull: true,
-  },
-  bio: {
-    type: DataTypes.STRING,
-    allowNull: true,
-  },
-  location: {
-    type: DataTypes.STRING,
-    allowNull: true,
-  },
-  lastName: {
-    type: DataTypes.STRING,
-    allowNull: true,
-  },
-  isActive: {
-    type: DataTypes.BOOLEAN,
-    allowNull: false,
-    defaultValue: true, // Default to active
-  },
-  deactivatedAt: {
-    type: DataTypes.DATE,
-    allowNull: true, // Date when user was deactivated
-  },
-  deactivatedBy: {
-    type: DataTypes.INTEGER,
-    allowNull: true, // ID of admin who deactivated the user
-  },
-  deactivationReason: {
-    type: DataTypes.TEXT,
-    allowNull: true, // Reason for deactivation
-  },
-  googleOAuthToken: {
-    type: DataTypes.TEXT,
-    allowNull: true, // Store Google OAuth token for calendar sync
-  },
-  permissionSetId: {
-    type: DataTypes.INTEGER,
-    allowNull: true,
-    references: {
-      model: permissionSet, // table name (auto-pluralized)
-      key: "permissionSetId",
+    name: {
+      type: DataTypes.STRING,
+      allowNull: false,
     },
-  },
-  globalPermissionSetId: {
-    type: DataTypes.INTEGER,
-    allowNull: true,
-    references: {
-      model: permissionSet, // table name (auto-pluralized)
-      key: "permissionSetId",
+    email: {
+      type: DataTypes.STRING,
+      allowNull: false,
+      unique: true,
+      validate: {
+        isEmail: true,
+      },
     },
-  },
-  groupId: {
-    type: DataTypes.INTEGER,
-    allowNull: true,
-    references: {
-      model: "groupVisibilities", // table name (auto-pluralized)
-      key: "groupId",
+    password: {
+      type: DataTypes.STRING,
+      allowNull: true,
     },
-  },
-});
+    designation: {
+      type: DataTypes.STRING,
+      allowNull: true,
+    },
+    department: {
+      type: DataTypes.STRING,
+      allowNull: true,
+    },
+    creatorId: {
+      type: DataTypes.INTEGER,
+      allowNull: false,
+    },
+    createdBy: {
+      type: DataTypes.STRING,
+      allowNull: false,
+    },
+    status: {
+      type: DataTypes.STRING,
+      allowNull: false,
+      defaultValue: "active",
+    },
+    resetToken: {
+      type: DataTypes.STRING,
+      allowNull: true,
+    },
+    resetTokenExpiry: {
+      type: DataTypes.DATE,
+      allowNull: true,
+    },
+    loginType: {
+      type: DataTypes.STRING,
+      allowNull: false,
+    },
+    otp: {
+      type: DataTypes.STRING,
+      allowNull: true,
+    },
+    otpExpiration: {
+      type: DataTypes.DATE,
+      allowNull: true,
+    },
+    userType: {
+      type: DataTypes.STRING,
+      allowNull: false,
+    },
+    mobileNumber: {
+      type: DataTypes.STRING,
+      allowNull: false,
+      unique: true,
+    },
+    profileImage: {
+      type: DataTypes.STRING,
+      allowNull: true,
+    },
+    bio: {
+      type: DataTypes.STRING,
+      allowNull: true,
+    },
+    location: {
+      type: DataTypes.STRING,
+      allowNull: true,
+    },
+    lastName: {
+      type: DataTypes.STRING,
+      allowNull: true,
+    },
+    isActive: {
+      type: DataTypes.BOOLEAN,
+      allowNull: false,
+      defaultValue: true,
+    },
+    deactivatedAt: {
+      type: DataTypes.DATE,
+      allowNull: true,
+    },
+    deactivatedBy: {
+      type: DataTypes.INTEGER,
+      allowNull: true,
+    },
+    deactivationReason: {
+      type: DataTypes.TEXT,
+      allowNull: true,
+    },
+    googleOAuthToken: {
+      type: DataTypes.TEXT,
+      allowNull: true,
+    },
+  }, {
+    tableName: 'MasterUsers',
+    timestamps: true,
+    createdAt: 'createdAt',
+    updatedAt: 'updatedAt'
+  });
+  return MasterUser;
+};
 
-const MasterUserPrivileges = require("../privileges/masterUserPrivilegesModel");
-
-
-MasterUser.hasOne(MasterUserPrivileges, {
-  foreignKey: "masterUserID",
-  as: "privileges", // Alias for the association
-});
-
-MasterUserPrivileges.belongsTo(MasterUser, {
-  foreignKey: "masterUserID",
-  as: "user", // Alias for the reverse association
-});
-
-MasterUser.sync({});
-
-module.exports = MasterUser;
+module.exports = createMasterUserModel;

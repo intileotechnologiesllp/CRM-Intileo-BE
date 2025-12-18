@@ -110,10 +110,10 @@
 
 //...............................changes.........................
 const { DataTypes } = require("sequelize");
-const sequelize = require("../../config/db");
-const Lead = require("./leadsModel");
 
-const LeadDetails = sequelize.define("LeadDetails", {
+
+const createLeadDetailsModel = (sequelizeInstance) => {
+const LeadDetail = sequelizeInstance.define("LeadDetail", {
   leadDetailsId: {
     type: DataTypes.INTEGER,
     primaryKey: true,
@@ -123,7 +123,7 @@ const LeadDetails = sequelize.define("LeadDetails", {
     type: DataTypes.INTEGER,
     allowNull: false,
     references: {
-      model: "leads",
+      model: "Leads",
       key: "leadId",
     },
     onDelete: "CASCADE", // Delete LeadDetails if the associated Lead is deleted
@@ -204,8 +204,12 @@ const LeadDetails = sequelize.define("LeadDetails", {
     type: DataTypes.STRING,
     allowNull: true, // Address for the lead
   }
-
-
+},
+{
+  tableName: "LeadDetails",
+  timestamps: true,
 });
+return LeadDetail
+}
 
-module.exports = LeadDetails;
+module.exports = createLeadDetailsModel;

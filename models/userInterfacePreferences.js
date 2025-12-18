@@ -1,9 +1,9 @@
 const { DataTypes } = require("sequelize");
-const sequelize = require("../config/db");
 
-const UserInterfacePreference = sequelize.define(
-  "UserInterfacePreference",
-  {
+const createUserInterfacePreferencesModel = (sequelizeInstance) => {
+  const UserInterfacePreference = sequelizeInstance.define(
+    "UserInterfacePreference",
+    {
     preferenceId: {
       type: DataTypes.INTEGER,
       primaryKey: true,
@@ -68,5 +68,7 @@ const UserInterfacePreference = sequelize.define(
     ],
   }
 );
+return UserInterfacePreference;
+}
 
-module.exports = UserInterfacePreference;
+module.exports = createUserInterfacePreferencesModel;

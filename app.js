@@ -219,7 +219,7 @@ app.get("/track/click", async (req, res) => {
 // })();
 
 // Sync database
-sequelize
+defaultSequelize
   .sync({ alter: false, force: false }) // Don't alter existing tables for deployment safety
   .then(() => console.log("Database synced successfully"))
   .catch((err) => console.error("Error syncing database:", err));
@@ -277,6 +277,7 @@ sequelize
       console.log(`🔴 Redis: ${redisConnected ? 'Connected' : 'Unavailable'}`);
       console.log(`🔔 Socket.IO: ACTIVE (Real-time notifications)`);
       console.log(`🌐 Application URL: ${process.env.LOCALHOST_URL || `http://localhost:${PORT}`}`);
+      console.log(`🔌 Database Connection APIs available at /api/auth/connect-db`);
       console.log(`📧 Real-time email sync: ${imapIdleManager.isInitialized ? 'ACTIVE' : 'DISABLED'}`);
     });
   } catch (err) {

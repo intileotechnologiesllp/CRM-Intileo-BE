@@ -1,9 +1,8 @@
 const { DataTypes } = require("sequelize");
-const sequelize = require("../../config/db");
 
-const Organization = require("../../models/leads/leadOrganizationModel");
 
-const LeadPerson = sequelize.define("LeadPerson", {
+const createLeadPersonModel = (sequelizeInstance) => {
+const LeadPerson = sequelizeInstance.define("LeadPerson", {
   personId: {
     type: DataTypes.INTEGER,
     primaryKey: true,
@@ -12,7 +11,7 @@ const LeadPerson = sequelize.define("LeadPerson", {
     leadOrganizationId: {
     type: DataTypes.INTEGER,
     references: {
-      model: Organization,
+      model: "LeadOrganizations",
       key: "leadOrganizationId"
     },
     allowNull: true,
@@ -131,7 +130,13 @@ activitiesTodoCount:{
 //     comment: "Reference to the owner's visibility group",
 //   },
   // Add more fields as needed
-});
-// Person.belongsTo(Organization, { foreignKey: "organizationId" });
-// Organization.hasMany(Person, { foreignKey: "organizationId" });
-module.exports = LeadPerson;
+},
+{
+  tableName: "LeadPersons",
+  timestamps: true,
+}
+);
+return LeadPerson
+}
+
+module.exports = createLeadPersonModel;

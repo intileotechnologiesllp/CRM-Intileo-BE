@@ -1,7 +1,7 @@
 const { DataTypes } = require("sequelize");
-const sequelize = require("../../config/db");
 
-const PersonNote = sequelize.define(
+const createPersonNoteModel = (sequelizeInstance) => {
+const PersonNote = sequelizeInstance.define(
   "PersonNote",
   {
     noteId: {
@@ -12,13 +12,13 @@ const PersonNote = sequelize.define(
     personId: {
       type: DataTypes.INTEGER,
       allowNull: false,
-      references: { model: "leadpeople", key: "personId" },
+      references: { model: "LeadPersons", key: "personId" },
       onDelete: "CASCADE",
     },
     masterUserID: {
       type: DataTypes.INTEGER,
       allowNull: false,
-      references: { model: "masterusers", key: "masterUserID" },
+      references: { model: "MasterUsers", key: "masterUserID" },
     },
     content: {
       type: DataTypes.TEXT("long"),
@@ -27,7 +27,7 @@ const PersonNote = sequelize.define(
     createdBy: {
       type: DataTypes.INTEGER,
       allowNull: false,
-      references: { model: "masterusers", key: "masterUserID" },
+      references: { model: "MasterUsers", key: "masterUserID" },
     },
   },
   {
@@ -35,5 +35,7 @@ const PersonNote = sequelize.define(
     timestamps: true,
   }
 );
+return PersonNote
+}
 
-module.exports = PersonNote;
+module.exports = createPersonNoteModel;

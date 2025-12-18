@@ -1,7 +1,8 @@
 const { DataTypes } = require("sequelize");
-const sequelize = require("../../../config/db");
 
-const Department = sequelize.define("Department", {
+
+const createDepartmentModel = (sequelizeInstance) => {
+const Department = sequelizeInstance.define("Department", {
   departmentId: {
     type: DataTypes.INTEGER,
     primaryKey: true, // Set as primary key
@@ -36,6 +37,13 @@ const Department = sequelize.define("Department", {
     allowNull: false,
     defaultValue: DataTypes.NOW, // Set default value to the current timestamp
   },
-});
+},
+  {
+    tableName: "Departments",
+    timestamps: true,
+  }
+);
+return Department
+}
 
-module.exports = Department;
+module.exports = createDepartmentModel;

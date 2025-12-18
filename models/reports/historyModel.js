@@ -1,7 +1,7 @@
 const { DataTypes } = require("sequelize");
-const sequelize = require("../../config/db");
 
-const History = sequelize.define("History", {
+const createHistoryModel = (sequelizeInstance) => {
+const History = sequelizeInstance.define("History", {
   id: {
     type: DataTypes.INTEGER,
     primaryKey: true,
@@ -39,6 +39,13 @@ const History = sequelize.define("History", {
     type: DataTypes.DATE,
     defaultValue: DataTypes.NOW, // Timestamp of the change
   },
-});
+},
+{
+  tableName: "Histories",
+  timestamps: true,
+}
+);
+return History
+}
 
-module.exports = History;
+module.exports = createHistoryModel;

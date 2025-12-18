@@ -1,7 +1,8 @@
 const { DataTypes } = require("sequelize");
-const sequelize = require("../../config/db"); // adjust path as needed
 
-const LeadFilter = sequelize.define("LeadFilter", {
+
+const createLeadFilterModel = (sequelizeInstance) => {
+const LeadFilter = sequelizeInstance.define("LeadFilter", {
   filterId: {
     type: DataTypes.INTEGER,
     primaryKey: true,
@@ -39,6 +40,12 @@ const LeadFilter = sequelize.define("LeadFilter", {
     defaultValue: false,
     comment: 'Indicates if this filter is marked as favorite by the user'
   },
+},
+{
+  tableName: "LeadFilters",
+  timestamps: true,
 });
+return LeadFilter
+}
 
-module.exports = LeadFilter;
+module.exports = createLeadFilterModel;

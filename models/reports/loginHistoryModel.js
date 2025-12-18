@@ -1,7 +1,7 @@
 const { DataTypes } = require("sequelize");
-const sequelize = require("../../config/db");
 
-const LoginHistory = sequelize.define("LoginHistory", {
+const createLoginHistoryModel = (sequelizeInstance) => {
+const LoginHistory = sequelizeInstance.define("LoginHistory", {
   userId: {
     type: DataTypes.INTEGER,
     allowNull: false,
@@ -59,8 +59,15 @@ const LoginHistory = sequelize.define("LoginHistory", {
     type: DataTypes.BOOLEAN,
     defaultValue: true
   }
-});
+},
+{
+  tableName: "LoginHistories",
+  timestamps: true,
+}
+);
+return LoginHistory
+}
 
-LoginHistory.sync({ alter: true });
+// LoginHistory.sync({ alter: true });
 
-module.exports = LoginHistory;
+module.exports = createLoginHistoryModel;

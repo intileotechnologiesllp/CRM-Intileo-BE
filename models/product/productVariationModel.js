@@ -2,7 +2,8 @@ const { DataTypes } = require("sequelize");
 const sequelize = require("../../config/db");
 const Product = require("./productModel");
 
-const ProductVariation = sequelize.define(
+const createProductVariationModel = (sequelizeInstance) => {
+const ProductVariation = sequelizeInstance.define(
   "ProductVariation",
   {
     variationId: {
@@ -14,7 +15,7 @@ const ProductVariation = sequelize.define(
       type: DataTypes.INTEGER,
       allowNull: false,
       references: {
-        model: Product,
+        model: "Products",
         key: "productId",
       },
       comment: "Parent product ID",
@@ -76,7 +77,7 @@ const ProductVariation = sequelize.define(
     },
   },
   {
-    tableName: "product_variations",
+    tableName: "ProductVariations",
     timestamps: true,
     indexes: [
       { fields: ["productId"] },
@@ -85,16 +86,18 @@ const ProductVariation = sequelize.define(
     ],
   }
 );
+return ProductVariation
+}
 
 // Associations
-ProductVariation.belongsTo(Product, {
-  foreignKey: "productId",
-  as: "product",
-});
+// ProductVariation.belongsTo(Product, {
+//   foreignKey: "productId",
+//   as: "product",
+// });
 
-Product.hasMany(ProductVariation, {
-  foreignKey: "productId",
-  as: "variations",
-});
+// Product.hasMany(ProductVariation, {
+//   foreignKey: "productId",
+//   as: "variations",
+// });
 
-module.exports = ProductVariation;
+module.exports = createProductVariationModel;

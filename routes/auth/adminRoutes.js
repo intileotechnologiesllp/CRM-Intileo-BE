@@ -6,7 +6,7 @@ const {
   validateCreateAdmin,
 } = require("../../middlewares/adminValidation");
 const { handleValidationErrors } = require("../../middlewares/errorMiddleware");
-
+const dbContextMiddleware = require("../../middlewares/dbContext");
 const router = express.Router();
 
 // Admin routes
@@ -16,6 +16,46 @@ router.post(
   handleValidationErrors,
   adminController.signIn
 );
+
+router.get(
+  "/profile",
+  verifyToken,
+  dbContextMiddleware,
+  async (req, res) => {
+    try {
+      // Use models from middleware
+      const { MasterUser } = req.models;
+      
+      // Find user using Sequelize model
+      const user = await MasterUser.findByPk(req.user.id);
+      
+      if (!user) {
+        return res.status(404).json({
+          success: false,
+          message: "User not found"
+        });
+      }
+      
+      res.status(200).json({
+        success: true,
+        user: {
+          id: user.masterUserID,
+          email: user.email,
+          name: user.name,
+          loginType: user.loginType
+        }
+      });
+    } catch (error) {
+      console.error("Error fetching profile:", error);
+      res.status(500).json({
+        success: false,
+        message: "Internal server error"
+      });
+    }
+  }
+);
+
+
 router.post(
   "/create",
   validateCreateAdmin,

@@ -1,9 +1,8 @@
 const { DataTypes } = require("sequelize");
-const sequelize = require("../../config/db");
-const Person = require("../leads/leadPersonModel");
-const MasterUser = require("../master/masterUserModel");
 
-const PersonFile = sequelize.define("PersonFile", {
+
+const createPersonFileModel = (sequelizeInstance) => {
+const PersonFile = sequelizeInstance.define("PersonFile", {
   fileId: {
     type: DataTypes.INTEGER,
     primaryKey: true,
@@ -13,7 +12,7 @@ const PersonFile = sequelize.define("PersonFile", {
     type: DataTypes.INTEGER,
     allowNull: false,
     references: {
-      model: Person,
+      model: "LeadPersons",
       key: "personId",
     },
     onDelete: "CASCADE",
@@ -73,7 +72,7 @@ const PersonFile = sequelize.define("PersonFile", {
     type: DataTypes.INTEGER,
     allowNull: false,
     references: {
-      model: MasterUser,
+      model: "MasterUsers",
       key: "masterUserID",
     },
     comment: "User who uploaded the file",
@@ -141,9 +140,11 @@ const PersonFile = sequelize.define("PersonFile", {
     }
   ]
 });
+return PersonFile
+}
 
 // Define associations
-PersonFile.belongsTo(Person, { foreignKey: 'personId', as: 'person' });
-PersonFile.belongsTo(MasterUser, { foreignKey: 'uploadedBy', as: 'uploader' });
+// PersonFile.belongsTo(Person, { foreignKey: 'personId', as: 'person' });
+// PersonFile.belongsTo(MasterUser, { foreignKey: 'uploadedBy', as: 'uploader' });
 
-module.exports = PersonFile;
+module.exports = createPersonFileModel;

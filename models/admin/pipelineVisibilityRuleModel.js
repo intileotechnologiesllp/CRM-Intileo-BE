@@ -1,7 +1,8 @@
 const { DataTypes } = require("sequelize");
-const sequelize = require("../../config/db");
 
-const PipelineVisibilityRule = sequelize.define(
+
+const createPipelineVisibilityRuleModel = (sequelizeInstance) => {
+const PipelineVisibilityRule = sequelizeInstance.define(
   "PipelineVisibilityRule",
   {
     ruleId: {
@@ -13,7 +14,7 @@ const PipelineVisibilityRule = sequelize.define(
       type: DataTypes.INTEGER,
       allowNull: false,
       references: {
-        model: "visibility_groups",
+        model: "GroupVisibilities",
         key: "groupId",
       },
     },
@@ -21,7 +22,7 @@ const PipelineVisibilityRule = sequelize.define(
       type: DataTypes.INTEGER,
       allowNull: false,
       references: {
-        model: "pipelines",
+        model: "Pipelines",
         key: "pipelineId",
       },
     },
@@ -29,7 +30,7 @@ const PipelineVisibilityRule = sequelize.define(
       type: DataTypes.INTEGER,
       allowNull: false,
       references: {
-        model: "masterusers",
+        model: "MasterUsers",
         key: "masterUserID",
       },
     },
@@ -63,7 +64,7 @@ const PipelineVisibilityRule = sequelize.define(
     },
   },
   {
-    tableName: "pipeline_visibility_rules",
+    tableName: "PipelineVisibilityRules",
     timestamps: true,
     indexes: [
       {
@@ -84,4 +85,7 @@ const PipelineVisibilityRule = sequelize.define(
   }
 );
 
-module.exports = PipelineVisibilityRule;
+return PipelineVisibilityRule
+}
+
+module.exports = createPipelineVisibilityRuleModel;

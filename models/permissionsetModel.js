@@ -1,9 +1,9 @@
 const { DataTypes } = require("sequelize");
-const sequelize = require("../config/db");
 
-const permissionSet = sequelize.define("permissionSet", {
-  permissionSetId: {
-    type: DataTypes.INTEGER,
+const createPermissionSetModel = (sequelizeInstance) => {
+  const permissionSet = sequelizeInstance.define("permissionSet", {
+    permissionSetId: {
+      type: DataTypes.INTEGER,
     primaryKey: true,
     autoIncrement: true,
   },
@@ -20,8 +20,12 @@ const permissionSet = sequelize.define("permissionSet", {
   description: {
     type: DataTypes.STRING,
   }
+},
+{
+  tableName: "permissionSets",
+  timestamps: true,
 });
+return permissionSet;
+}
 
-permissionSet.sync();
-
-module.exports = permissionSet;
+module.exports = createPermissionSetModel;

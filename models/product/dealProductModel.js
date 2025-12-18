@@ -1,10 +1,8 @@
 const { DataTypes } = require("sequelize");
-const sequelize = require("../../config/db");
-const Deal = require("../deals/dealsModels");
-const Product = require("./productModel");
-const ProductVariation = require("./productVariationModel");
 
-const DealProduct = sequelize.define(
+
+const createDealProductModel = (sequelizeInstance) => {
+const DealProduct = sequelizeInstance.define(
   "DealProduct",
   {
     dealProductId: {
@@ -16,7 +14,7 @@ const DealProduct = sequelize.define(
       type: DataTypes.INTEGER,
       allowNull: false,
       references: {
-        model: Deal,
+        model: "Deals",
         key: "dealId",
       },
       comment: "Associated deal ID",
@@ -25,7 +23,7 @@ const DealProduct = sequelize.define(
       type: DataTypes.INTEGER,
       allowNull: false,
       references: {
-        model: Product,
+        model: "Products",
         key: "productId",
       },
       comment: "Product ID",
@@ -34,7 +32,7 @@ const DealProduct = sequelize.define(
       type: DataTypes.INTEGER,
       allowNull: true,
       references: {
-        model: ProductVariation,
+        model: "ProductVariations",
         key: "variationId",
       },
       comment: "Product variation ID (if applicable)",
@@ -153,7 +151,7 @@ const DealProduct = sequelize.define(
     },
   },
   {
-    tableName: "deal_products",
+    tableName: "DealProducts",
     timestamps: true,
     indexes: [
       { fields: ["dealId"] },
@@ -162,31 +160,33 @@ const DealProduct = sequelize.define(
     ],
   }
 );
+return DealProduct
+}
 
 // Associations
-DealProduct.belongsTo(Deal, {
-  foreignKey: "dealId",
-  as: "deal",
-});
+// DealProduct.belongsTo(Deal, {
+//   foreignKey: "dealId",
+//   as: "deal",
+// });
 
-DealProduct.belongsTo(Product, {
-  foreignKey: "productId",
-  as: "product",
-});
+// DealProduct.belongsTo(Product, {
+//   foreignKey: "productId",
+//   as: "product",
+// });
 
-DealProduct.belongsTo(ProductVariation, {
-  foreignKey: "variationId",
-  as: "variation",
-});
+// DealProduct.belongsTo(ProductVariation, {
+//   foreignKey: "variationId",
+//   as: "variation",
+// });
 
-Deal.hasMany(DealProduct, {
-  foreignKey: "dealId",
-  as: "dealProducts",
-});
+// Deal.hasMany(DealProduct, {
+//   foreignKey: "dealId",
+//   as: "dealProducts",
+// });
 
-Product.hasMany(DealProduct, {
-  foreignKey: "productId",
-  as: "dealProducts",
-});
+// Product.hasMany(DealProduct, {
+//   foreignKey: "productId",
+//   as: "dealProducts",
+// });
 
-module.exports = DealProduct;
+module.exports = createDealProductModel;

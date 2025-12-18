@@ -1,8 +1,8 @@
 const { DataTypes } = require("sequelize");
-const sequelize = require("../../../config/db");
-const Country = require("./countryModel");
 
-const Region = sequelize.define("Region", {
+
+const createRegionModel = (sequelizeInstance) => {
+const Region = sequelizeInstance.define("Region", {
   regionID: {
     type: DataTypes.INTEGER,
     primaryKey: true,
@@ -24,7 +24,7 @@ const Region = sequelize.define("Region", {
     type: DataTypes.INTEGER,
     allowNull: false,
     references: {
-      model: Country,
+      model: "Countries",
       key: "countryID",
     },
   },
@@ -46,9 +46,16 @@ const Region = sequelize.define("Region", {
     allowNull: false,
     defaultValue: DataTypes.NOW, // Set default value to the current timestamp
   },
-});
+},
+  {
+    tableName: "Regions",
+    timestamps: true,
+  }
+);
+return Region
+}
 
-Region.belongsTo(Country, { foreignKey: "countryId", as: "country" });
-Country.hasMany(Region, { foreignKey: "countryId", as: "regions" });
+// Region.belongsTo(Country, { foreignKey: "countryId", as: "country" });
+// Country.hasMany(Region, { foreignKey: "countryId", as: "regions" });
 
-module.exports = Region;
+module.exports = createRegionModel;

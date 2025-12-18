@@ -1,7 +1,7 @@
 const { DataTypes } = require("sequelize");
-const sequelize = require("../../../config/db");
 
-const Label = sequelize.define("Label", {
+const createLabelModel = (sequelizeInstance) => {
+const Label = sequelizeInstance.define("Label", {
   labelId: {
     type: DataTypes.INTEGER,
     primaryKey: true, // Set as primary key
@@ -80,6 +80,13 @@ const Label = sequelize.define("Label", {
     type: DataTypes.DATE,
     allowNull: true,
   },
-});
+},
+  {
+    tableName: "Labels",
+    timestamps: true,
+  }
+);
+return Label
+}
 
-module.exports = Label;
+module.exports = createLabelModel;

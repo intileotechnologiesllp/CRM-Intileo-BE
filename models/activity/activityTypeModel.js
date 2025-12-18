@@ -1,13 +1,15 @@
 // models/activitySettingModel.js
 const { DataTypes } = require('sequelize');
-const sequelize = require('../../config/db');
-const ActivityType = sequelize.define('ActivityType', {
+
+
+const createActivityTypeModel = (sequelizeInstance) => {
+const ActivityType = sequelizeInstance.define('ActivityType', {
   activityTypeId: {
     type: DataTypes.INTEGER,
     primaryKey: true,
     autoIncrement: true,
   },
-name:{
+  name:{
     type: DataTypes.STRING,
     allowNull: false,
   },
@@ -19,9 +21,13 @@ name:{
     type: DataTypes.BOOLEAN,
     defaultValue: true,
   }
-}, {
-  tableName: 'activity_types',
+}, 
+{
+  tableName: 'ActivityTypes',
   timestamps: true,
 });
+return ActivityType
+}
 
-module.exports = ActivityType;
+
+module.exports = createActivityTypeModel;

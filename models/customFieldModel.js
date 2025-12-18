@@ -1,9 +1,9 @@
 const { DataTypes } = require("sequelize");
-const sequelize = require("../config/db");
 
-const CustomField = sequelize.define(
-  "CustomField",
-  {
+const createCustomFieldModel = (sequelizeInstance) => {
+  const CustomField = sequelizeInstance.define(
+    "CustomField",
+    {
     fieldId: {
       type: DataTypes.INTEGER,
       primaryKey: true,
@@ -238,5 +238,7 @@ const CustomField = sequelize.define(
     ],
   }
 );
+  return CustomField;
+}
 
-module.exports = CustomField;
+module.exports = createCustomFieldModel;

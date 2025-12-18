@@ -1,8 +1,8 @@
 const { DataTypes } = require("sequelize");
-const sequelize = require("../../../config/db");
-const MasterUserPrivileges = require("../../privileges/masterUserPrivilegesModel"); // Import the MasterUserPrivileges model
 
-const Program = sequelize.define("Program", {
+
+const createProgramModel = (sequelizeInstance) => {
+const Program = sequelizeInstance.define("Program", {
   programId: {
     type: DataTypes.INTEGER,
     primaryKey: true, // Set as primary key
@@ -42,10 +42,14 @@ const Program = sequelize.define("Program", {
     allowNull: false,
     defaultValue: DataTypes.NOW, // Set default value to the current timestamp
   },
-});
+},
+  {
+    tableName: "Programs",
+    timestamps: true,
+  }
+);
+return Program
+}
 
 
-
-
-
-module.exports = Program;
+module.exports = createProgramModel;

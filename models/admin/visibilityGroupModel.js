@@ -1,7 +1,8 @@
 const { DataTypes } = require("sequelize");
-const sequelize = require("../../config/db");
 
-const VisibilityGroup = sequelize.define(
+
+const createVisibilityGroupModel = (sequelizeInstance) => {
+const VisibilityGroup = sequelizeInstance.define(
   "VisibilityGroup",
   {
     groupId: {
@@ -21,7 +22,7 @@ const VisibilityGroup = sequelize.define(
       type: DataTypes.INTEGER,
       allowNull: true,
       references: {
-        model: "visibility_groups",
+        model: "GroupVisibilities",
         key: "groupId",
       },
     },
@@ -29,7 +30,7 @@ const VisibilityGroup = sequelize.define(
       type: DataTypes.INTEGER,
       allowNull: false,
       references: {
-        model: "masterusers",
+        model: "MasterUsers",
         key: "masterUserID",
       },
     },
@@ -56,7 +57,7 @@ const VisibilityGroup = sequelize.define(
     },
   },
   {
-    tableName: "visibility_groups",
+    tableName: "VisibilityGroups",
     timestamps: true,
     indexes: [
       {
@@ -79,16 +80,18 @@ const VisibilityGroup = sequelize.define(
     ],
   }
 );
+return VisibilityGroup
+}
 
 // Self-referencing association for parent-child relationships
-VisibilityGroup.hasMany(VisibilityGroup, {
-  as: "childGroups",
-  foreignKey: "parentGroupId",
-});
+// VisibilityGroup.hasMany(VisibilityGroup, {
+//   as: "childGroups",
+//   foreignKey: "parentGroupId",
+// });
 
-VisibilityGroup.belongsTo(VisibilityGroup, {
-  as: "parentGroup",
-  foreignKey: "parentGroupId",
-});
+// VisibilityGroup.belongsTo(VisibilityGroup, {
+//   as: "parentGroup",
+//   foreignKey: "parentGroupId",
+// });
 
-module.exports = VisibilityGroup;
+module.exports = createVisibilityGroupModel;

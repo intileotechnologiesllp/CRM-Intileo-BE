@@ -1,8 +1,9 @@
 // models/activitySettingModel.js
 const { DataTypes } = require('sequelize');
-const sequelize = require('../../config/db');
 
-const ActivitySetting = sequelize.define('ActivitySetting', {
+
+const createActivitySettingModel = (sequelizeInstance) => {
+const ActivitySetting = sequelizeInstance.define('ActivitySetting', {
   activitySettingId: {
     type: DataTypes.INTEGER,
     primaryKey: true,
@@ -71,8 +72,10 @@ const ActivitySetting = sequelize.define('ActivitySetting', {
     comment: 'Allow users to disable deal won popup',
   }
 }, {
-  tableName: 'activity_settings',
+  tableName: 'ActivitySettings',
   timestamps: true,
 });
+return ActivitySetting
+}
 
-module.exports = ActivitySetting;
+module.exports = createActivitySettingModel;

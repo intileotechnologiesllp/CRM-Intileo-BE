@@ -1,7 +1,7 @@
 const { DataTypes } = require("sequelize");
-const sequelize = require("../../config/db");
 
-const AuditTrail = sequelize.define("AuditTrail", {
+const createAuditTrailModel = (sequelizeInstance) => {
+const AuditTrail = sequelizeInstance.define("AuditTrail", {
   id: {
     type: DataTypes.INTEGER,
     primaryKey: true,
@@ -31,6 +31,13 @@ const AuditTrail = sequelize.define("AuditTrail", {
     type: DataTypes.DATE,
     defaultValue: DataTypes.NOW, // Timestamp of the action
   },
-});
+},
+{
+  tableName: "AuditTrails",
+  timestamps: true,
+}
+);
+return AuditTrail
+}
 
-module.exports = AuditTrail;
+module.exports = createAuditTrailModel;

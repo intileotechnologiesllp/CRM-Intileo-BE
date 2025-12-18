@@ -3,7 +3,9 @@ const sequelize = require("../../config/db");
 const { workloadmanager } = require("googleapis/build/src/apis/workloadmanager");
 const { people } = require("googleapis/build/src/apis/people");
 
-const LeadOrganization = sequelize.define("LeadOrganization", {
+
+const createLeadOrganizationModel = (sequelizeInstance) => {
+const LeadOrganization = sequelizeInstance.define("LeadOrganization", {
   leadOrganizationId: {
     type: DataTypes.INTEGER,
     primaryKey: true, 
@@ -28,7 +30,7 @@ const LeadOrganization = sequelize.define("LeadOrganization", {
   masterUserID: {
   type: DataTypes.INTEGER,
   allowNull: false, // or true if you want to allow nulls
-  references: { model: "masterusers", key: "masterUserID" }
+  references: { model: "MasterUsers", key: "masterUserID" }
 },
 ownerId:{
   type: DataTypes.INTEGER,
@@ -96,7 +98,11 @@ activitiesTodoCount:{
 //   },
   // Add more fields as needed
 }, {
-  //tableName: "leadorganizations" // <-- Set your desired table name here
-});
+    tableName: "LeadOrganizations",
+    timestamps: true,
+  }
+);
+return LeadOrganization;
+}
 
-module.exports = LeadOrganization;
+module.exports = createLeadOrganizationModel;

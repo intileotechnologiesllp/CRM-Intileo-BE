@@ -1,7 +1,8 @@
 const { DataTypes } = require("sequelize");
-const sequelize = require("../../config/db");
 
-const GroupMembership = sequelize.define(
+
+const createGroupMembershipModel = (sequelizeInstance) => {
+const GroupMembership = sequelizeInstance.define(
   "GroupMembership",
   {
     membershipId: {
@@ -13,7 +14,7 @@ const GroupMembership = sequelize.define(
       type: DataTypes.INTEGER,
       allowNull: false,
       references: {
-        model: "visibility_groups",
+        model: "GroupVisibilities",
         key: "groupId",
       },
     },
@@ -21,7 +22,7 @@ const GroupMembership = sequelize.define(
       type: DataTypes.INTEGER,
       allowNull: false,
       references: {
-        model: "masterusers",
+        model: "MasterUsers",
         key: "masterUserID",
       },
     },
@@ -29,7 +30,7 @@ const GroupMembership = sequelize.define(
       type: DataTypes.INTEGER,
       allowNull: false,
       references: {
-        model: "masterusers",
+        model: "MasterUsers",
         key: "masterUserID",
       },
     },
@@ -37,7 +38,7 @@ const GroupMembership = sequelize.define(
       type: DataTypes.INTEGER,
       allowNull: false,
       references: {
-        model: "masterusers",
+        model: "MasterUsers",
         key: "masterUserID",
       },
     },
@@ -51,7 +52,7 @@ const GroupMembership = sequelize.define(
     },
   },
   {
-    tableName: "group_memberships",
+    tableName: "GroupMemberships",
     timestamps: true,
     indexes: [
       {
@@ -71,5 +72,7 @@ const GroupMembership = sequelize.define(
     ],
   }
 );
+return GroupMembership
+}
 
-module.exports = GroupMembership;
+module.exports = createGroupMembershipModel;

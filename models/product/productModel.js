@@ -2,7 +2,8 @@ const { DataTypes } = require("sequelize");
 const sequelize = require("../../config/db");
 const MasterUser = require("../master/masterUserModel");
 
-const Product = sequelize.define(
+const createProductModel = (sequelizeInstance) => {
+const Product = sequelizeInstance.define(
   "Product",
   {
     productId: {
@@ -119,8 +120,8 @@ const Product = sequelize.define(
       type: DataTypes.INTEGER,
       allowNull: false,
       references: {
-        model: MasterUser,
-        key: "masterUserId",
+        model: "MasterUsers",
+        key: "masterUserID",
       },
       comment: "Product owner (created by)",
     },
@@ -152,7 +153,7 @@ const Product = sequelize.define(
     },
   },
   {
-    tableName: "products",
+    tableName: "Products",
     timestamps: true,
     indexes: [
       { fields: ["code"] },
@@ -163,11 +164,13 @@ const Product = sequelize.define(
     ],
   }
 );
+return Product
+}
 
 // Associations
-Product.belongsTo(MasterUser, {
-  foreignKey: "ownerId",
-  as: "owner",
-});
+// Product.belongsTo(MasterUser, {
+//   foreignKey: "ownerId",
+//   as: "owner",
+// });
 
-module.exports = Product;
+module.exports = createProductModel;

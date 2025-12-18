@@ -4,7 +4,8 @@ const Person = require("../leads/leadPersonModel");
 const Organization = require("../leads/leadOrganizationModel");
 const MasterUser = require("../master/masterUserModel");
 
-const EntityFile = sequelize.define("EntityFile", {
+const createEntityFileModel = (sequelizeInstance) => {
+  const EntityFile = sequelizeInstance.define("EntityFile", {
   fileId: {
     type: DataTypes.INTEGER,
     primaryKey: true,
@@ -76,7 +77,7 @@ const EntityFile = sequelize.define("EntityFile", {
     type: DataTypes.INTEGER,
     allowNull: false,
     references: {
-      model: MasterUser,
+      model: "MasterUsers",
       key: "masterUserID",
     },
     comment: "User who uploaded the file",
@@ -150,6 +151,8 @@ const EntityFile = sequelize.define("EntityFile", {
     }
   ]
 });
+return EntityFile
+}
 
 // Define associations
 EntityFile.belongsTo(MasterUser, { foreignKey: 'uploadedBy', as: 'uploader' });
@@ -186,4 +189,4 @@ EntityFile.createForEntity = function(entityId, entityType, fileData) {
   });
 };
 
-module.exports = EntityFile;
+module.exports = createEntityFileModel;

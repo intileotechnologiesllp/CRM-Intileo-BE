@@ -1,7 +1,8 @@
 const { DataTypes } = require("sequelize");
-const sequelize = require("../../../config/db");
 
-const Scope = sequelize.define("Scope", {
+
+const createScopeModel = (sequelizeInstance) => {
+const Scope = sequelizeInstance.define("Scope", {
   scopeId: {
     type: DataTypes.INTEGER,
     primaryKey: true, // Set as primary key
@@ -36,6 +37,13 @@ const Scope = sequelize.define("Scope", {
     allowNull: false,
     defaultValue: DataTypes.NOW, // Set default value to the current timestamp
   },
-});
+},
+  {
+    tableName: "Scopes",
+    timestamps: true,
+  }
+);
+return Scope
+}
 
-module.exports = Scope;
+module.exports = createScopeModel;

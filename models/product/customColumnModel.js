@@ -1,8 +1,8 @@
 const { DataTypes } = require("sequelize");
-const sequelize = require("../../config/db");
-const MasterUser = require("../../models/master/masterUserModel"); // adjust path as needed
 
-const ProductColumn = sequelize.define(
+
+const createProductColumnModel = (sequelizeInstance) => {
+const ProductColumn = sequelizeInstance.define(
   "ProductColumn",
   {
     id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
@@ -17,6 +17,7 @@ const ProductColumn = sequelize.define(
     timestamps: true,
   }
 );
-ProductColumn.sync();
+return ProductColumn
+}
 
-module.exports = ProductColumn;
+module.exports = createProductColumnModel;

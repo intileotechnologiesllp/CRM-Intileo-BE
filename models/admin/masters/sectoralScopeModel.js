@@ -1,7 +1,8 @@
 const { DataTypes } = require("sequelize");
-const sequelize = require("../../../config/db");
 
-const Sectoralscope = sequelize.define("Sectoralscope", {
+
+const createSectoralscopeModel = (sequelizeInstance) => {
+const Sectoralscope = sequelizeInstance.define("Sectoralscope", {
   sectoralscopeId: {
     type: DataTypes.INTEGER,
     primaryKey: true, // Set as primary key
@@ -36,6 +37,13 @@ const Sectoralscope = sequelize.define("Sectoralscope", {
     allowNull: false,
     defaultValue: DataTypes.NOW, // Set default value to the current timestamp
   },
-});
+},
+  {
+    tableName: "Sectoralscopes",
+    timestamps: true,
+  }
+);
+return Sectoralscope
+}
 
-module.exports = Sectoralscope;
+module.exports = createSectoralscopeModel;

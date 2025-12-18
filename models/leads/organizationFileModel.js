@@ -1,9 +1,7 @@
 const { DataTypes } = require("sequelize");
-const sequelize = require("../../config/db");
-const Organization = require("../leads/leadOrganizationModel");
-const MasterUser = require("../master/masterUserModel");
 
-const OrganizationFile = sequelize.define("OrganizationFile", {
+const createOrganizationFileModel = (sequelizeInstance) => {
+const OrganizationFile = sequelizeInstance.define("OrganizationFile", {
   fileId: {
     type: DataTypes.INTEGER,
     primaryKey: true,
@@ -13,7 +11,7 @@ const OrganizationFile = sequelize.define("OrganizationFile", {
     type: DataTypes.INTEGER,
     allowNull: false,
     references: {
-      model: Organization,
+      model: "LeadOrganizations",
       key: "leadOrganizationId",
     },
     onDelete: "CASCADE",
@@ -73,7 +71,7 @@ const OrganizationFile = sequelize.define("OrganizationFile", {
     type: DataTypes.INTEGER,
     allowNull: false,
     references: {
-      model: MasterUser,
+      model: "MasterUsers",
       key: "masterUserID",
     },
     comment: "User who uploaded the file",
@@ -141,9 +139,11 @@ const OrganizationFile = sequelize.define("OrganizationFile", {
     }
   ]
 });
+return OrganizationFile;
+}
 
 // Define associations
-OrganizationFile.belongsTo(Organization, { foreignKey: 'leadOrganizationId', as: 'organization' });
-OrganizationFile.belongsTo(MasterUser, { foreignKey: 'uploadedBy', as: 'uploader' });
+// OrganizationFile.belongsTo(Organization, { foreignKey: 'leadOrganizationId', as: 'organization' });
+// OrganizationFile.belongsTo(MasterUser, { foreignKey: 'uploadedBy', as: 'uploader' });
 
-module.exports = OrganizationFile;
+module.exports = createOrganizationFileModel;

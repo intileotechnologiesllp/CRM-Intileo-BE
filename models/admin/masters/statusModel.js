@@ -1,7 +1,8 @@
 const { DataTypes } = require("sequelize");
 const sequelize = require("../../../config/db");
 
-const Status = sequelize.define("Status", {
+const createStatusModel = (sequelizeInstance) => {
+const Status = sequelizeInstance.define("Status", {
   statusId: {
     type: DataTypes.INTEGER,
     primaryKey: true, // Set as primary key
@@ -36,6 +37,13 @@ const Status = sequelize.define("Status", {
     allowNull: false,
     defaultValue: DataTypes.NOW, // Set default value to the current timestamp
   },
-});
+},
+  {
+    tableName: "Statuses",
+    timestamps: true,
+  }
+);
+return Status
+}
 
-module.exports = Status;
+module.exports = createStatusModel;

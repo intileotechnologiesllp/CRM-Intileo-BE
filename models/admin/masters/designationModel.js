@@ -1,7 +1,7 @@
 const { DataTypes } = require("sequelize");
-const sequelize = require("../../../config/db");
 
-const Designation = sequelize.define("Designation", {
+const createDesignationModel = (sequelizeInstance) => {
+const Designation = sequelizeInstance.define("Designation", {
   designationId: {
     type: DataTypes.INTEGER,
     primaryKey: true, // Set as primary key
@@ -36,7 +36,13 @@ const Designation = sequelize.define("Designation", {
     allowNull: false,
     defaultValue: DataTypes.NOW, // Set default value to the current timestamp
   },
-  
-});
+},
+  {
+    tableName: "Designations",
+    timestamps: true,
+  }
+);
+return Designation
+}
 
-module.exports = Designation;
+module.exports = createDesignationModel;

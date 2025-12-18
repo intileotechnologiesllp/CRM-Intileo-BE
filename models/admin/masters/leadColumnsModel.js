@@ -1,7 +1,8 @@
 const { DataTypes } = require("sequelize");
-const sequelize = require("../../../config/db");
 
-const LeadColumn = sequelize.define("LeadColumn", {
+
+const createLeadColumnModel = (sequelizeInstance) => {
+const LeadColumn = sequelizeInstance.define("LeadColumn", {
   leadColumnId: {
     type: DataTypes.INTEGER,
     primaryKey: true, // Set as primary key
@@ -37,6 +38,13 @@ const LeadColumn = sequelize.define("LeadColumn", {
     defaultValue: DataTypes.NOW, // Set default value to the current timestamp
   },
   
-});
+},
+{
+    tableName: "LeadColumns",
+    timestamps: true,
+  }
+);
+return LeadColumn
+}
 
-module.exports = LeadColumn;
+module.exports = createLeadColumnModel;

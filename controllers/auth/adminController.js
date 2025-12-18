@@ -13,155 +13,18 @@ const PROGRAMS = require("../../utils/programConstants");
 const MiscSettings = require("../../models/miscSettings/miscSettingModel.js");
 const GroupVisibility = require("../../models/admin/groupVisibilityModel.js");
 const { google } = require("googleapis")
-
-// exports.signIn = async (req, res) => {
-//   const { email, password, longitude, latitude, ipAddress } = req.body;
-
-//   try {
-//     // Check if the user exists
-//     const user = await MasterUser.findOne({ where: { email } });
-
-//     if (!user) {
-//       await logAuditTrail(
-//         PROGRAMS.AUTHENTICATION,
-//         "SIGN_IN",
-//         "Invalid email",
-//         null
-//       );
-//       return res.status(404).json({ message: "User not found" });
-//     }
-
-//     // Verify the password
-//     const isPasswordValid = await bcrypt.compare(password, user.password);
-//     if (!isPasswordValid) {
-//       await logAuditTrail(
-//         PROGRAMS.AUTHENTICATION,
-//         "SIGN_IN",
-//         user.loginType,
-//         "Invalid password",
-//         user.masterUserID
-//       );
-//       return res.status(401).json({ message: "Invalid password" });
-//     }
-
-//     // Generate JWT token
-//     const token = jwt.sign(
-//       {
-//         id: user.masterUserID,
-//         email: user.email,
-//         loginType: user.loginType,
-//       },
-//       process.env.JWT_SECRET,
-//       { expiresIn: "30d" }
-//     );
-
-//     // Get the current UTC time
-//     const loginTimeUTC = new Date();
-
-//     // Convert login time to IST
-//     const loginTimeIST = moment(loginTimeUTC)
-//       .tz("Asia/Kolkata")
-//       .format("YYYY-MM-DD HH:mm:ss");
-
-//     // Fetch the latest login history for the user
-//     const latestLoginHistory = await LoginHistory.findOne({
-//       where: { userId: user.masterUserID },
-//       order: [["loginTime", "DESC"]],
-//     });
-
-//     // Fetch the previous totalSessionDuration
-//     let previousTotalDurationInSeconds = 0;
-//     if (latestLoginHistory && latestLoginHistory.totalSessionDuration) {
-//       const [hours, minutes] = latestLoginHistory.totalSessionDuration
-//         .replace(" hours", "")
-//         .replace(" minutes", "")
-//         .split(" ")
-//         .map(Number);
-
-//       previousTotalDurationInSeconds =
-//         (hours || 0) * 3600 + (minutes || 0) * 60;
-//     }
-
-//     // Add the current session's duration (default to 0 for a new session)
-//     const currentSessionDurationInSeconds = 0; // No logout yet for the new session
-//     const totalSessionDurationInSeconds =
-//       previousTotalDurationInSeconds + currentSessionDurationInSeconds;
-
-//     // Convert total session duration to hours and minutes
-//     const totalHours = Math.floor(totalSessionDurationInSeconds / 3600);
-//     const totalMinutes = Math.floor(
-//       (totalSessionDurationInSeconds % 3600) / 60
-//     );
-//     const totalSessionDuration = `${totalHours} hours ${totalMinutes} minutes`;
-
-//     // Save the new login history
-//     await LoginHistory.create({
-//       userId: user.masterUserID,
-//       loginType: user.loginType,
-//       ipAddress: ipAddress || null,
-//       longitude: longitude || null,
-//       latitude: latitude || null,
-//       loginTime: loginTimeIST,
-//       username: user.name,
-//       totalSessionDuration, // Save updated totalSessionDuration
-//     });
-
-//     // Delete any existing records for the user in RecentLoginHistory
-//     await RecentLoginHistory.destroy({
-//       where: { userId: user.masterUserID },
-//     });
-
-//     // Add the most recent login data to RecentLoginHistory
-//     await RecentLoginHistory.create({
-//       userId: user.masterUserID,
-//       loginType: user.loginType,
-//       ipAddress: ipAddress || null,
-//       longitude: longitude || null,
-//       latitude: latitude || null,
-//       loginTime: loginTimeIST,
-//       username: user.name,
-//       totalSessionDuration, // Save updated totalSessionDuration
-//     });
-
-//     // Return the response with totalSessionDuration
-//     res.status(200).json({
-//       message: `${
-//         user.loginType === "admin" ? "Admin" : "General User"
-//       } sign-in successful`,
-//       token,
-//       totalSessionDuration,
-//     });
-//   } catch (error) {
-//     console.error("Error during sign-in:", error);
-
-//     await logAuditTrail(
-//       PROGRAMS.AUTHENTICATION,
-//       "SIGN_IN",
-//       "unknown",
-//       error.message || "Internal server error"
-//     );
-
-//     res.status(500).json({ message: "Internal server error" });
-//   }
-// };
+const DatabaseConnectionManager = require("../../config/dbConnectionManager.js");
 
 exports.signIn = async (req, res) => {
+
   const { email, password,systemInfo,device ,longitude, latitude, ipAddress } = req.body;
 
   const locationInfo = systemInfo?.approximateLocation
   try {
-    // Check if the user exists
-    const user = await MasterUser.findOne({ where: { email } });
 
-    if (!user) {
-      await logAuditTrail(
-        PROGRAMS.AUTHENTICATION,
-        "SIGN_IN",
-        "Invalid email",
-        null
-      );
-      return res.status(404).json({ message: "User not found" });
-    }
+  const result = await DatabaseConnectionManager.verifyUserInDatabase(email, password);
+    
+  const { user, creator, clientConfig } = result;
 
     // Verify the password
     const isPasswordValid = await bcrypt.compare(password, user.password);
@@ -237,6 +100,11 @@ exports.signIn = async (req, res) => {
         email: user.email,
         loginType: user.loginType,
         sessionId: newSession.id, // Include session ID for tracking
+        clientId: clientConfig.id,
+        dbName: clientConfig.db_name,
+        clientName: clientConfig.name,
+        organizationName: clientConfig.organizationName,
+        api_key : clientConfig.api_key
       },
       process.env.JWT_SECRET,
       { expiresIn: "30d" }
@@ -325,7 +193,19 @@ exports.signIn = async (req, res) => {
         email: user.email,
         name: user.name,
         loginType: user.loginType
-      }
+      },
+      clientInfo: {
+        clientId: clientConfig.id,
+        clientName: clientConfig.name,
+        organizationName: clientConfig.organizationName,
+        dbName: clientConfig.db_name
+      },
+      creator: {
+        id: creator.masterUserID,
+        email: creator.email,
+        name: creator.name,
+        userType: creator.userType
+      },
     });
   } catch (error) {
     console.error("Error during sign-in:", error);

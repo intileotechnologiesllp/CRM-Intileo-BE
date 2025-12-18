@@ -1,7 +1,8 @@
 const { DataTypes } = require("sequelize");
-const sequelize = require("../../../config/db");
 
-const Country = sequelize.define("Country", {
+
+const createCountryModel = (sequelizeInstance) => {
+const Country = sequelizeInstance.define("Country", {
   countryID: {
     type: DataTypes.INTEGER,
     primaryKey: true, // Set as primary key
@@ -44,6 +45,13 @@ const Country = sequelize.define("Country", {
     type: DataTypes.STRING,
     allowNull: false, // Ensure this field cannot be null
   },
-});
+},
+  {
+    tableName: "Countries",
+    timestamps: true,
+  }
+);
+return Country
+}
 
-module.exports = Country;
+module.exports = createCountryModel;

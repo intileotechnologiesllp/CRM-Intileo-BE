@@ -1,7 +1,8 @@
 const { DataTypes } = require("sequelize");
-const sequelize = require("../../config/db");
 
-const OrganizationSidebarPreference = sequelize.define("OrganizationSidebarPreference", {
+
+const createOrganizationSidebarPreferenceModel = (sequelizeInstance) => {
+const OrganizationSidebarPreference = sequelizeInstance.define("OrganizationSidebarPreference", {
   id: { 
     type: DataTypes.INTEGER, 
     primaryKey: true, 
@@ -94,5 +95,7 @@ const OrganizationSidebarPreference = sequelize.define("OrganizationSidebarPrefe
     }
   ]
 });
+return OrganizationSidebarPreference;
+}
 
-module.exports = OrganizationSidebarPreference;
+module.exports = createOrganizationSidebarPreferenceModel;

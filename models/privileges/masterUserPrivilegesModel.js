@@ -1,8 +1,7 @@
 const { DataTypes } = require("sequelize");
-const sequelize = require("../../config/db");
-const Program = require("../../models/admin/masters/programModel"); // Import the Program model
 
-const MasterUserPrivileges = sequelize.define("MasterUserPrivileges", {
+const createMasterUserPrivilegesModel = (sequelizeInstance) => {
+const MasterUserPrivileges = sequelizeInstance.define("MasterUserPrivileges", {
   privilegeID: {
     type: DataTypes.INTEGER,
     primaryKey: true,
@@ -12,7 +11,7 @@ const MasterUserPrivileges = sequelize.define("MasterUserPrivileges", {
     type: DataTypes.INTEGER,
     allowNull: false,
     references: {
-      model: "masterusers", // Table name for MasterUser
+      model: "MasterUsers", // Table name for MasterUser
       key: "masterUserID",
     },
     onDelete: "CASCADE",
@@ -44,7 +43,14 @@ const MasterUserPrivileges = sequelize.define("MasterUserPrivileges", {
     type: DataTypes.STRING,
     allowNull: true,
   },
-});
+},
+  {
+    tableName: 'MasterUserPrivileges',
+    timestamps: true,
+  }
+); 
+return MasterUserPrivileges
+}
 
 // Define associations
 // Program.hasOne(MasterUserPrivileges, {
@@ -57,4 +63,4 @@ const MasterUserPrivileges = sequelize.define("MasterUserPrivileges", {
 //   as: "program",
 // });
 
-module.exports = MasterUserPrivileges;
+module.exports = createMasterUserPrivilegesModel;

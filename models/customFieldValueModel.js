@@ -1,9 +1,9 @@
 const { DataTypes } = require("sequelize");
-const sequelize = require("../config/db");
 
-const CustomFieldValue = sequelize.define(
-  "CustomFieldValue",
-  {
+const createCustomFieldValueModel = (sequelizeInstance) => {
+  const CustomFieldValue = sequelizeInstance.define(
+    "CustomFieldValue",
+    {
     valueId: {
       type: DataTypes.INTEGER,
       primaryKey: true,
@@ -42,7 +42,7 @@ const CustomFieldValue = sequelize.define(
       type: DataTypes.INTEGER,
       allowNull: false,
       references: {
-        model: "masterusers",
+        model: "MasterUsers",
         key: "masterUserID",
       },
     },
@@ -69,5 +69,7 @@ const CustomFieldValue = sequelize.define(
     ],
   }
 );
+  return CustomFieldValue;
+}
 
-module.exports = CustomFieldValue;
+module.exports = createCustomFieldValueModel;

@@ -1,7 +1,7 @@
 const { DataTypes } = require("sequelize");
-const sequelize = require("../../config/db");
 
-const RecentLoginHistory = sequelize.define("RecentLoginHistory", {
+const createRecentLoginHistoryModel = (sequelizeInstance) => {
+const RecentLoginHistory = sequelizeInstance.define("RecentLoginHistory", {
   userId: {
     type: DataTypes.INTEGER,
     allowNull: false,
@@ -49,6 +49,13 @@ const RecentLoginHistory = sequelize.define("RecentLoginHistory", {
     type: DataTypes.STRING, // New column for total session duration (e.g., "2 hours 15 minutes")
     allowNull: true,
   }
-});
+},
+{
+  tableName: "RecentLoginHistories",
+  timestamps: true,
+}
+);
+return RecentLoginHistory
+}
 
-module.exports = RecentLoginHistory;
+module.exports = createRecentLoginHistoryModel;

@@ -13,7 +13,10 @@ const sequelize = require("../../config/db");
 const LeadDetails = require("./leadDetailsModel"); // Import the LeadDetails model
 const { number } = require("joi");
 // const { Organization } = require("..");
-const Lead = sequelize.define("Lead", {
+
+
+const createLeadModel = (sequelizeInstance) => {
+const Lead = sequelizeInstance.define("Lead", {
   // Primary Key
   leadId: {
     type: DataTypes.INTEGER,
@@ -23,7 +26,7 @@ const Lead = sequelize.define("Lead", {
   personId: {
     type: DataTypes.INTEGER,
     references: {
-      model: Person,
+      model: "LeadPerson",
       key: "personId",
     },
     allowNull: true,
@@ -31,7 +34,7 @@ const Lead = sequelize.define("Lead", {
   leadOrganizationId: {
     type: DataTypes.INTEGER,
     references: {
-      model: "leadOrganizations", // Name of the Organization table
+      model: "LeadOrganizations", // Name of the Organization table
       key: "leadOrganizationId",
     },
     allowNull: true,
@@ -247,6 +250,8 @@ const Lead = sequelize.define("Lead", {
     comment: "Reference to the owner's visibility group",
   },
 });
+return Lead
+}
 // 
 // Lead.sync({ alter: true })
-module.exports = Lead;
+module.exports = createLeadModel;

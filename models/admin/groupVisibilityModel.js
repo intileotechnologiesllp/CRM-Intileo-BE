@@ -1,9 +1,8 @@
 const { DataTypes } = require("sequelize");
-const sequelize = require("../../config/db");
-const MasterUser = require("../../models/master/masterUserModel");
-const Pipeline = require("../deals/pipelineModel");
 
-const GroupVisibility = sequelize.define("GroupVisibility", {
+
+const createGroupVisibilityModel = (sequelizeInstance) => {
+const GroupVisibility = sequelizeInstance.define("GroupVisibility", {
   groupId: {
     type: DataTypes.INTEGER,
     primaryKey: true,
@@ -61,13 +60,20 @@ const GroupVisibility = sequelize.define("GroupVisibility", {
       key: "masterUserID",
     },
   },
-});
+},
+  {
+    tableName: "GroupVisibilities",
+    timestamps: true,
+  }
+);
+return GroupVisibility
+}
 
-GroupVisibility.sync({});
-GroupVisibility.belongsTo(MasterUser, {
-  foreignKey: "createdBy",
-  as: "creator",
-});
+// GroupVisibility.sync({});
+// GroupVisibility.belongsTo(MasterUser, {
+//   foreignKey: "createdBy",
+//   as: "creator",
+// });
 
 
-module.exports = GroupVisibility;
+module.exports = createGroupVisibilityModel;

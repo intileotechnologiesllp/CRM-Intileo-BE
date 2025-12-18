@@ -1,7 +1,7 @@
 const { DataTypes } = require("sequelize");
-const sequelize = require("../../../config/db");
 
-const Currency = sequelize.define("Currency", {
+const createCurrencyModel = (sequelizeInstance) => {
+const Currency = sequelizeInstance.define("Currency", {
   currencyId: {
     type: DataTypes.INTEGER,
     primaryKey: true, // Set as primary key
@@ -105,7 +105,7 @@ const Currency = sequelize.define("Currency", {
     defaultValue: DataTypes.NOW, // Set default value to the current timestamp
   },
 }, {
-  tableName: 'currencies',
+  tableName: 'Currencies',
   timestamps: true,
   indexes: [
     {
@@ -123,5 +123,7 @@ const Currency = sequelize.define("Currency", {
     }
   ]
 });
+return Currency
+}
 
-module.exports = Currency;
+module.exports = createCurrencyModel;
