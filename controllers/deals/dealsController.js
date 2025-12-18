@@ -73,7 +73,8 @@ exports.createDeal = async (req, res) => {
       source,
       label,
       // Activity ID to link existing activity (similar to emailID)
-      activityId
+      activityId,
+      visibleGroup
       // Custom fields will be processed from remaining req.body fields
     } = req.body;
     // --- Enhanced validation similar to createLead ---
@@ -381,7 +382,8 @@ exports.createDeal = async (req, res) => {
       source,
       valueCurrency: req.body.valueCurrency || "INR",
       proposalValueCurrency: req.body.proposalValueCurrency || "INR",
-      label
+      label,
+      visibleGroup
       // Add personId, organizationId, etc. as needed
     });
     let responsiblePerson = null;
@@ -1733,38 +1735,51 @@ exports.getDeals = async (req, res) => {
       }
     })
 
+    
     let filterDeals = [];
 
-    if(findGroup?.lead?.toLowerCase() == "visibilitygroup"){
-      let findParentGroup = null; 
-      if(findGroup?.parentGroupId){
-        findParentGroup = await GroupVisibility.findOne({
-          where: {
-            groupId: findGroup?.parentGroupId
-          }
-        })
+    for(let i = 0; i < dealsWithCustomFields.length; i++){
+      if(dealsWithCustomFields[i]?.visibleGroup == "owner"){
+        if(filterDeals[i]?.ownerId == req.adminId){
+          filterDeals.push(flatLeads[i]);
+        }
+      }else if(dealsWithCustomFields[i]?.visibleGroup == "visibilitygroup"){
+        findGroup?.memberIds?.split(",").includes(req.adminId.toString()) && filterDeals.push(flatLeads[i]);
+      }else{
+        filterDeals.push(dealsWithCustomFields[i]);
       }
+    }
+
+    // if(findGroup?.lead?.toLowerCase() == "visibilitygroup"){
+    //   let findParentGroup = null; 
+    //   if(findGroup?.parentGroupId){
+    //     findParentGroup = await GroupVisibility.findOne({
+    //       where: {
+    //         groupId: findGroup?.parentGroupId
+    //       }
+    //     })
+    //   }
       
-      const filterDeals = dealsWithCustomFields.filter((idx)=> idx?.ownerId == req.adminId || idx?.visibilityGroupId == groupId ||  idx?.visibilityGroupId == findGroup?.parentGroupId || findParentGroup.memberIds?.split(",").includes(req.adminId.toString()));
+    //   const filterDeals = dealsWithCustomFields.filter((idx)=> idx?.ownerId == req.adminId || idx?.visibilityGroupId == groupId ||  idx?.visibilityGroupId == findGroup?.parentGroupId || findParentGroup.memberIds?.split(",").includes(req.adminId.toString()));
 
-      filterDeals = filterDeals;
-    }
-    else if(findGroup?.lead?.toLowerCase() == "owner"){
-      let findParentGroup = null; 
-      if(findGroup?.parentGroupId){
-        findParentGroup = await GroupVisibility.findOne({
-          where: {
-            groupId: findGroup?.parentGroupId
-          }
-        })
-      }
+    //   filterDeals = filterDeals;
+    // }
+    // else if(findGroup?.lead?.toLowerCase() == "owner"){
+    //   let findParentGroup = null; 
+    //   if(findGroup?.parentGroupId){
+    //     findParentGroup = await GroupVisibility.findOne({
+    //       where: {
+    //         groupId: findGroup?.parentGroupId
+    //       }
+    //     })
+    //   }
 
-      const filterFields = dealsWithCustomFields.filter((idx)=> idx?.ownerId == req.adminId || idx?.visibilityGroupId == findGroup?.parentGroupId || findParentGroup.memberIds?.split(",").includes(req.adminId.toString()));
+    //   const filterFields = dealsWithCustomFields.filter((idx)=> idx?.ownerId == req.adminId || idx?.visibilityGroupId == findGroup?.parentGroupId || findParentGroup.memberIds?.split(",").includes(req.adminId.toString()));
 
-      filterDeals = filterFields;
-    }else{
-      filterDeals = dealsWithCustomFields;
-    }
+    //   filterDeals = filterFields;
+    // }else{
+    //   filterDeals = dealsWithCustomFields;
+    // }
 
     res.status(200).json({
       message: "Deals fetched successfully",

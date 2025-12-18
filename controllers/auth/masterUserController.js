@@ -896,7 +896,7 @@ exports.updateProfile = async (req, res) => {
 // Set Permission Sets for Master User
 exports.setMasterUserPermissions = async (req, res) => {
   // const masterUserID = req.adminId; // Get from authenticated user context
-  const { permissionSetId, masterUserID, globalPermissionSetId } = req.body;
+  const { permissionSetId, masterUserID, globalPermissionSetId, groupId } = req.body;
 
   try {
     console.log(`[setMasterUserPermissions] 🔍 Setting permissions for authenticated user: ${masterUserID}`);
@@ -985,6 +985,9 @@ exports.setMasterUserPermissions = async (req, res) => {
     }
     if (globalPermissionSetId !== undefined) {
       updateFields.globalPermissionSetId = globalPermissionSetId;
+    }
+    if (groupId !== undefined) {
+      updateFields.groupId = groupId;
     }
 
     // Update the master user with new permission sets

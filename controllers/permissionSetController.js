@@ -1,3 +1,4 @@
+const GroupVisibility = require("../models/admin/groupVisibilityModel");
 const MasterUser = require("../models/master/masterUserModel");
 const permissionSet = require("../models/permissionsetModel");
 
@@ -68,9 +69,12 @@ exports.getPermissionSet = async (req, res) => {
       })
     );
 
+    const groupVisibility = await GroupVisibility.findAll({});
+
     res.status(200).json({
       message: "permission set fetched successfully.",
       set: enrichedSets,
+      groups: groupVisibility
     });
   } catch (error) {
     console.error("Error fetching permission sets:", error);
