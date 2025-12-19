@@ -249,6 +249,10 @@ const Lead = sequelizeInstance.define("Lead", {
     },
     comment: "Reference to the owner's visibility group",
   },
+  visibleGroup: {
+    type: DataTypes.STRING,
+    allowNull: true, // Visible group for the lead
+  },
 });
 return Lead
 }
