@@ -1,8 +1,9 @@
 // models/deals/lostReasonModel.js
 const { DataTypes } = require('sequelize');
-const sequelize = require('../../config/db');
 
-const LostReason = sequelize.define('LostReason', {
+
+const createLostReasonModel = (sequelizeInstance) => {
+const LostReason = sequelizeInstance.define('LostReason', {
   lostReasonId: {
     type: DataTypes.INTEGER,
     primaryKey: true,
@@ -43,7 +44,7 @@ const LostReason = sequelize.define('LostReason', {
     defaultValue: false, // Mark system-provided reasons
   }
 }, {
-  tableName: 'lost_reasons',
+  tableName: 'LostReasons',
   timestamps: true,
   indexes: [
     {
@@ -61,5 +62,7 @@ const LostReason = sequelize.define('LostReason', {
     }
   ]
 });
+return LostReason
+}
 
-module.exports = LostReason;
+module.exports = createLostReasonModel;

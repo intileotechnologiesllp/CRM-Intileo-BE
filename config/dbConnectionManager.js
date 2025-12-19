@@ -1,6 +1,118 @@
 const { getClientDbConnection, getClientConfig } = require("./db");
 const bcrypt = require("bcrypt");
-const { createMasterUserModel } = require("../models");
+const {createActivityColumnModel,
+  createActivityModel,
+  createActivitySettingModel,
+  createActivityTypeModel,
+
+  createCountryModel,
+  createCurrencyModel,
+  createDepartmentModel,
+  createDesignationModel,
+  createLabelModel,
+  createLeadColumnModel,
+  createOrganizationModel,
+  createProgramModel,
+  createRegionModel,
+  createScopeModel,
+  createSectoralscopeModel,
+  createStatusModel,
+
+  createGroupMembershipModel,
+  createGroupVisibilityModel,
+  createItemVisibilityRuleModel,
+  createPipelineVisibilityRuleModel,
+  createVisibilityGroupModel,
+
+  createCompanySettingModel,
+
+  createContactChangeLogModel,
+  createContactSyncConfigModel,
+  createContactSyncHistoryModel,
+  createContactSyncMappingModel,
+
+
+  createDealColumnModel,
+  createDealFileModel,
+  createDealParticipantModel,
+  createDealDetailsModel,
+  createDealModel,
+  createDealStageHistoryModel,
+  createLostReasonModel,
+  createDealNoteModel,
+  createLostReasonSettingModel,
+  createPipelineModel,
+  createPipelineStageModel,
+
+
+  createDeviceActivityModel,
+
+
+  createAttachmentModel,
+  createDefaultEmailModel,
+  createEmailModel,
+  createTemplateModel,
+  createUserCredentialModel,
+
+
+  createUserFavoriteModel,
+  createUserGoogleTokenModel,
+  createImportDataModel,
+
+
+  createCardModel,
+  createDashboardModel,
+  createGoalModel,
+  createReportFolderModel,
+  createReportModel,
+
+
+  createEntityFileModel,
+  createLeadColumnPreferenceModel,
+  createLeadDetailsModel,
+  createLeadFilterModel,
+  createLeadNoteModel,
+  createLeadOrganizationModel,
+  createLeadPersonModel,
+  createLeadModel,
+  createOrganizationColumnPreferenceModel,
+  createOrganizationFileModel,
+  createOrganizationNoteModel,
+  createOrganizationSidebarPreferenceModel,
+  createPersonColumnPreferenceModel,
+  createPersonFileModel,
+  createPersonNoteModel,
+  createPersonSidebarPreferenceModel,
+
+
+  createMeetingModel,
+  createSchedulingLinkModel,
+  createMiscSettingModel,
+
+
+  createNotificationModel,
+  createNotificationPreferenceModel,
+  createPushSubscriptionModel,
+
+  createMasterUserPrivilegesModel,
+  createProductColumnModel,
+  createDealProductModel,
+  createProductModel,
+  createProductVariationModel,
+
+  createAuditTrailModel,
+  createHistoryModel,
+  createLoginHistoryModel,
+  createRecentLoginHistoryModel,
+
+
+  createMasterUserModel,
+  createAdminModel,
+  createCustomFieldModel,
+  createCustomFieldValueModel,
+  createPermissionSetModel,
+  createRecentSearchModel,
+  createUserInterfacePreferencesModel } = require("../models");
 const { setupAssociations } = require("./associations");
 
 class DatabaseConnectionManager {
@@ -23,14 +135,269 @@ class DatabaseConnectionManager {
       case 'MasterUser':
         model = createMasterUserModel(connection);
         break;
-      case 'LostReason':
-        model = createLostReasonModel(connection);
+      case 'AuditTrail':
+        model = createAuditTrailModel(connection);
+        break;
+      case 'History':
+        model = createHistoryModel(connection);
+        break;
+      case 'LoginHistory':
+        model = createLoginHistoryModel(connection);
+        break;
+      case 'RecentLoginHistory':
+        model = createRecentLoginHistoryModel(connection);
+        break;
+      case 'Admin':
+        model = createAdminModel(connection);
+        break;
+      case 'CustomField':
+        model = createCustomFieldModel(connection);
+        break;
+      case 'CustomFieldValue':
+        model = createCustomFieldValueModel(connection);
+        break;
+      case 'PermissionSet':
+        model = createPermissionSetModel(connection);
+        break;
+      case 'RecentSearch':
+        model = createRecentSearchModel(connection);
+        break;
+      case 'UserInterfacePreference':
+        model = createUserInterfacePreferencesModel(connection);
+        break;
+      case 'Country':
+        model = createCountryModel(connection);
+        break;
+      case 'Currency':
+        model = createCurrencyModel(connection);
+        break;
+      case 'Department':
+        model = createDepartmentModel(connection);
+        break;
+      case 'Designation':
+        model = createDesignationModel(connection);
+        break;
+      case 'Label':
+        model = createLabelModel(connection);
+        break;
+      case 'Organization':
+        model = createOrganizationModel(connection);
+        break;
+      case 'Program':
+        model = createProgramModel(connection);
+        break;
+      case 'Region':
+        model = createRegionModel(connection);
+        break;
+      case 'Scope':
+        model = createScopeModel(connection);
+        break;
+      case 'Sectoralscope':
+        model = createSectoralscopeModel(connection);
+        break;
+      case 'Status':
+        model = createStatusModel(connection);
+        break;
+      case 'GroupVisibility':
+        model = createGroupVisibilityModel(connection);
+        break;
+      case 'ItemVisibilityRule':
+        model = createItemVisibilityRuleModel(connection);
+        break;
+      case 'GroupMembership':
+        model = createGroupMembershipModel(connection);
+        break;
+      case 'VisibilityGroup':
+        model = createVisibilityGroupModel(connection);
+        break;
+      case 'Pipeline':
+        model = createPipelineModel(connection);
+        break;
+      case 'PipelineStage':
+        model = createPipelineStageModel(connection);
+        break;
+      case 'PipelineVisibilityRule':
+        model = createPipelineVisibilityRuleModel(connection);
+        break;
+      case 'LeadColumn':
+        model = createLeadColumnModel(connection);
         break;
       case 'LeadOrganization':
         model = createLeadOrganizationModel(connection);
         break;
+      case 'OrganizationColumnPreference':
+        model = createOrganizationColumnPreferenceModel(connection);
+        break;
+      case 'OrganizationFile':
+        model = createOrganizationFileModel(connection);
+        break;
+      case 'OrganizationNote':
+        model = createOrganizationNoteModel(connection);
+        break;
+      case 'OrganizationSidebarPreference':
+        model = createOrganizationSidebarPreferenceModel(connection);
+        break;
       case 'LeadPerson':
         model = createLeadPersonModel(connection);
+        break;
+      case 'PersonColumnPreference':
+        model = createPersonColumnPreferenceModel(connection);
+        break;
+      case 'PersonFile':
+        model = createPersonFileModel(connection);
+        break;
+      case 'PersonNote':
+        model = createPersonNoteModel(connection);
+        break;
+      case 'PersonSidebarPreference':
+        model = createPersonSidebarPreferenceModel(connection);
+        break;
+      case 'Lead':
+        model = createLeadModel(connection);
+        break;
+      case 'LeadNote':
+        model = createLeadNoteModel(connection);
+        break;
+      case 'LeadFilter':
+        model = createLeadFilterModel(connection);
+        break;
+      case 'LeadDetail':
+        model = createLeadDetailsModel(connection);
+        break;
+      case 'LeadColumnPreference':
+        model = createLeadColumnPreferenceModel(connection);
+        break;
+      case 'EntityFile':
+        model = createEntityFileModel(connection);
+        break;
+      case 'Dashboard':
+        model = createDashboardModel(connection);
+        break;
+      case 'Card':
+        model = createCardModel(connection);
+        break;
+      case 'Goal':
+        model = createGoalModel(connection);
+        break;
+      case 'ReportFolder':
+        model = createReportFolderModel(connection);
+        break;
+      case 'Report':
+        model = createReportModel(connection);
+        break;
+      case 'ImportData':
+        model = createImportDataModel(connection);
+        break;
+      case 'UserGoogleToken':
+        model = createUserGoogleTokenModel(connection);
+        break;
+      case 'UserFavorite':
+        model = createUserFavoriteModel(connection);
+        break;
+      case 'Email':
+        model = createEmailModel(connection);
+        break;
+      case 'Attachment':
+        model = createAttachmentModel(connection);
+        break;
+      case 'DefaultEmail':
+        model = createDefaultEmailModel(connection);
+        break;
+      case 'Template':
+        model = createTemplateModel(connection);
+        break;
+      case 'UserCredential':
+        model = createUserCredentialModel(connection);
+        break;
+      case 'DeviceActivity':
+        model = createDeviceActivityModel(connection);
+        break;
+      case 'LostReason':
+        model = createLostReasonModel(connection);
+        break;
+      case 'LostReasonSetting':
+        model = createLostReasonSettingModel(connection);
+        break;
+      case 'Deal':
+        model = createDealModel(connection);
+        break;
+      case 'DealStageHistory':
+        model = createDealStageHistoryModel(connection);
+        break;
+      case 'DealNote':
+        model = createDealNoteModel(connection);
+        break;
+      case 'DealDetail':
+        model = createDealDetailsModel(connection);
+        break;
+      case 'DealParticipant':
+        model = createDealParticipantModel(connection);
+        break;
+      case 'DealFile':
+        model = createDealFileModel(connection);
+        break;
+      case 'DealColumn':
+        model = createDealColumnModel(connection);
+        break;
+      case 'ContactChangeLog':
+        model = createContactChangeLogModel(connection);
+        break;
+      case 'ContactSyncHistory':
+        model = createContactSyncHistoryModel(connection);
+        break;
+      case 'ContactSyncConfig':
+        model = createContactSyncConfigModel(connection);
+        break;
+      case 'ContactSyncMapping':
+        model = createContactSyncMappingModel(connection);
+        break;
+      case 'CompanySetting':
+        model = createCompanySettingModel(connection);
+        break;
+      case 'Activity':
+        model = createActivityModel(connection);
+        break;
+      case 'ActivityColumn':
+        model = createActivityColumnModel(connection);
+        break;
+      case 'ActivitySetting':
+        model = createActivitySettingModel(connection);
+        break;
+      case 'ActivityType':
+        model = createActivityTypeModel(connection);
+        break;
+      case 'Meeting':
+        model = createMeetingModel(connection);
+        break;
+      case 'SchedulingLink':
+        model = createSchedulingLinkModel(connection);
+        break;
+      case 'MiscSetting':
+        model = createMiscSettingModel(connection);
+        break;
+      case 'Notification':
+        model = createNotificationModel(connection);
+        break;
+      case 'NotificationPreference':
+        model = createNotificationPreferenceModel(connection);
+        break;
+      case 'PushSubscription':
+        model = createPushSubscriptionModel(connection);
+        break;
+      case 'MasterUserPrivileges':
+        model = createMasterUserPrivilegesModel(connection);
+        break;
+      case 'Product':
+        model = createProductModel(connection);
+        break;
+      case 'ProductVariation':
+        model = createProductVariationModel(connection);
+        break;
+      case 'DealProduct':
+        model = createDealProductModel(connection);
+        break;
+      case 'ProductColumn':
+        model = createProductColumnModel(connection);
         break;
       default:
         throw new Error(`Unknown model: ${modelName}`);
@@ -54,9 +421,95 @@ class DatabaseConnectionManager {
     // Get individual models
     const models = {
       MasterUser: this.getModel(connection, 'MasterUser'),
-      LostReason: this.getModel(connection, 'LostReason'),
+      AuditTrail: this.getModel(connection, 'AuditTrail'),
+      History: this.getModel(connection, 'History'),
+      LoginHistory: this.getModel(connection, 'LoginHistory'),
+      RecentLoginHistory: this.getModel(connection, 'RecentLoginHistory'),
+      Admin: this.getModel(connection, 'Admin'),
+      CustomField: this.getModel(connection, 'CustomField'),
+      CustomFieldValue: this.getModel(connection, 'CustomFieldValue'),
+      PermissionSet: this.getModel(connection, 'PermissionSet'),
+      RecentSearch: this.getModel(connection, 'RecentSearch'),
+      UserInterfacePreference: this.getModel(connection, 'UserInterfacePreference'),
+      Country: this.getModel(connection, 'Country'),
+      Currency: this.getModel(connection, 'Currency'),
+      Department: this.getModel(connection, 'Department'),
+      Designation: this.getModel(connection, 'Designation'),
+      Label: this.getModel(connection, 'Label'),
+      Organization: this.getModel(connection, 'Organization'),
+      Program: this.getModel(connection, 'Program'),
+      Region: this.getModel(connection, 'Region'),
+      Scope: this.getModel(connection, 'Scope'),
+      Sectoralscope: this.getModel(connection, 'Sectoralscope'),
+      Status: this.getModel(connection, 'Status'),
+      GroupVisibility: this.getModel(connection, 'GroupVisibility'),
+      ItemVisibilityRule: this.getModel(connection, 'ItemVisibilityRule'),
+      GroupMembership: this.getModel(connection, 'GroupMembership'),
+      VisibilityGroup: this.getModel(connection, 'VisibilityGroup'),
+      Pipeline: this.getModel(connection, 'Pipeline'),
+      PipelineStage: this.getModel(connection, 'PipelineStage'),
+      PipelineVisibilityRule: this.getModel(connection, 'PipelineVisibilityRule'),
+      GroupMembership: this.getModel(connection, 'GroupMembership'),
+      LeadColumn: this.getModel(connection, 'LeadColumn'),
       LeadOrganization: this.getModel(connection, 'LeadOrganization'),
-      LeadPerson: this.getModel(connection, 'LeadPerson')
+      OrganizationColumnPreference: this.getModel(connection, 'OrganizationColumnPreference'),
+      OrganizationFile: this.getModel(connection, 'OrganizationFile'),
+      OrganizationNote: this.getModel(connection, 'OrganizationNote'),
+      OrganizationSidebarPreference: this.getModel(connection, 'OrganizationSidebarPreference'),
+      LeadPerson: this.getModel(connection, 'LeadPerson'),
+      PersonColumnPreference: this.getModel(connection, 'PersonColumnPreference'),
+      PersonFile: this.getModel(connection, 'PersonFile'),
+      PersonNote: this.getModel(connection, 'PersonNote'),
+      PersonSidebarPreference: this.getModel(connection, 'PersonSidebarPreference'),
+      Lead: this.getModel(connection, 'Lead'),
+      LeadNote: this.getModel(connection, 'LeadNote'),
+      LeadFilter: this.getModel(connection, 'LeadFilter'),
+      LeadDetail: this.getModel(connection, 'LeadDetail'),
+      LeadColumnPreference: this.getModel(connection, 'LeadColumnPreference'),
+      EntityFile: this.getModel(connection, 'EntityFile'),
+      Dashboard: this.getModel(connection, 'Dashboard'),
+      Card: this.getModel(connection, 'Card'),
+      Goal: this.getModel(connection, 'Goal'),
+      ReportFolder: this.getModel(connection, 'ReportFolder'),
+      Report: this.getModel(connection, 'Report'),
+      ImportData: this.getModel(connection, 'ImportData'),
+      UserGoogleToken: this.getModel(connection, 'UserGoogleToken'),
+      UserFavorite: this.getModel(connection, 'UserFavorite'),
+      Email: this.getModel(connection, 'Email'),
+      Attachment: this.getModel(connection, 'Attachment'),
+      DefaultEmail: this.getModel(connection, 'DefaultEmail'),
+      Template: this.getModel(connection, 'Template'),
+      UserCredential: this.getModel(connection, 'UserCredential'),
+      DeviceActivity: this.getModel(connection, 'DeviceActivity'),
+      LostReason: this.getModel(connection, 'LostReason'),
+      LostReasonSetting: this.getModel(connection, 'LostReasonSetting'),
+      Deal: this.getModel(connection, 'Deal'),
+      DealStageHistory: this.getModel(connection, 'DealStageHistory'),
+      DealNote: this.getModel(connection, 'DealNote'),
+      DealDetail: this.getModel(connection, 'DealDetail'),
+      DealParticipant: this.getModel(connection, 'DealParticipant'),
+      DealFile: this.getModel(connection, 'DealFile'),
+      DealColumn: this.getModel(connection, 'DealColumn'),
+      ContactChangeLog: this.getModel(connection, 'ContactChangeLog'),
+      ContactSyncHistory: this.getModel(connection, 'ContactSyncHistory'),
+      ContactSyncConfig: this.getModel(connection, 'ContactSyncConfig'),
+      ContactSyncMapping: this.getModel(connection, 'ContactSyncMapping'),
+      CompanySetting: this.getModel(connection, 'CompanySetting'),
+      Activity: this.getModel(connection, 'Activity'),
+      ActivityColumn: this.getModel(connection, 'ActivityColumn'),
+      ActivitySetting: this.getModel(connection, 'ActivitySetting'),
+      ActivityType: this.getModel(connection, 'ActivityType'),
+      Meeting: this.getModel(connection, 'Meeting'),
+      SchedulingLink: this.getModel(connection, 'SchedulingLink'),
+      MiscSetting: this.getModel(connection, 'MiscSetting'),
+      Notification: this.getModel(connection, 'Notification'),
+      NotificationPreference: this.getModel(connection, 'NotificationPreference'),
+      PushSubscription: this.getModel(connection, 'PushSubscription'),
+      MasterUserPrivileges: this.getModel(connection, 'MasterUserPrivileges'),
+      Product: this.getModel(connection, 'Product'),
+      ProductVariation: this.getModel(connection, 'ProductVariation'),
+      DealProduct: this.getModel(connection, 'DealProduct'),
+      ProductColumn: this.getModel(connection, 'ProductColumn'),
     };
     
     // Set up associations

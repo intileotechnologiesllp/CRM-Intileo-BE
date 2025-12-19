@@ -1,7 +1,8 @@
 const { DataTypes } = require("sequelize");
-const sequelize = require("../../config/db");
 
-const ContactChangeLog = sequelize.define(
+
+const createContactChangeLogModel = (sequelizeInstance) => {
+const ContactChangeLog = sequelizeInstance.define(
   "ContactChangeLog",
   {
     changeLogId: {
@@ -118,7 +119,7 @@ const ContactChangeLog = sequelize.define(
     },
   },
   {
-    tableName: "contactChangeLogs",
+    tableName: "ContactChangeLogs",
     timestamps: true,
     indexes: [
       { fields: ["syncHistoryId"] },
@@ -131,5 +132,7 @@ const ContactChangeLog = sequelize.define(
     ],
   }
 );
+return ContactChangeLog
+}
 
-module.exports = ContactChangeLog;
+module.exports = createContactChangeLogModel;

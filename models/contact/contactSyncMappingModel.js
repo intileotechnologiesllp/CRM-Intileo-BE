@@ -1,7 +1,8 @@
 const { DataTypes } = require("sequelize");
-const sequelize = require("../../config/db");
 
-const ContactSyncMapping = sequelize.define(
+
+const createContactSyncMappingModel = (sequelizeInstance) => {
+const ContactSyncMapping = sequelizeInstance.define(
   "ContactSyncMapping",
   {
     mappingId: {
@@ -67,7 +68,7 @@ const ContactSyncMapping = sequelize.define(
     },
   },
   {
-    tableName: "contactSyncMappings",
+    tableName: "ContactSyncMappings",
     timestamps: true,
     indexes: [
       { fields: ["masterUserID"] },
@@ -78,5 +79,7 @@ const ContactSyncMapping = sequelize.define(
     ],
   }
 );
+return ContactSyncMapping
+}
 
-module.exports = ContactSyncMapping;
+module.exports = createContactSyncMappingModel;

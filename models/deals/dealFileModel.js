@@ -1,9 +1,8 @@
 const { DataTypes } = require("sequelize");
-const sequelize = require("../../config/db");
-const Deal = require("./dealsModels");
-const MasterUser = require("../master/masterUserModel");
 
-const DealFile = sequelize.define("DealFile", {
+
+const createDealFileModel = (sequelizeInstance) => {
+const DealFile = sequelizeInstance.define("DealFile", {
   fileId: {
     type: DataTypes.INTEGER,
     primaryKey: true,
@@ -13,7 +12,7 @@ const DealFile = sequelize.define("DealFile", {
     type: DataTypes.INTEGER,
     allowNull: false,
     references: {
-      model: Deal,
+      model: "Deals",
       key: "dealId",
     },
     onDelete: "CASCADE",
@@ -73,8 +72,8 @@ const DealFile = sequelize.define("DealFile", {
     type: DataTypes.INTEGER,
     allowNull: false,
     references: {
-      model: MasterUser,
-      key: "id",
+      model: "MasterUsers",
+      key: "masterUserID",
     },
     comment: "User who uploaded the file",
   },
@@ -141,5 +140,8 @@ const DealFile = sequelize.define("DealFile", {
     }
   ]
 });
+return DealFile
+}
 
-module.exports = DealFile;
+
+module.exports = createDealFileModel;

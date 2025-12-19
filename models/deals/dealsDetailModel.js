@@ -1,8 +1,9 @@
 const { DataTypes } = require("sequelize");
-const sequelize = require("../../config/db");
-const Deal = require("../../models/deals/dealsModels");
+// const Deal = require("../../models/deals/dealsModels");
 
-const DealDetails = sequelize.define("DealDetails", {
+
+const createDealDetailsModel = (sequelizeInstance) => {
+const DealDetail = sequelizeInstance.define("DealDetail", {
   dealDetailsId: {
     type: DataTypes.INTEGER,
     primaryKey: true,
@@ -12,7 +13,7 @@ const DealDetails = sequelize.define("DealDetails", {
     type: DataTypes.INTEGER,
     allowNull: false,
     references: {
-      model: Deal,
+      model: "Deals",
       key: "dealId"
     }
   },
@@ -70,9 +71,11 @@ const DealDetails = sequelize.define("DealDetails", {
   tableName: "DealDetails",
   timestamps: true,
 });
+return DealDetail
+}
 
 // Associations
-DealDetails.belongsTo(Deal, { foreignKey: "dealId", as: "Deal" });
-Deal.hasOne(DealDetails, { foreignKey: "dealId", as: "details" });
+// DealDetails.belongsTo(Deal, { foreignKey: "dealId", as: "Deal" });
+// Deal.hasOne(DealDetails, { foreignKey: "dealId", as: "details" });
 
-module.exports = DealDetails;
+module.exports = createDealDetailsModel;

@@ -1,8 +1,8 @@
 const { DataTypes } = require("sequelize");
-const sequelize = require("../../config/db");
-const Attachment = require("../../models/email/attachmentModel");
+// const Attachment = require("../../models/email/attachmentModel");
 
-const Email = sequelize.define(
+const createEmailModel = (sequelizeInstance) => {
+const Email = sequelizeInstance.define(
   "Email",
   {
     emailID: {
@@ -152,6 +152,8 @@ const Email = sequelize.define(
     },
   },
   {
+    tableName: "Emails",
+    timestamps: true,
     indexes: [
       {
         fields: ["messageId", "folder"], // Composite unique index
@@ -179,8 +181,10 @@ const Email = sequelize.define(
     }
   }
 );
+return Email
+}
 
-Email.hasMany(Attachment, { foreignKey: "emailID", as: "attachments" });
-Attachment.belongsTo(Email, { foreignKey: "emailID" });
+// Email.hasMany(Attachment, { foreignKey: "emailID", as: "attachments" });
+// Attachment.belongsTo(Email, { foreignKey: "emailID" });
 
-module.exports = Email;
+module.exports = createEmailModel;

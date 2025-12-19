@@ -1,7 +1,7 @@
 const { DataTypes } = require("sequelize");
 
 
-const createLeadPersonModel = (sequelizeInstance) => {
+const createLeadNoteModel = (sequelizeInstance) => {
   const LeadNote = sequelizeInstance.define("LeadNote", {
     noteId: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
     leadId: { type: DataTypes.INTEGER, allowNull: false },
@@ -18,4 +18,4 @@ const createLeadPersonModel = (sequelizeInstance) => {
 }
 
 
-  module.exports = createLeadPersonModel;
+  module.exports = createLeadNoteModel;

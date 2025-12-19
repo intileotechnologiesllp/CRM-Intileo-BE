@@ -1,10 +1,11 @@
 const { DataTypes } = require("sequelize");
-const sequelize = require("../../config/db");
-const Deal = require("../../models/deals/dealsModels");
-const Person = require("../leads/leadPersonModel");
-const Organization = require("../leads/leadOrganizationModel");
+// const Deal = require("../../models/deals/dealsModels");
+// const Person = require("../leads/leadPersonModel");
+// const Organization = require("../leads/leadOrganizationModel");
 
-const DealParticipant = sequelize.define("DealParticipant", {
+
+const createDealParticipantModel = (sequelizeInstance) => {
+const DealParticipant = sequelizeInstance.define("DealParticipant", {
   participantId: {
     type: DataTypes.INTEGER,
     primaryKey: true,
@@ -14,7 +15,7 @@ const DealParticipant = sequelize.define("DealParticipant", {
     type: DataTypes.INTEGER,
     allowNull: false,
     references: {
-      model: Deal,
+      model: "Deals",
       key: "dealId"
     }
   },
@@ -22,7 +23,7 @@ const DealParticipant = sequelize.define("DealParticipant", {
     type: DataTypes.INTEGER,
     allowNull: true,
     references: {
-      model: Person,
+      model: "LeadPersons",
       key: "personId"
     }
   },
@@ -30,7 +31,7 @@ const DealParticipant = sequelize.define("DealParticipant", {
     type: DataTypes.INTEGER,
     allowNull: true,
     references: {
-      model: Organization,
+      model: "LeadOrganizations",
       key: "leadOrganizationId"
     }
   }
@@ -38,10 +39,12 @@ const DealParticipant = sequelize.define("DealParticipant", {
   tableName: "DealParticipants",
   timestamps: false
 });
+return DealParticipant
+}
 
 // Associations
-DealParticipant.belongsTo(Deal, { foreignKey: "dealId", as: "Deal" });
-DealParticipant.belongsTo(Person, { foreignKey: "personId", as: "Person" });
-DealParticipant.belongsTo(Organization, { foreignKey: "leadOrganizationId", as: "Organization" });
+// DealParticipant.belongsTo(Deal, { foreignKey: "dealId", as: "Deal" });
+// DealParticipant.belongsTo(Person, { foreignKey: "personId", as: "Person" });
+// DealParticipant.belongsTo(Organization, { foreignKey: "leadOrganizationId", as: "Organization" });
 
-module.exports = DealParticipant;
+module.exports = createDealParticipantModel;

@@ -1,11 +1,12 @@
 const { DataTypes } = require("sequelize");
-const sequelize = require("../../config/db");
-const Lead = require("../leads/leadsModel");
-const Person = require("../leads/leadPersonModel");
-const Organization = require("../leads/leadOrganizationModel");
-const MasterUser = require("../master/masterUserModel");
+// const Lead = require("../leads/leadsModel");
+// const Person = require("../leads/leadPersonModel");
+// const Organization = require("../leads/leadOrganizationModel");
+// const MasterUser = require("../master/masterUserModel");
 
-const Deal = sequelize.define(
+
+const createDealModel = (sequelizeInstance) => {
+const Deal = sequelizeInstance.define(
   "Deal",
   {
     dealId: {
@@ -16,7 +17,7 @@ const Deal = sequelize.define(
     leadId: {
       type: DataTypes.INTEGER,
       references: {
-        model: Lead,
+        model: "Leads",
         key: "leadId",
       },
       allowNull: true,
@@ -24,7 +25,7 @@ const Deal = sequelize.define(
     personId: {
       type: DataTypes.INTEGER,
       references: {
-        model: Person,
+        model: "LeadPersons",
         key: "personId",
       },
       allowNull: true,
@@ -32,7 +33,7 @@ const Deal = sequelize.define(
     leadOrganizationId: {
       type: DataTypes.INTEGER,
       references: {
-        model: Organization,
+        model: "LeadOrganizations",
         key: "leadOrganizationId",
       },
       allowNull: true,
@@ -70,7 +71,7 @@ const Deal = sequelize.define(
       type: DataTypes.INTEGER,
       allowNull: true,
       references: {
-        model: "pipelines",
+        model: "Pipelines",
         key: "pipelineId",
       },
     },
@@ -78,7 +79,7 @@ const Deal = sequelize.define(
       type: DataTypes.INTEGER,
       allowNull: true,
       references: {
-        model: "pipeline_stages",
+        model: "PipelineStages",
         key: "stageId",
       },
     },
@@ -349,7 +350,7 @@ const Deal = sequelize.define(
     type: DataTypes.INTEGER,
     allowNull: true,
     references: {
-      model: "GroupVisibility",
+      model: "GroupVisibilities",
       key: "groupId",
     },
     comment: "Reference to the owner's visibility group",
@@ -360,6 +361,8 @@ const Deal = sequelize.define(
     timestamps: true,
   }
 );
+return Deal
+}
 
 // Associations (optional)
 // Deal.belongsTo(Lead, { foreignKey: "leadId", as: "Lead" });
@@ -368,4 +371,4 @@ const Deal = sequelize.define(
 // Deal.belongsTo(MasterUser, { foreignKey: "ownerId", as: "Owner" });
 
 
-module.exports = Deal;
+module.exports = createDealModel;

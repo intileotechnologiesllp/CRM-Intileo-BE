@@ -1,7 +1,7 @@
 const { DataTypes } = require("sequelize");
-const sequelize = require("../../config/db");
 
-const Pipeline = sequelize.define(
+const createPipelineModel = (sequelizeInstance) => {
+const Pipeline = sequelizeInstance.define(
   "Pipeline",
   {
     pipelineId: {
@@ -37,7 +37,7 @@ const Pipeline = sequelize.define(
       type: DataTypes.INTEGER,
       allowNull: false,
       references: {
-        model: "masterusers",
+        model: "MasterUsers",
         key: "masterUserID",
       },
     },
@@ -51,7 +51,7 @@ const Pipeline = sequelize.define(
     },
   },
   {
-    tableName: "pipelines",
+    tableName: "Pipelines",
     timestamps: true,
     indexes: [
       {
@@ -66,5 +66,7 @@ const Pipeline = sequelize.define(
     ],
   }
 );
+return Pipeline
+}
 
-module.exports = Pipeline;
+module.exports = createPipelineModel;

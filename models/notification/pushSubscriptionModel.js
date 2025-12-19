@@ -1,8 +1,8 @@
 const { DataTypes } = require("sequelize");
-const sequelize = require("../../config/db");
-const MasterUser = require("../master/masterUserModel");
+// const MasterUser = require("../master/masterUserModel");
 
-const PushSubscription = sequelize.define(
+const createPushSubscriptionModel = (sequelizeInstance) => {
+const PushSubscription = sequelizeInstance.define(
   "PushSubscription",
   {
     subscriptionId: {
@@ -66,12 +66,14 @@ const PushSubscription = sequelize.define(
     ],
   }
 );
+return PushSubscription
+}
 
 // Association
-PushSubscription.belongsTo(MasterUser, {
-  foreignKey: "userId",
-  targetKey: "masterUserID",  // Specify the correct primary key in MasterUsers table
-  as: "user",
-});
+// PushSubscription.belongsTo(MasterUser, {
+//   foreignKey: "userId",
+//   targetKey: "masterUserID",  // Specify the correct primary key in MasterUsers table
+//   as: "user",
+// });
 
-module.exports = PushSubscription;
+module.exports = createPushSubscriptionModel;

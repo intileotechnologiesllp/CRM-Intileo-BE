@@ -1,7 +1,8 @@
 const { DataTypes } = require("sequelize");
-const sequelize = require("../../config/db");
 
-const PipelineStage = sequelize.define(
+
+const createPipelineStageModel = (sequelizeInstance) => {
+const PipelineStage = sequelizeInstance.define(
   "PipelineStage",
   {
     stageId: {
@@ -13,7 +14,7 @@ const PipelineStage = sequelize.define(
       type: DataTypes.INTEGER,
       allowNull: false,
       references: {
-        model: "pipelines",
+        model: "Pipelines",
         key: "pipelineId",
       },
     },
@@ -53,7 +54,7 @@ const PipelineStage = sequelize.define(
       type: DataTypes.INTEGER,
       allowNull: false,
       references: {
-        model: "masterusers",
+        model: "MasterUsers",
         key: "masterUserID",
       },
     },
@@ -67,7 +68,7 @@ const PipelineStage = sequelize.define(
     },
   },
   {
-    tableName: "pipeline_stages",
+    tableName: "PipelineStages",
     timestamps: true,
     indexes: [
       {
@@ -85,5 +86,7 @@ const PipelineStage = sequelize.define(
     ],
   }
 );
+return PipelineStage
+}
 
-module.exports = PipelineStage;
+module.exports = createPipelineStageModel;

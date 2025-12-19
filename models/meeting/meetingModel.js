@@ -1,9 +1,9 @@
 const { DataTypes } = require("sequelize");
-const sequelize = require("../../config/db");
-const Activity = require("../activity/activityModel");
-const MasterUser = require("../master/masterUserModel");
+// const Activity = require("../activity/activityModel");
+// const MasterUser = require("../master/masterUserModel");
 
-const Meeting = sequelize.define(
+const createMeetingModel = (sequelizeInstance) => {
+const Meeting = sequelizeInstance.define(
   "Meeting",
   {
     meetingId: {
@@ -112,7 +112,7 @@ const Meeting = sequelize.define(
       type: DataTypes.INTEGER,
       allowNull: true,
       references: {
-        model: "masterusers",
+        model: "MasterUsers",
         key: "masterUserID",
       },
       // onDelete: "SET NULL",
@@ -150,7 +150,7 @@ const Meeting = sequelize.define(
       type: DataTypes.INTEGER,
       allowNull: false,
       references: {
-        model: "masterusers",
+        model: "MasterUsers",
         key: "masterUserID",
       },
       // onDelete: "CASCADE",
@@ -168,7 +168,8 @@ const Meeting = sequelize.define(
     ],
   }
 );
-
+return Meeting
+}
 /* =======================
    Associations
 ======================= */
@@ -193,4 +194,4 @@ const Meeting = sequelize.define(
 //   as: "cancelledByUser",
 // });
 
-// module.exports = Meeting;  
+module.exports = createMeetingModel;  

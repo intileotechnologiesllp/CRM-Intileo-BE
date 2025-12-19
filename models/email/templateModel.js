@@ -1,7 +1,8 @@
 const { DataTypes } = require("sequelize");
-const sequelize = require("../../config/db");
 
-const Template = sequelize.define("Template", {
+
+const createTemplateModel = (sequelizeInstance) => {
+const Template = sequelizeInstance.define("Template", {
   templateID: {
     type: DataTypes.INTEGER,
     primaryKey: true,
@@ -31,6 +32,13 @@ const Template = sequelize.define("Template", {
     type: DataTypes.INTEGER,
     allowNull: false, // Assuming this is required for user association
   }
-});
+},
+ {
+    tableName: "Templates",
+    timestamps: true,
+  }
+);
+return Template
+}
 
-module.exports = Template;
+module.exports = createTemplateModel;

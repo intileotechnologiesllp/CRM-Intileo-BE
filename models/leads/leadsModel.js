@@ -244,7 +244,7 @@ const Lead = sequelizeInstance.define("Lead", {
     type: DataTypes.INTEGER,
     allowNull: true,
     references: {
-      model: "GroupVisibility",
+      model: "GroupVisibilities",
       key: "groupId",
     },
     comment: "Reference to the owner's visibility group",

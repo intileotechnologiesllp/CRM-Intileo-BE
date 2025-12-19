@@ -1,8 +1,8 @@
 const { DataTypes } = require("sequelize");
-const sequelize = require("../../config/db"); // Adjust the path to your database configuration
-// const { op}= require("sequelize/types/lib/operators");
 
-const UserCredential = sequelize.define("UserCredential", {
+
+const createUserCredentialModel = (sequelizeInstance) => {
+const UserCredential = sequelizeInstance.define("UserCredential", {
   masterUserID: {
     type: DataTypes.INTEGER,
     allowNull: false,
@@ -100,6 +100,13 @@ smartBcc: {
     type: DataTypes.BOOLEAN,
     allowNull: true,
   },
-});
+},
+ {
+    tableName: "UserCredentials",
+    timestamps: true,
+  }
+);
+return UserCredential
+}
 
-module.exports = UserCredential;
+module.exports = createUserCredentialModel;

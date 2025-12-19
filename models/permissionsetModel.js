@@ -1,7 +1,7 @@
 const { DataTypes } = require("sequelize");
 
 const createPermissionSetModel = (sequelizeInstance) => {
-  const permissionSet = sequelizeInstance.define("permissionSet", {
+  const PermissionSet = sequelizeInstance.define("PermissionSet", {
     permissionSetId: {
       type: DataTypes.INTEGER,
     primaryKey: true,
@@ -22,10 +22,10 @@ const createPermissionSetModel = (sequelizeInstance) => {
   }
 },
 {
-  tableName: "permissionSets",
+  tableName: "PermissionSets",
   timestamps: true,
 });
-return permissionSet;
+return PermissionSet;
 }
 
 module.exports = createPermissionSetModel;

@@ -1,7 +1,8 @@
 const { DataTypes } = require("sequelize");
-const sequelize = require("../../config/db");
 
-const Goal = sequelize.define(
+
+const createGoalModel = (sequelizeInstance) => {
+const Goal = sequelizeInstance.define(
   "Goal",
   {
     goalId: {
@@ -12,7 +13,7 @@ const Goal = sequelize.define(
     dashboardId: {
       type: DataTypes.INTEGER,
       allowNull: true, // Allow null for goals not assigned to dashboard yet
-      references: { model: "dashboards", key: "dashboardId" },
+      references: { model: "Dashboards", key: "dashboardId" },
     },
     entity: {
       type: DataTypes.STRING,
@@ -115,5 +116,7 @@ const Goal = sequelize.define(
     timestamps: true,
   }
 );
+return Goal
+}
 
-module.exports = Goal;
+module.exports = createGoalModel;

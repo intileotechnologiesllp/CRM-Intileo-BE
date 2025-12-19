@@ -1,7 +1,7 @@
 const { DataTypes } = require("sequelize");
-const sequelize = require("../../config/db");
 
-const DefaultEmail = sequelize.define("DefaultEmail", {
+const createDefaultEmailModel = (sequelizeInstance) => {
+const DefaultEmail = sequelizeInstance.define("DefaultEmail", {
   masterUserID: {
     type: DataTypes.INTEGER,
     allowNull: false,
@@ -31,6 +31,13 @@ const DefaultEmail = sequelize.define("DefaultEmail", {
       isIn: [['gmail', 'outlook', 'yahoo', 'custom',"yandex"]], // Restrict to known providers
     },
   }, 
-});
+},
+ {
+    tableName: "DefaultEmails",
+    timestamps: true,
+  }
+);
+return DefaultEmail
+}
 
-module.exports = DefaultEmail;
+module.exports = createDefaultEmailModel;

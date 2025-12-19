@@ -1,7 +1,8 @@
 const { DataTypes } = require("sequelize");
-const sequelize = require("../../config/db");
 
-const DeviceActivity = sequelize.define("DeviceActivity", {
+
+const createDeviceActivityModel = (sequelizeInstance) => {
+const DeviceActivity = sequelizeInstance.define("DeviceActivity", {
   device: {
     type: DataTypes.STRING(100),
   },
@@ -23,6 +24,13 @@ const DeviceActivity = sequelize.define("DeviceActivity", {
   isActive: {
     type: DataTypes.BOOLEAN,
   },
-});
+},
+ {
+    tableName: "DeviceActivities",
+    timestamps: true,
+  }
+);
+return DeviceActivity
+}
 
-module.exports = DeviceActivity;
+module.exports = createDeviceActivityModel;

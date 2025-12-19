@@ -314,15 +314,245 @@
 // };
 
 
+const createActivityColumnModel = require("./activity/activityColumnModel.js");
+const createActivityModel = require("./activity/activityModel.js");
+const createActivitySettingModel = require("./activity/activitySettingModel.js");
+const createActivityTypeModel = require("./activity/activityTypeModel.js");
 
+
+const createCountryModel = require("./admin/masters/countryModel.js");
+const createCurrencyModel = require("./admin/masters/currencyModel.js");
+const createDepartmentModel = require("./admin/masters/departmentModel.js");
+const createDesignationModel = require("./admin/masters/designationModel.js");
+const createLabelModel = require("./admin/masters/labelModel.js");
+const createLeadColumnModel = require("./admin/masters/leadColumnsModel.js");
+const createOrganizationModel = require("./admin/masters/organizationModel.js");
+const createProgramModel = require("./admin/masters/programModel.js");
+const createRegionModel = require("./admin/masters/regionModel.js");
+const createScopeModel = require("./admin/masters/scopeModel.js");
+const createSectoralscopeModel = require("./admin/masters/sectoralScopeModel.js");
+const createStatusModel = require("./admin/masters/statusModel.js");
+
+
+const createGroupMembershipModel = require("./admin/groupMembershipModel.js");
+const createGroupVisibilityModel = require("./admin/groupVisibilityModel.js");
+const createItemVisibilityRuleModel = require("./admin/itemVisibilityRuleModel.js");
+const createPipelineVisibilityRuleModel = require("./admin/pipelineVisibilityRuleModel.js");
+const createVisibilityGroupModel = require("./admin/visibilityGroupModel.js");
+
+
+const createCompanySettingModel = require("./company/companySettingsModel.js");
+
+
+const createContactChangeLogModel = require("./contact/contactChangeLogModel.js");
+const createContactSyncConfigModel = require("./contact/contactSyncConfigModel.js");
+const createContactSyncHistoryModel = require("./contact/contactSyncHistoryModel.js");
+const createContactSyncMappingModel = require("./contact/contactSyncMappingModel.js");
+
+
+const createDealColumnModel = require("./deals/dealColumnModel.js");
+const createDealFileModel = require("./deals/dealFileModel.js");
+const createDealParticipantModel = require("./deals/dealPartcipentsModel.js");
+const createDealDetailsModel = require("./deals/dealsDetailModel.js");
+const createDealModel = require("./deals/dealsModels.js");
+const createDealStageHistoryModel = require("./deals/dealsStageHistoryModel.js");
+const createDealNoteModel = require("./deals/delasNoteModel.js");
+const createLostReasonModel = require("./deals/lostReasonModel.js");
+const createLostReasonSettingModel = require("./deals/lostReasonSettingModel.js");
+const createPipelineModel = require("./deals/pipelineModel.js");
+const createPipelineStageModel = require("./deals/pipelineStageModel.js");
+
+ 
+const createDeviceActivityModel = require("./deviceActivity/deviceActivity.js");
+
+
+const createAttachmentModel = require("./email/attachmentModel.js");
+const createDefaultEmailModel = require("./email/defaultEmailModel.js");
+const createEmailModel = require("./email/emailModel.js");
+const createTemplateModel = require("./email/templateModel.js");
+const createUserCredentialModel = require("./email/userCredentialModel.js")
+
+
+const createUserFavoriteModel = require("./favorites/userFavoritesModel.js");
+
+
+const createUserGoogleTokenModel = require("./googledrive/googledrive.js");
+
+
+const createImportDataModel = require("./import/importDataModel.js");
+
+
+const createCardModel = require("./insight/cardModel.js");
+const createDashboardModel = require("./insight/dashboardModel.js");
+const createGoalModel = require("./insight/goalModel.js");
+const createReportFolderModel = require("./insight/reportFolderModel.js");
+const createReportModel = require("./insight/reportModel.js");
+
+
+const createEntityFileModel = require("./leads/entityFileModel.js");
+const createLeadColumnPreferenceModel = require("./leads/leadColumnModel.js")
+const createLeadDetailsModel = require("./leads/leadDetailsModel.js");
+const createLeadFilterModel = require("./leads/leadFiltersModel.js");
+const createLeadNoteModel = require("./leads/leadNoteModel.js");
+const createLeadOrganizationModel = require("./leads/leadOrganizationModel.js");
+const createLeadPersonModel = require("./leads/leadPersonModel.js");
+const createLeadModel = require("./leads/leadsModel.js");
+const createOrganizationColumnPreferenceModel = require("./leads/organizationColumnModel.js");
+const createOrganizationFileModel = require("./leads/organizationFileModel.js");
+const createOrganizationNoteModel = require("./leads/organizationNoteModel.js");
+const createOrganizationSidebarPreferenceModel = require("./leads/organizationSidebarModel.js");
+const createPersonColumnPreferenceModel = require("./leads/personColumnModel.js");
+const createPersonFileModel = require("./leads/personFileModel.js");
+const createPersonNoteModel = require("./leads/personNoteModel.js");
+const createPersonSidebarPreferenceModel = require("./leads/personSidebarModel.js");
+
+
+const createMeetingModel = require("./meeting/meetingModel.js");
+const createSchedulingLinkModel = require("./meeting/schedulingLinkModel.js");
+const createMiscSettingModel = require("./miscSettings/miscSettingModel.js");
+
+const createNotificationModel = require("./notification/notificationModel.js");
+const createNotificationPreferenceModel = require("./notification/notificationPreferenceModel.js");
+const createPushSubscriptionModel = require('./notification/pushSubscriptionModel.js');
+
+
+const createMasterUserPrivilegesModel = require("./privileges/masterUserPrivilegesModel.js");
+const createProductColumnModel = require("./product/customColumnModel.js");
+const createDealProductModel = require("./product/dealProductModel.js");
+const createProductModel = require("./product/productModel.js");
+const createProductVariationModel = require("./product/productVariationModel.js");
+
+
+const createAuditTrailModel = require("./reports/auditTrailModel.js");
+const createHistoryModel = require("./reports/historyModel.js");
+const createLoginHistoryModel = require("./reports/loginHistoryModel.js");
+const createRecentLoginHistoryModel = require("./reports/recentLoginHistoryModel.js");
+
+const createAdminModel = require("./adminModel.js");
+const createCustomFieldModel = require("./customFieldModel.js");
+const createCustomFieldValueModel = require("./customFieldValueModel.js");
+const createPermissionSetModel = require("./permissionsetModel.js");
+const createRecentSearchModel = require("./recentSearchModel.js");
+const createUserInterfacePreferencesModel = require("./userInterfacePreferences.js");
 const createMasterUserModel = require("./master/masterUserModel.js");
-const createLostReasonModel = require("./lostReason/lostReasonModal.js");
+// const createLostReasonModel = require("./lostReason/lostReasonModal.js");
 
 
 
 
 
 module.exports = {
+  createActivityColumnModel,
+  createActivityModel,
+  createActivitySettingModel,
+  createActivityTypeModel,
+
+  createCountryModel,
+  createCurrencyModel,
+  createDepartmentModel,
+  createDesignationModel,
+  createLabelModel,
+  createLeadColumnModel,
+  createOrganizationModel,
+  createProgramModel,
+  createRegionModel,
+  createScopeModel,
+  createSectoralscopeModel,
+  createStatusModel,
+
+  createGroupMembershipModel,
+  createGroupVisibilityModel,
+  createItemVisibilityRuleModel,
+  createPipelineVisibilityRuleModel,
+  createVisibilityGroupModel,
+
+  createCompanySettingModel,
+
+  createContactChangeLogModel,
+  createContactSyncConfigModel,
+  createContactSyncHistoryModel,
+  createContactSyncMappingModel,
+
+
+  createDealColumnModel,
+  createDealFileModel,
+  createDealParticipantModel,
+  createDealDetailsModel,
+  createDealModel,
+  createDealStageHistoryModel,
+  createLostReasonModel,
+  createDealNoteModel,
+  createLostReasonSettingModel,
+  createPipelineModel,
+  createPipelineStageModel,
+
+
+  createDeviceActivityModel,
+
+
+  createAttachmentModel,
+  createDefaultEmailModel,
+  createEmailModel,
+  createTemplateModel,
+  createUserCredentialModel,
+
+
+  createUserFavoriteModel,
+  createUserGoogleTokenModel,
+  createImportDataModel,
+
+
+  createCardModel,
+  createDashboardModel,
+  createGoalModel,
+  createReportFolderModel,
+  createReportModel,
+
+
+  createEntityFileModel,
+  createLeadColumnPreferenceModel,
+  createLeadDetailsModel,
+  createLeadFilterModel,
+  createLeadNoteModel,
+  createLeadOrganizationModel,
+  createLeadPersonModel,
+  createLeadModel,
+  createOrganizationColumnPreferenceModel,
+  createOrganizationFileModel,
+  createOrganizationNoteModel,
+  createOrganizationSidebarPreferenceModel,
+  createPersonColumnPreferenceModel,
+  createPersonFileModel,
+  createPersonNoteModel,
+  createPersonSidebarPreferenceModel,
+
+
+  createMeetingModel,
+  createSchedulingLinkModel,
+  createMiscSettingModel,
+
+
+  createNotificationModel,
+  createNotificationPreferenceModel,
+  createPushSubscriptionModel,
+
+  createMasterUserPrivilegesModel,
+  createProductColumnModel,
+  createDealProductModel,
+  createProductModel,
+  createProductVariationModel,
+
+  createAuditTrailModel,
+  createHistoryModel,
+  createLoginHistoryModel,
+  createRecentLoginHistoryModel,
+
+
   createMasterUserModel,
-  createLostReasonModel
+  createAdminModel,
+  createCustomFieldModel,
+  createCustomFieldValueModel,
+  createPermissionSetModel,
+  createRecentSearchModel,
+  createUserInterfacePreferencesModel
 };

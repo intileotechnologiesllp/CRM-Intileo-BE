@@ -1,8 +1,9 @@
 const { DataTypes } = require("sequelize");
-const sequelize = require("../../config/db");
 
-const CompanySettings = sequelize.define(
-  "CompanySettings",
+
+const createCompanySettingModel = (sequelizeInstance) => {
+const CompanySetting = sequelizeInstance.define(
+  "CompanySetting",
   {
     companySettingsId: {
       type: DataTypes.INTEGER,
@@ -67,7 +68,7 @@ const CompanySettings = sequelize.define(
     },
   },
   {
-    tableName: "company_settings",
+    tableName: "CompanySettings",
     timestamps: true,
     indexes: [
       {
@@ -78,5 +79,7 @@ const CompanySettings = sequelize.define(
     ],
   }
 );
+return CompanySetting
+}
 
-module.exports = CompanySettings;
+module.exports = createCompanySettingModel;

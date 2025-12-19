@@ -1,8 +1,9 @@
 // models/deals/lostReasonSettingModel.js
 const { DataTypes } = require('sequelize');
-const sequelize = require('../../config/db');
 
-const LostReasonSetting = sequelize.define('LostReasonSetting', {
+
+const createLostReasonSettingModel = (sequelizeInstance) => {
+const LostReasonSetting = sequelizeInstance.define('LostReasonSetting', {
   settingId: {
     type: DataTypes.INTEGER,
     primaryKey: true,
@@ -28,7 +29,7 @@ const LostReasonSetting = sequelize.define('LostReasonSetting', {
     allowNull: false,
   }
 }, {
-  tableName: 'lost_reason_settings',
+  tableName: 'LostReasonSettings',
   timestamps: true,
   indexes: [
     {
@@ -42,5 +43,7 @@ const LostReasonSetting = sequelize.define('LostReasonSetting', {
     }
   ]
 });
+return LostReasonSetting
+}
 
-module.exports = LostReasonSetting;
+module.exports = createLostReasonSettingModel;

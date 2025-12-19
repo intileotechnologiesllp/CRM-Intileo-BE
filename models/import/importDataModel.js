@@ -1,7 +1,8 @@
 const { DataTypes } = require('sequelize');
-const sequelize = require('../../config/db');
 
-const ImportData = sequelize.define('ImportData', {
+
+const createImportDataModel = (sequelizeInstance) => {
+const ImportData = sequelizeInstance.define('ImportData', {
   importId: {
     type: DataTypes.INTEGER,
     primaryKey: true,
@@ -167,7 +168,7 @@ const ImportData = sequelize.define('ImportData', {
     comment: 'Array of column headers from the spreadsheet'
   }
 }, {
-  tableName: 'import_data',
+  tableName: 'ImportDatas',
   timestamps: true,
   createdAt: 'createdAt',
   updatedAt: 'updatedAt',
@@ -194,6 +195,8 @@ const ImportData = sequelize.define('ImportData', {
     }
   ]
 });
+return ImportData
+}
 
 // Instance methods for common operations
 ImportData.prototype.updateProgress = function(progress, additionalData = {}) {
@@ -261,4 +264,4 @@ ImportData.getActiveImports = function(masterUserID = null) {
   });
 };
 
-module.exports = ImportData;
+module.exports = createImportDataModel;

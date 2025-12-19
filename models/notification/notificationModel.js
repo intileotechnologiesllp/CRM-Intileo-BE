@@ -1,8 +1,8 @@
 const { DataTypes } = require("sequelize");
-const sequelize = require("../../config/db");
-const MasterUser = require("../master/masterUserModel");
+// const MasterUser = require("../master/masterUserModel");
 
-const Notification = sequelize.define(
+const createNotificationModel = (sequelizeInstance) => {
+const Notification = sequelizeInstance.define(
   "Notification",
   {
     notificationId: {
@@ -155,18 +155,20 @@ const Notification = sequelize.define(
     ],
   }
 );
+return Notification
+}
 
 // Associations
-Notification.belongsTo(MasterUser, {
-  foreignKey: "userId",
-  targetKey: "masterUserID",  // Specify the correct primary key in MasterUsers table
-  as: "recipient",
-});
+// Notification.belongsTo(MasterUser, {
+//   foreignKey: "userId",
+//   targetKey: "masterUserID",  // Specify the correct primary key in MasterUsers table
+//   as: "recipient",
+// });
 
-Notification.belongsTo(MasterUser, {
-  foreignKey: "actionBy",
-  targetKey: "masterUserID",  // Specify the correct primary key in MasterUsers table
-  as: "actor",
-});
+// Notification.belongsTo(MasterUser, {
+//   foreignKey: "actionBy",
+//   targetKey: "masterUserID",  // Specify the correct primary key in MasterUsers table
+//   as: "actor",
+// });
 
-module.exports = Notification;
+module.exports = createNotificationModel;

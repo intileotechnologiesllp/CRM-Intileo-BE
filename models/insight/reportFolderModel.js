@@ -1,7 +1,8 @@
 const { DataTypes } = require("sequelize");
-const sequelize = require("../../config/db");
 
-const ReportFolder = sequelize.define(
+
+const createReportFolderModel = (sequelizeInstance) => {
+const ReportFolder = sequelizeInstance.define(
   "ReportFolder",
   {
     reportFolderId: {
@@ -17,5 +18,7 @@ const ReportFolder = sequelize.define(
     timestamps: true,
   }
 );
+return ReportFolder
+}
 
-module.exports = ReportFolder;
+module.exports = createReportFolderModel;

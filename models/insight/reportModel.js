@@ -1,7 +1,8 @@
 const { DataTypes } = require("sequelize");
-const sequelize = require("../../config/db");
 
-const Report = sequelize.define(
+
+const createReportModel = (sequelizeInstance) => {
+const Report = sequelizeInstance.define(
   "Report",
   {
     reportId: {
@@ -44,5 +45,7 @@ const Report = sequelize.define(
     timestamps: true,
   }
 );
+return Report
+}
 
-module.exports = Report;
+module.exports = createReportModel;

@@ -165,38 +165,38 @@ const createActivityModel = (sequelizeInstance) => {
 //   }
 // });
 
-Activity.afterCreate(async (activity, options) => {
-  try {
-    // Fetch user's OAuth token (from DB or session)
-    const user = await User.findByPk(activity.masterUserID);
-    if (!user || !user.googleOAuthToken) return;
+// Activity.afterCreate(async (activity, options) => {
+//   try {
+//     // Fetch user's OAuth token (from DB or session)
+//     const user = await User.findByPk(activity.masterUserID);
+//     if (!user || !user.googleOAuthToken) return;
 
-    // Parse the token if it's a string
-    let tokenObj;
-    if (typeof user.googleOAuthToken === "string") {
-      try {
-        tokenObj = JSON.parse(user.googleOAuthToken);
-      } catch (e) {
-        tokenObj = {};
-      }
-    } else {
-      tokenObj = user.googleOAuthToken;
-    }
+//     // Parse the token if it's a string
+//     let tokenObj;
+//     if (typeof user.googleOAuthToken === "string") {
+//       try {
+//         tokenObj = JSON.parse(user.googleOAuthToken);
+//       } catch (e) {
+//         tokenObj = {};
+//       }
+//     } else {
+//       tokenObj = user.googleOAuthToken;
+//     }
 
-    // Use only the access_token
-    const accessToken = tokenObj.access_token;
-    if (!accessToken) return;
+//     // Use only the access_token
+//     const accessToken = tokenObj.access_token;
+//     if (!accessToken) return;
 
-    // Sync to Google Calendar
-    const eventId = await syncActivityToGoogleCalendar(activity, accessToken);
+//     // Sync to Google Calendar
+//     const eventId = await syncActivityToGoogleCalendar(activity, accessToken);
 
-    // Save calendar_event_id for future updates/deletes
-    activity.calendar_event_id = eventId;
-    await activity.save();
-  } catch (err) {
-    console.error("Google Calendar sync failed:", err);
-    // Optionally log error or notify user
-  }
-});
+//     // Save calendar_event_id for future updates/deletes
+//     activity.calendar_event_id = eventId;
+//     await activity.save();
+//   } catch (err) {
+//     console.error("Google Calendar sync failed:", err);
+//     // Optionally log error or notify user
+//   }
+// });
 
 module.exports = createActivityModel;

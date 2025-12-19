@@ -1,8 +1,9 @@
 const { DataTypes } = require("sequelize");
-const sequelize = require("../../config/db");
-const MasterUser = require("../master/masterUserModel");
+// const MasterUser = require("../master/masterUserModel");
 
-const SchedulingLink = sequelize.define(
+
+const createSchedulingLinkModel = (sequelizeInstance) => {
+const SchedulingLink = sequelizeInstance.define(
   "SchedulingLink",
   {
     linkId: {
@@ -13,7 +14,7 @@ const SchedulingLink = sequelize.define(
     masterUserID: {
       type: DataTypes.INTEGER,
       allowNull: false,
-      references: { model: "masterusers", key: "masterUserID" },
+      references: { model: "MasterUsers", key: "masterUserID" },
       onDelete: "CASCADE",
     },
     uniqueToken: {
@@ -145,17 +146,18 @@ const SchedulingLink = sequelize.define(
     ],
   }
 );
-
+return SchedulingLink
+}
 // Associations
-SchedulingLink.belongsTo(MasterUser, {
-  foreignKey: "masterUserID",
-  as: "owner",
-});
+// SchedulingLink.belongsTo(MasterUser, {
+//   foreignKey: "masterUserID",
+//   as: "owner",
+// });
 
-MasterUser.hasMany(SchedulingLink, {
-  foreignKey: "masterUserID",
-  as: "schedulingLinks",
-});
+// MasterUser.hasMany(SchedulingLink, {
+//   foreignKey: "masterUserID",
+//   as: "schedulingLinks",
+// });
 
-module.exports = SchedulingLink;
+module.exports = createSchedulingLinkModel;
 

@@ -1,9 +1,9 @@
 const { DataTypes } = require("sequelize");
-const sequelize = require("../../config/db");
-const Deal = require("../../models/deals/dealsModels"); // Adjust path as needed
-const MasterUser = require("../../models/master/masterUserModel"); // Adjust path as needed
+// const Deal = require("../../models/deals/dealsModels"); 
+// const MasterUser = require("../../models/master/masterUserModel"); 
 
-const DealNote = sequelize.define("DealNote", {
+const createDealNoteModel = (sequelizeInstance) => {
+const DealNote = sequelizeInstance.define("DealNote", {
   noteId: {
     type: DataTypes.INTEGER,
     primaryKey: true,
@@ -13,7 +13,7 @@ const DealNote = sequelize.define("DealNote", {
     type: DataTypes.INTEGER,
     allowNull: false,
     references: {
-      model: Deal,
+      model: "Deals",
       key: "dealId"
     }
   },
@@ -25,7 +25,7 @@ const DealNote = sequelize.define("DealNote", {
     type: DataTypes.INTEGER,
     allowNull: false,
     references: {
-      model: MasterUser,
+      model: "MasterUsers",
       key: "masterUserID"
     }
   },
@@ -41,9 +41,10 @@ const DealNote = sequelize.define("DealNote", {
   tableName: "DealNotes",
   timestamps: true,
 });
-
+return DealNote
+}
 // Associations (optional)
-DealNote.belongsTo(Deal, { foreignKey: "dealId", as: "Deal" });
-DealNote.belongsTo(MasterUser, { foreignKey: "createdBy", as: "Author" });
+// DealNote.belongsTo(Deal, { foreignKey: "dealId", as: "Deal" });
+// DealNote.belongsTo(MasterUser, { foreignKey: "createdBy", as: "Author" });
 
-module.exports = DealNote;
+module.exports = createDealNoteModel;

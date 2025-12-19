@@ -1,7 +1,8 @@
 const { DataTypes } = require("sequelize");
-const sequelize = require("../../config/db");
 
-const Dashboard = sequelize.define(
+
+const createDashboardModel = (sequelizeInstance) => {
+const Dashboard = sequelizeInstance.define(
   "Dashboard",
   {
     dashboardId: {
@@ -31,6 +32,8 @@ const Dashboard = sequelize.define(
     timestamps: true,
   }
 );
+return Dashboard
+}
 
-Dashboard.sync({alter: true});
-module.exports = Dashboard;
+// Dashboard.sync({alter: true});
+module.exports = createDashboardModel;

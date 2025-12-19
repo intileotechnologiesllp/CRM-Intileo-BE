@@ -1,7 +1,8 @@
 const { DataTypes } = require("sequelize");
-const sequelize = require("../../config/db");
 
-const Card = sequelize.define(
+
+const createCardModel = (sequelizeInstance) => {
+const Card = sequelizeInstance.define(
   "Card",
   {
     cardId: {
@@ -41,5 +42,7 @@ const Card = sequelize.define(
     ]
   }
 );
+return Card
+}
 
-module.exports = Card;
+module.exports = createCardModel;

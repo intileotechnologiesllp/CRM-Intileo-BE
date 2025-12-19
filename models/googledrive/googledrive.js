@@ -1,7 +1,7 @@
 const { DataTypes } = require("sequelize");
-const sequelize = require("../../config/db");
 
-const UserGoogleToken = sequelize.define("UserGoogleToken", {
+const createUserGoogleTokenModel = (sequelizeInstance) => {
+const UserGoogleToken = sequelizeInstance.define("UserGoogleToken", {
   id:{
     type: DataTypes.INTEGER,
     primaryKey: true,
@@ -15,7 +15,14 @@ const UserGoogleToken = sequelize.define("UserGoogleToken", {
   accessToken: DataTypes.TEXT,
   refreshToken: DataTypes.TEXT,
   expiryDate: DataTypes.DATE,
-});
+},
+{
+    tableName: "UserGoogleTokens",
+    timestamps: true,
+  }
+);
+return UserGoogleToken
+}
 
 UserGoogleToken.sync({});
-module.exports = UserGoogleToken;
+module.exports = createUserGoogleTokenModel;

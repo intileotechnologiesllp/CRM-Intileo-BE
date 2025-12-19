@@ -1,8 +1,8 @@
 const { DataTypes } = require("sequelize");
-const sequelize = require("../../config/db");
 
-const UserFavorites = sequelize.define(
-  "UserFavorites",
+const createUserFavoriteModel = (sequelizeInstance) => {
+const UserFavorite = sequelizeInstance.define(
+  "UserFavorite",
   {
     favoriteId: {
       type: DataTypes.INTEGER,
@@ -41,7 +41,7 @@ const UserFavorites = sequelize.define(
     },
   },
   {
-    tableName: "user_favorites",
+    tableName: "UserFavorites",
     timestamps: true,
     indexes: [
       {
@@ -64,5 +64,7 @@ const UserFavorites = sequelize.define(
     ]
   }
 );
+return UserFavorite
+}
 
-module.exports = UserFavorites;
+module.exports = createUserFavoriteModel;

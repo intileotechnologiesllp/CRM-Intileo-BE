@@ -1,7 +1,8 @@
 const { DataTypes } = require("sequelize");
-const sequelize = require("../../config/db");
 
-const Attachment = sequelize.define("Attachment", {
+
+const createAttachmentModel = (sequelizeInstance) => {
+const Attachment = sequelizeInstance.define("Attachment", {
   attachmentID: {
     type: DataTypes.INTEGER,
     primaryKey: true,
@@ -11,10 +12,10 @@ const Attachment = sequelize.define("Attachment", {
     type: DataTypes.INTEGER,
     allowNull: false,
     references: {
-      model: "emails", // Name of the Email table
+      model: "Emails", 
       key: "emailID",
     },
-    onDelete: "CASCADE", // Delete attachments if the associated email is deleted
+    onDelete: "CASCADE", 
   },
   filename: {
     type: DataTypes.STRING,
@@ -36,6 +37,13 @@ const Attachment = sequelize.define("Attachment", {
     type: DataTypes.INTEGER,
     allowNull: true,
   },
-});
+},
+ {
+    tableName: "Attachments",
+    timestamps: true,
+  }
+);
+return Attachment
+}
 
-module.exports = Attachment;
+module.exports = createAttachmentModel;

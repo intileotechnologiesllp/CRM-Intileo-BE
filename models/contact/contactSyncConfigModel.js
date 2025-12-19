@@ -1,7 +1,8 @@
 const { DataTypes } = require("sequelize");
-const sequelize = require("../../config/db");
 
-const ContactSyncConfig = sequelize.define(
+
+const createContactSyncConfigModel = (sequelizeInstance) => {
+const ContactSyncConfig = sequelizeInstance.define(
   "ContactSyncConfig",
   {
     syncConfigId: {
@@ -109,9 +110,11 @@ const ContactSyncConfig = sequelize.define(
     },
   },
   {
-    tableName: "contactSyncConfigs",
+    tableName: "ContactSyncConfigs",
     timestamps: true,
   }
 );
+return ContactSyncConfig
+}
 
-module.exports = ContactSyncConfig;
+module.exports = createContactSyncConfigModel;
