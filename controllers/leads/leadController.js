@@ -939,7 +939,7 @@ exports.getLeads = async (req, res) => {
         attr.includes('Currency') || attr.includes('currency')
       );
     }
-
+    leadAttributes.push('visibleGroup')
     let whereClause = {};
     let hasActivityFiltering = false; // Initialize early for use throughout the function
     let hasPersonFiltering = false; // Initialize for Person filtering
