@@ -388,6 +388,7 @@ exports.createLead = async (req, res) => {
       visibilityLevel = "item_owners_visibility_group"; // Default fallback
     }
 
+    console.log(req.body.visibleGroup, "THIS IS THE VISIBLE")
     const lead = await Lead.create({
       personId: personRecord ? personRecord.personId : null,
       leadOrganizationId: orgRecord ? orgRecord.leadOrganizationId : null,
