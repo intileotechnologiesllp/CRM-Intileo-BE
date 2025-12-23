@@ -70,7 +70,7 @@ const schedulingLinkRoutes = require('./routes/meeting/schedulingLinkRoutes.js')
 
 const { loadPrograms } = require("./utils/programCache");
 const imapIdleManager = require('./services/imapIdleManager'); // IMAP IDLE for real-time sync
-const { initializeSocket } = require('./config/socket'); // Socket.IO for real-time notifications
+const { initializeSocket, getIO } = require('./config/socket'); // Socket.IO for real-time notifications
 const http = require('http');
 // const { initRabbitMQ } = require("./services/rabbitmqService");
 const app = express();
@@ -171,6 +171,25 @@ app.post('/api/meetings/scheduling/:token/book', schedulingLinkController.bookMe
 const notificationRoutes = require('./routes/notification/notificationRoutes.js'); // Import notification routes
 app.use('/api/notifications', notificationRoutes); // Register notification routes
 
+// Debug route to emit a notification event to all connected clients
+// Useful for testing toast delivery without creating DB records
+app.post('/debug/emit-all', (req, res) => {
+  try {
+    const payload = req.body && Object.keys(req.body).length
+      ? req.body
+      : { notification: { title: 'debug', message: 'hi' }, unreadCount: 1 };
+
+    // Get Socket.IO instance (throws if not initialized)
+    const io = getIO();
+    io.emit('new_notification', payload);
+    console.log("📤 [Debug] Emitted 'new_notification' to all connected clients", payload);
+    res.json({ ok: true });
+  } catch (error) {
+    console.error('[Debug] Failed to emit new_notification to all:', error);
+    res.status(500).json({ ok: false, error: error.message });
+  }
+});
+
 app.get("/track/open/:tempMessageId", async (req, res) => {
   const { tempMessageId } = req.params;
 
@@ -207,6 +226,7 @@ app.get("/track/click", async (req, res) => {
     res.status(500).send("Internal Server Error");
   }
 });
+
 
 // (async () => {
 //   try {
