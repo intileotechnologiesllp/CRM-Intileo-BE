@@ -228,6 +228,7 @@ class NotificationTriggers {
           entityType: "lead",
           entityId: lead.leadId,
           actionUrl: `/leads/${lead.leadId}`,
+          leadId: lead.leadId,
           actionBy: createdBy.userId,
           metadata: {
             leadTitle: lead.leadTitle,

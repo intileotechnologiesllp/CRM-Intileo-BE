@@ -53,10 +53,10 @@ function initializeSocket(server) {
 
       // Verify JWT token
       const decoded = jwt.verify(token, process.env.JWT_SECRET);
-      socket.userId = decoded.userId;
+      socket.userId = decoded.userId || decoded.id; // Support both userId and id fields
       socket.userData = decoded;
       
-      console.log(`✅ [Socket.IO] User ${decoded.userId} authenticated`);
+      console.log(`✅ [Socket.IO] User ${socket.userId} authenticated`);
       next();
     } catch (error) {
       console.error("❌ [Socket.IO] Authentication failed:", error.message);
