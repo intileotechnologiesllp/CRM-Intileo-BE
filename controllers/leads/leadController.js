@@ -837,6 +837,7 @@ exports.getLeads = async (req, res) => {
       } else {
         console.log("→ Favorite record not found or not accessible");
         return res.status(404).json({
+          statusCode: 404,
           message: "Favorite not found or you don't have access to it."
         });
       }
@@ -867,6 +868,7 @@ exports.getLeads = async (req, res) => {
       } else {
         console.log("→ Favorite filter not found or not accessible");
         return res.status(404).json({
+          statusCode: 404,
           message: "Favorite filter not found or you don't have access to it."
         });
       }
@@ -1115,7 +1117,10 @@ exports.getLeads = async (req, res) => {
       // Fetch the saved filter
       const filter = await LeadFilter.findByPk(effectiveFilterId);
       if (!filter) {
-        return res.status(404).json({ message: "Filter not found." });
+        return res.status(404).json({ 
+          statusCode: 404,
+          message: "Filter not found." 
+        });
       }
 
       // console.log("Found filter:", filter.filterName);
@@ -2914,6 +2919,7 @@ exports.getLeads = async (req, res) => {
     // }
 
     res.status(200).json({
+      statusCode: 200,
       message: "Leads fetched successfully",
       totalRecords: leads.count,
       totalLeadCount, // Total unconverted leads count  
@@ -2937,7 +2943,10 @@ exports.getLeads = async (req, res) => {
       null
     );
     console.error("Error fetching leads:", error);
-    res.status(500).json({ message: "Internal server error" });
+    res.status(500).json({ 
+      statusCode: 500,
+      message: "Internal server error" 
+    });
   }
 };
 
