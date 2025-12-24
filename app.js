@@ -67,6 +67,7 @@ const userInterfacePreferencesRoutes = require('./routes/userInterfacePreference
 const googleDriveRoutes  = require('./routes/google-drive/googledrive.js'); // Import Google Drive routes
 const meetingRoutes = require('./routes/meeting/meetingRoutes.js'); // Import meeting routes
 const schedulingLinkRoutes = require('./routes/meeting/schedulingLinkRoutes.js'); // Import scheduling link routes
+const mergeRoutes = require('./routes/merge/mergeRoute.js'); // Import scheduling link routes
 
 const { loadPrograms } = require("./utils/programCache");
 const imapIdleManager = require('./services/imapIdleManager'); // IMAP IDLE for real-time sync
@@ -160,6 +161,7 @@ app.use('/api/user-sessions', userSessionRoutes); // Register user session/devic
 app.use('/api/drive', googleDriveRoutes); // Register Google Drive routes
 app.use('/api/meetings', meetingRoutes); // Register meeting routes
 app.use('/api/meetings/scheduling-links', schedulingLinkRoutes); // Register scheduling link routes
+app.use('/api/merge', mergeRoutes); // Register scheduling link routes
 
 // Public scheduling link routes (must be registered separately for public access)
 const schedulingLinkController = require('./controllers/meeting/schedulingLinkController');
