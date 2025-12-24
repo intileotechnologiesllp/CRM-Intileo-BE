@@ -160,7 +160,7 @@ exports.signIn = async (req, res) => {
         "Invalid email",
         null
       );
-      return res.status(404).json({ message: "User not found" });
+      return res.status(404).json({ statusCode: 404, message: "User not found" });
     }
 
     // Verify the password
@@ -173,7 +173,7 @@ exports.signIn = async (req, res) => {
         "Invalid password",
         user.masterUserID
       );
-      return res.status(401).json({ message: "Invalid password" });
+      return res.status(401).json({ statusCode: 401, message: "Invalid password" });
     }
 
     // Get the current UTC time
@@ -313,6 +313,7 @@ exports.signIn = async (req, res) => {
 
     // Return the response with totalSessionDuration and user groups
     res.status(200).json({
+      statusCode: 200,
       message: `${
         user.loginType === "admin" ? "Admin" : "General User"
       } sign-in successful`,
@@ -337,7 +338,7 @@ exports.signIn = async (req, res) => {
       error.message || "Internal server error"
     );
 
-    res.status(500).json({ message: "Internal server error" });
+    res.status(500).json({ statusCode: 500, message: "Internal server error" });
   }
 };
 
