@@ -15,6 +15,7 @@ function initializeSocket(server) {
     'http://localhost:3001',
     'http://localhost:5173', // Vite default
     'http://127.0.0.1:3000',
+    'http://213.136.77.55:4001', // Added for server API access
     'http://213.136.77.55:4002',
     'http://213.136.77.55:3000',
   ].filter(Boolean); // Remove undefined values
