@@ -11,6 +11,7 @@ const Designation = require("./models/admin/masters/designationModel"); // Impor
 const Department = require("./models/admin/masters/departmentModel"); // Import the Department model
 const Label = require("./models/admin/masters/labelModel"); // Import Label model
 const adminRoutes = require("./routes/auth/adminRoutes"); // Import admin routes
+const twoFactorRoutes = require("./routes/auth/twoFactorRoutes"); // Import 2FA routes
 const designationRoutes = require("./routes/admin/masters/designation/designationRoutes");
 const departmentRoutes = require("./routes/admin/masters/department/departmentRoutes");
 const organizationRoutes = require("./routes/admin/masters/organization/organizationRoutes"); // Import organization routes
@@ -100,6 +101,7 @@ app.get("/api/env", (req, res) => {
 // await loadPrograms(); // Call this once at startup
 // Routes
 app.use("/api", adminRoutes);
+app.use("/api/auth/2fa", twoFactorRoutes); // Register 2FA routes
 app.use("/api/designations", designationRoutes);
 app.use("/api/departments", departmentRoutes);
 app.use("/api/organizations", organizationRoutes); // Register organization routes
