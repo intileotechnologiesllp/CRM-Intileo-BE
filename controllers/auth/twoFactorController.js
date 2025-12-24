@@ -10,35 +10,55 @@ const PROGRAMS = require("../../utils/programConstants");
  * POST /api/auth/2fa/setup
  */
 exports.setup2FA = async (req, res) => {
+  console.log(`🚀 [2FA Setup] FUNCTION ENTRY - setup2FA called`);
+  console.log(`🚀 [2FA Setup] Request method: ${req.method}`);
+  console.log(`🚀 [2FA Setup] Request path: ${req.path}`);
+  console.log(`🚀 [2FA Setup] Request headers: ${JSON.stringify(req.headers)}`);
+  
   try {
     const userId = req.adminId; // From JWT token middleware
+    console.log(`🔍 [2FA Setup] Starting 2FA setup for userId: ${userId}`);
     
     const user = await MasterUser.findByPk(userId);
     if (!user) {
+      console.log(`❌ [2FA Setup] User not found for ID: ${userId}`);
       return res.status(404).json({ message: "User not found" });
     }
 
+    console.log(`✅ [2FA Setup] User found - Email: ${user.email}, ID: ${user.masterUserID}`);
+    console.log(`🔍 [2FA Setup] Current 2FA status - Enabled: ${user.twoFactorEnabled}, HasSecret: ${!!user.twoFactorSecret}`);
+
     // If already enabled, return error
     if (user.twoFactorEnabled) {
+      console.log(`❌ [2FA Setup] 2FA already enabled for user ${userId}`);
       return res.status(400).json({ 
         message: "2FA is already enabled for this account",
         enabled: true
       });
     }
 
+    console.log(`🔍 [2FA Setup] Generating new TOTP secret...`);
     // Generate new secret
     const { secret, otpauth_url } = twoFactorService.generateSecret(
       user.email,
       "PipedriveCRM"
     );
+    console.log(`✅ [2FA Setup] Secret generated - Length: ${secret.length}`);
 
+    console.log(`🔍 [2FA Setup] Generating QR code...`);
     // Generate QR code
     const qrCodeDataUrl = await twoFactorService.generateQRCode(otpauth_url);
+    console.log(`✅ [2FA Setup] QR code generated - Length: ${qrCodeDataUrl.length}`);
 
+    console.log(`🔍 [2FA Setup] Encrypting secret for storage...`);
     // Store encrypted secret temporarily (not enabled yet)
     const encryptedSecret = twoFactorService.encrypt(secret);
+    console.log(`✅ [2FA Setup] Secret encrypted - Length: ${encryptedSecret.length}`);
+    
+    console.log(`🔍 [2FA Setup] Saving encrypted secret to database...`);
     user.twoFactorSecret = encryptedSecret;
     await user.save();
+    console.log(`✅ [2FA Setup] Secret saved successfully to user record`);
 
     await logAuditTrail(
       PROGRAMS.AUTHENTICATION,
@@ -47,6 +67,7 @@ exports.setup2FA = async (req, res) => {
       userId
     );
 
+    console.log(`✅ [2FA Setup] Setup completed successfully for user ${userId}`);
     res.status(200).json({
       message: "Scan this QR code with your authenticator app",
       qrCode: qrCodeDataUrl,
@@ -54,7 +75,9 @@ exports.setup2FA = async (req, res) => {
       otpauth_url: otpauth_url,
     });
   } catch (error) {
-    console.error("2FA Setup Error:", error);
+    console.error("❌ [2FA Setup] Error during 2FA setup:", error);
+    console.error("❌ [2FA Setup] Error stack:", error.stack);
+    console.error("❌ [2FA Setup] Setup failed for userId:", req.adminId);
     res.status(500).json({ message: "Failed to setup 2FA", error: error.message });
   }
 };
@@ -69,19 +92,51 @@ exports.verifyAndEnable2FA = async (req, res) => {
     const userId = req.adminId;
     const { token } = req.body;
 
+    console.log(`🔍 [2FA Verify] Starting verification for userId: ${userId}`);
+    console.log(`🔍 [2FA Verify] Token received: ${token ? `${token.substring(0,2)}****` : 'null/undefined'}`);
+
     if (!token || token.length !== 6) {
+      console.log(`❌ [2FA Verify] Invalid token format - Length: ${token?.length || 0}, Value: ${token || 'null'}`);
       return res.status(400).json({ message: "Invalid token format" });
     }
 
+    console.log(`🔍 [2FA Verify] Looking up user with ID: ${userId}`);
     const user = await MasterUser.findByPk(userId);
-    if (!user || !user.twoFactorSecret) {
+    
+    if (!user) {
+      console.log(`❌ [2FA Verify] User not found in database for ID: ${userId}`);
       return res.status(400).json({ message: "2FA setup not initiated" });
     }
 
+    console.log(`✅ [2FA Verify] User found - Email: ${user.email}, ID: ${user.masterUserID}`);
+    console.log(`🔍 [2FA Verify] Checking twoFactorSecret...`);
+    console.log(`🔍 [2FA Verify] twoFactorSecret exists: ${!!user.twoFactorSecret}`);
+    console.log(`🔍 [2FA Verify] twoFactorSecret length: ${user.twoFactorSecret?.length || 0}`);
+    console.log(`🔍 [2FA Verify] twoFactorEnabled: ${user.twoFactorEnabled}`);
+
+    if (!user.twoFactorSecret) {
+      console.log(`❌ [2FA Verify] No twoFactorSecret found - setup was not completed properly`);
+      console.log(`💡 [2FA Verify] Possible causes:`);
+      console.log(`   - /setup endpoint was never called successfully`);
+      console.log(`   - /setup endpoint failed to save the secret`);
+      console.log(`   - Different user JWT was used for setup vs verify`);
+      console.log(`   - Database transaction rollback occurred`);
+      return res.status(400).json({ message: "2FA setup not initiated" });
+    }
+
+    console.log(`🔍 [2FA Verify] Attempting to verify token with secret...`);
     // Verify the token
     const isValid = twoFactorService.verifyToken(token, user.twoFactorSecret);
+    console.log(`🔍 [2FA Verify] Token verification result: ${isValid}`);
     
     if (!isValid) {
+      console.log(`❌ [2FA Verify] Token verification failed for user ${userId}`);
+      console.log(`💡 [2FA Verify] Possible causes:`);
+      console.log(`   - Incorrect token entered`);
+      console.log(`   - Time synchronization issue`);
+      console.log(`   - Secret decryption failed`);
+      console.log(`   - Token already used (replay attack protection)`);
+      
       await logAuditTrail(
         PROGRAMS.AUTHENTICATION,
         "2FA_VERIFICATION_FAILED",
@@ -91,15 +146,21 @@ exports.verifyAndEnable2FA = async (req, res) => {
       return res.status(401).json({ message: "Invalid token. Please try again." });
     }
 
+    console.log(`✅ [2FA Verify] Token verification successful - proceeding with 2FA enablement`);
+    
     // Generate backup codes
+    console.log(`🔍 [2FA Verify] Generating backup codes...`);
     const backupCodes = twoFactorService.generateBackupCodes();
     const encryptedBackupCodes = twoFactorService.prepareBackupCodesForStorage(backupCodes);
+    console.log(`✅ [2FA Verify] Generated ${backupCodes.length} backup codes`);
 
     // Enable 2FA
+    console.log(`🔍 [2FA Verify] Updating user record to enable 2FA...`);
     user.twoFactorEnabled = true;
     user.twoFactorBackupCodes = encryptedBackupCodes;
     user.twoFactorEnabledAt = new Date();
     await user.save();
+    console.log(`✅ [2FA Verify] 2FA enabled successfully for user ${userId}`);
 
     await logAuditTrail(
       PROGRAMS.AUTHENTICATION,
@@ -114,7 +175,14 @@ exports.verifyAndEnable2FA = async (req, res) => {
       warning: "Save these backup codes in a safe place. They won't be shown again.",
     });
   } catch (error) {
-    console.error("2FA Verification Error:", error);
+    console.error("❌ [2FA Verify] Unexpected error during 2FA verification:", error);
+    console.error("❌ [2FA Verify] Error stack:", error.stack);
+    console.error("❌ [2FA Verify] Error details:", {
+      userId: req.adminId,
+      tokenProvided: !!req.body?.token,
+      tokenLength: req.body?.token?.length || 0,
+      errorMessage: error.message
+    });
     res.status(500).json({ message: "Failed to enable 2FA", error: error.message });
   }
 };

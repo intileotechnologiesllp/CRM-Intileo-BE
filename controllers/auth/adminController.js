@@ -176,6 +176,29 @@ exports.signIn = async (req, res) => {
       return res.status(401).json({ statusCode: 401, message: "Invalid password" });
     }
 
+    // Check if 2FA is enabled
+    if (user.twoFactorEnabled) {
+      await logAuditTrail(
+        PROGRAMS.AUTHENTICATION,
+        "SIGN_IN_2FA_REQUIRED",
+        "Password verified, awaiting 2FA",
+        user.masterUserID
+      );
+      
+      return res.status(200).json({
+        message: "2FA verification required",
+        requiresTwoFactor: true,
+        userId: user.masterUserID,
+        email: user.email,
+        sessionData: {
+          systemInfo,
+          device,
+          longitude,
+          latitude,
+          ipAddress
+        }
+      });
+    }
     // Get the current UTC time
     const loginTimeUTC = new Date();
 

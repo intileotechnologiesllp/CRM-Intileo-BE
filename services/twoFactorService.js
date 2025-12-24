@@ -46,6 +46,7 @@ function generateSecret(userEmail, companyName = "PipedriveCRM") {
   });
 
   return {
+    base32: secret.base32,
     secret: secret.base32,
     otpauth_url: secret.otpauth_url,
   };

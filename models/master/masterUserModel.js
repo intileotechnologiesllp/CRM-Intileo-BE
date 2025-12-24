@@ -136,6 +136,24 @@ const MasterUser = sequelize.define("MasterUser", {
       key: "groupId",
     },
   },
+  // 2FA fields
+  twoFactorEnabled: {
+    type: DataTypes.BOOLEAN,
+    allowNull: false,
+    defaultValue: false,
+  },
+  twoFactorSecret: {
+    type: DataTypes.TEXT, // Encrypted TOTP secret
+    allowNull: true,
+  },
+  twoFactorBackupCodes: {
+    type: DataTypes.TEXT, // Encrypted backup codes JSON
+    allowNull: true,
+  },
+  twoFactorEnabledAt: {
+    type: DataTypes.DATE,
+    allowNull: true,
+  },
 });
 
 const MasterUserPrivileges = require("../privileges/masterUserPrivilegesModel");
