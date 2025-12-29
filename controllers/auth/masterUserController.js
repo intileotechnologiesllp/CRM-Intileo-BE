@@ -135,6 +135,62 @@ exports.createMasterUser = async (req, res) => {
       return res.status(400).json({ message });
     }
 
+     // Step 1: Call third-party API to create client
+    const apiKey = req.api_key; // API key from token (you'll need to set this in middleware)
+    
+    if (!apiKey) {
+      return res.status(400).json({ message: "API key not found in token" });
+    }
+
+    // Prepare data for third-party API
+    const thirdPartyData = {
+      name: name,
+      email: email,
+      password: password,
+      phone: mobileNumber,
+      userType: userType === "admin" ? "ADMIN" : "USER", // Map to third-party's format
+      isActive: status !== "inactive" // Map status to isActive
+    };
+
+    // Call third-party API
+    let thirdPartyResponse;
+    try {
+      thirdPartyResponse = await axios.post(
+        "http://localhost:3069/api/v1/public/clients/create-client",
+        thirdPartyData,
+        {
+          headers: {
+            "x-api-key": apiKey,
+            "Content-Type": "application/json"
+          }
+        }
+      );
+    } catch (thirdPartyError) {
+      console.error("Third-party API error:", thirdPartyError.response?.data || thirdPartyError.message);
+      
+      // Return appropriate error message
+      let errorMessage = "Failed to create client in third-party system";
+      if (thirdPartyError.response?.status === 429) {
+        errorMessage = "Rate limit exceeded. Please try again later.";
+      } else if (thirdPartyError.response?.data?.message) {
+        errorMessage = thirdPartyError.response.data.message;
+      }
+      
+      return res.status(thirdPartyError.response?.status || 500).json({ 
+        message: errorMessage 
+      });
+    }
+
+    // Check if third-party API was successful
+    if (!thirdPartyResponse.data.success) {
+      return res.status(thirdPartyResponse.status || 400).json({
+        message: thirdPartyResponse.data.message || "Failed to create client in third-party system"
+      });
+    }
+
+    // Extract data from third-party response
+    const thirdPartyClient = thirdPartyResponse.data.data;
+
     let resetToken = null; // Initialize reset token
     let resetTokenExpiry = null; // Initialize reset token expiry
 
@@ -243,6 +299,7 @@ exports.createMasterUser = async (req, res) => {
         mobileNumber: masterUser.mobileNumber,
         userType: masterUser.userType, // Include userType in the response
         status: masterUser.status, // Include status in the response
+        thirdPartyClientId: masterUser.thirdPartyClientId,
         ...(userType !== "admin" && { designation: masterUser.designation }), // Include designation only if userType is not "admin"
         ...(userType !== "admin" && { department: masterUser.department }), // Include department only if userType is not "admin"
       },

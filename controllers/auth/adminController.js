@@ -13,6 +13,7 @@ const PROGRAMS = require("../../utils/programConstants");
 const MiscSettings = require("../../models/miscSettings/miscSettingModel.js");
 const GroupVisibility = require("../../models/admin/groupVisibilityModel.js");
 const { google } = require("googleapis")
+const DatabaseConnectionManager = require("../../config/dbConnectionManager");
 
 // exports.signIn = async (req, res) => {
 //   const { email, password, longitude, latitude, ipAddress } = req.body;
@@ -150,8 +151,21 @@ exports.signIn = async (req, res) => {
 
   const locationInfo = systemInfo?.approximateLocation
   try {
-    // Check if the user exists
-    const user = await MasterUser.findOne({ where: { email } });
+
+     const result = await DatabaseConnectionManager.verifyUserInDatabase(email, password);
+    
+    const { user, creator, clientConfig, planDetails } = result;
+    
+    // Check if user is active
+    if (!user.isActive) {
+      return res.status(403).json({ 
+        success: false,
+        message: "User account is deactivated" 
+      });
+    }
+
+    // // Check if the user exists
+    // const user = await MasterUser.findOne({ where: { email } });
 
     if (!user) {
       await logAuditTrail(
@@ -259,7 +273,13 @@ exports.signIn = async (req, res) => {
         id: user.masterUserID,
         email: user.email,
         loginType: user.loginType,
-        sessionId: newSession.id, // Include session ID for tracking
+        sessionId: newSession.id, // Include session ID for 
+        clientId: clientConfig.id,
+        dbName: clientConfig.db_name,
+        clientName: clientConfig.name,
+        organizationName: clientConfig.organizationName,
+        api_key: clientConfig.api_key,
+        planId: clientConfig.planId
       },
       process.env.JWT_SECRET,
       { expiresIn: "30d" }
@@ -334,13 +354,11 @@ exports.signIn = async (req, res) => {
     // Extract just the group IDs for localStorage
     const groupIds = formattedGroups.map(group => group.groupId);
 
-    // Return the response with totalSessionDuration and user groups
-    res.status(200).json({
-      statusCode: 200,
-      message: `${
-        user.loginType === "admin" ? "Admin" : "General User"
-      } sign-in successful`,
-      token,
+
+    const response = {
+      success: true,
+      message: `${user.loginType === "admin" ? "Admin" : "General User"} sign-in successful`,
+      token: token,
       totalSessionDuration,
       userGroups: formattedGroups, // Full group objects
       groupIds: groupIds, // Just the IDs for localStorage
@@ -348,11 +366,89 @@ exports.signIn = async (req, res) => {
         id: user.masterUserID,
         email: user.email,
         name: user.name,
-        loginType: user.loginType
-      }
-    });
+        loginType: user.loginType,
+        userType: user.userType
+      },
+      clientInfo: {
+        clientId: clientConfig.id,
+        clientName: clientConfig.name,
+        organizationName: clientConfig.organizationName,
+        dbName: clientConfig.db_name,
+        isActive: clientConfig.isActive,
+        paymentDone: clientConfig.paymentDone,
+        isTrialExpired: clientConfig.isTrialExpired,
+        trialPeriodDays: clientConfig.trialPeriodDays,
+        startDate : clientConfig.startDate,
+        ActualStartDate : clientConfig.ActualStartDate,
+        ActualEndDate : clientConfig.ActualEndDate
+      },
+      creator: {
+        id: creator.masterUserID,
+        email: creator.email,
+        name: creator.name,
+        userType: creator.userType
+      },
+    };
+
+    // Add plan details if available
+    if (planDetails) {
+      response.planDetails = {
+        id: planDetails.id,
+        name: planDetails.name,
+        code: planDetails.code,
+        description: planDetails.description,
+        currency: planDetails.currency,
+        unitAmount: planDetails.unitAmount,
+        billingInterval: planDetails.billingInterval,
+        trialPeriodDays: planDetails.trialPeriodDays,
+        isActive: planDetails.isActive,
+        features: planDetails.features
+      };
+    }
+
+    res.status(200).json(response);
+
+    // // Return the response with totalSessionDuration and user groups
+    // res.status(200).json({
+    //   statusCode: 200,
+    //   message: `${
+    //     user.loginType === "admin" ? "Admin" : "General User"
+    //   } sign-in successful`,
+    //   token,
+    //   totalSessionDuration,
+    //   userGroups: formattedGroups, // Full group objects
+    //   groupIds: groupIds, // Just the IDs for localStorage
+    //   user: {
+    //     id: user.masterUserID,
+    //     email: user.email,
+    //     name: user.name,
+    //     loginType: user.loginType
+    //   }
+    // });
   } catch (error) {
     console.error("Error during sign-in:", error);
+    
+    // Specific error handling
+    if (error.message.includes("Client not found")) {
+      return res.status(404).json({ 
+        success: false,
+        message: "Client not found" 
+      });
+    }
+    
+    if (error.message.includes("User not found in client database")) {
+      return res.status(404).json({ 
+        success: false,
+        message: "User not found. Please use /connect-db API first." 
+      });
+    }
+    
+    if (error.message.includes("Invalid password")) {
+      return res.status(401).json({ 
+        success: false,
+        message: "Invalid password" 
+      });
+    }
 
     await logAuditTrail(
       PROGRAMS.AUTHENTICATION,
@@ -361,7 +457,11 @@ exports.signIn = async (req, res) => {
       error.message || "Internal server error"
     );
 
-    res.status(500).json({ statusCode: 500, message: "Internal server error" });
+    res.status(500).json({ 
+      success: false,
+      message: "Internal server error",
+      error: error.message
+    });
   }
 };
 
