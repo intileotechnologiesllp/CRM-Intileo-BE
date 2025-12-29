@@ -69,6 +69,8 @@ const googleDriveRoutes  = require('./routes/google-drive/googledrive.js'); // I
 const meetingRoutes = require('./routes/meeting/meetingRoutes.js'); // Import meeting routes
 const schedulingLinkRoutes = require('./routes/meeting/schedulingLinkRoutes.js'); // Import scheduling link routes
 const mergeRoutes = require('./routes/merge/mergeRoute.js'); // Import scheduling link routes
+const webFormRoutes = require('./routes/webForm/webFormRoutes.js'); // Import web form routes
+const webFormPublicRoutes = require('./routes/webForm/webFormPublicRoutes.js'); // Import web form public routes
 
 const { loadPrograms } = require("./utils/programCache");
 const imapIdleManager = require('./services/imapIdleManager'); // IMAP IDLE for real-time sync
@@ -176,7 +178,9 @@ app.use('/api/user-sessions', userSessionRoutes); // Register user session/devic
 app.use('/api/drive', googleDriveRoutes); // Register Google Drive routes
 app.use('/api/meetings', meetingRoutes); // Register meeting routes
 app.use('/api/meetings/scheduling-links', schedulingLinkRoutes); // Register scheduling link routes
-app.use('/api/merge', mergeRoutes); // Register scheduling link routes
+app.use('/api/webforms', webFormRoutes); // Register web form admin routes
+app.use('/api/public/webforms', webFormPublicRoutes); // Register web form public routes (no auth)
+app.use('/api/merge', mergeRoutes); // Register merge routes
 
 // Public scheduling link routes (must be registered separately for public access)
 const schedulingLinkController = require('./controllers/meeting/schedulingLinkController');
