@@ -5031,6 +5031,31 @@ exports.getAllLeadDetails = async (req, res) => {
       });
     }
 
+    // Build "focus" array: only upcoming or overdue activities
+    // Each item will include a focusCategory ('upcoming' or 'overdue'),
+    // minutesUntil (positive for upcoming, negative for overdue) and isCompleted flag.
+    const now = new Date();
+    const focus = (activities || [])
+      .filter((a) => a && a.startDateTime) // only activities with a start date
+      .map((a) => {
+        const start = new Date(a.startDateTime);
+        const isCompleted =
+          a.isCompleted === true ||
+          (a.status && ["completed", "done", "finished"].includes(String(a.status).toLowerCase()));
+        const minutesUntil = Math.round((start.getTime() - now.getTime()) / 60000);
+        const focusCategory = isCompleted ? null : start < now ? "overdue" : "upcoming";
+        return {
+          ...a,
+          focusCategory,
+          minutesUntil,
+          isCompleted,
+        };
+      })
+      .filter((f) => f.focusCategory !== null)
+      // sort by soonest first (overdue will have negative minutesUntil so order works)
+      .sort((x, y) => x.minutesUntil - y.minutesUntil);
+
+
     // Fetch all active custom fields for leads
     const allCustomFields = await CustomField.findAll({
       where: {
@@ -5158,6 +5183,7 @@ exports.getAllLeadDetails = async (req, res) => {
       customFields,
       notes: notesWithCreator,
       emails: relatedEmails,
+      focus,
       activities,
       person: person ? [person] : [], // Person array (single person if exists)
       leadOrganization: leadOrganization ? [leadOrganization] : [], // Lead organization array (single organization if exists)
