@@ -32,6 +32,10 @@ const SchedulingLink = require("./meeting/schedulingLinkModel");
 const ProductColumn = require("./product/customColumnModel");
 const MergeMapModel = require("./merge/mergeMap");
 const TagMapModel = require("./merge/tagMap");
+const WebForm = require("./webForm/webFormModel");
+const WebFormField = require("./webForm/webFormFieldModel");
+const WebFormSubmission = require("./webForm/webFormSubmissionModel");
+const WebFormTracking = require("./webForm/webFormTrackingModel");
 
 // GroupVisibility.belongsTo(Person, { as: "GroupPerson", foreignKey: "personId" });
 // Person.hasMany(GroupVisibility, { foreignKey: "personId", as: "GroupVisibility" });
@@ -283,6 +287,64 @@ GroupVisibility.hasMany(MasterUser, {
   as: "users",
 });
 
+// WebForm Associations
+WebForm.hasMany(WebFormField, {
+  foreignKey: "formId",
+  as: "fields",
+  onDelete: "CASCADE",
+});
+WebFormField.belongsTo(WebForm, {
+  foreignKey: "formId",
+  as: "form",
+});
+
+WebForm.hasMany(WebFormSubmission, {
+  foreignKey: "formId",
+  as: "submissions",
+  onDelete: "CASCADE",
+});
+WebFormSubmission.belongsTo(WebForm, {
+  foreignKey: "formId",
+  as: "form",
+});
+
+WebForm.hasMany(WebFormTracking, {
+  foreignKey: "formId",
+  as: "tracking",
+  onDelete: "CASCADE",
+});
+WebFormTracking.belongsTo(WebForm, {
+  foreignKey: "formId",
+  as: "form",
+});
+
+WebFormSubmission.belongsTo(Lead, {
+  foreignKey: "leadId",
+  as: "lead",
+});
+Lead.hasMany(WebFormSubmission, {
+  foreignKey: "leadId",
+  as: "formSubmissions",
+});
+
+WebFormSubmission.belongsTo(Person, {
+  foreignKey: "personId",
+  as: "person",
+});
+Person.hasMany(WebFormSubmission, {
+  foreignKey: "personId",
+  as: "formSubmissions",
+});
+
+WebForm.belongsTo(MasterUser, {
+  foreignKey: "masterUserID",
+  as: "creator",
+});
+MasterUser.hasMany(WebForm, {
+  foreignKey: "masterUserID",
+  as: "webForms",
+});
+
 module.exports = {
   Lead,
   LeadDetails,
@@ -314,5 +376,9 @@ module.exports = {
   SchedulingLink,
   ProductColumn,
   MergeMapModel,
-  TagMapModel
+  TagMapModel,
+  WebForm,
+  WebFormField,
+  WebFormSubmission,
+  WebFormTracking,
 };
