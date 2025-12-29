@@ -26,6 +26,8 @@ exports.createActivity = async (req, res) => {
       return str && typeof str === 'string' && str.trim() !== '';
     };
 
+    const { LeadOrganization, LeadPerson, Activity, Lead, Deal, MasterUser } = req.models;
+
     const {
       type,
       subject,
@@ -69,19 +71,19 @@ exports.createActivity = async (req, res) => {
         
         // Strategy 1: Find by personId if provided
         if (personData.personId) {
-          personRecord = await Person.findByPk(personData.personId);
+          personRecord = await LeadPerson.findByPk(personData.personId);
           console.log(`Found person by personId ${personData.personId}:`, personRecord ? 'YES' : 'NO');
         }
         
         // Strategy 2: Find by email if no personId but email provided
         if (!personRecord && personData.email && typeof personData.email === 'string' && personData.email.trim() !== "") {
-          personRecord = await Person.findOne({ where: { email: personData.email } });
+          personRecord = await LeadPerson.findOne({ where: { email: personData.email } });
           console.log(`Found person by email ${personData.email}:`, personRecord ? 'YES' : 'NO');
         }
         
         // Strategy 3: Create new person if not found
         if (!personRecord && ((personData.contactPerson && typeof personData.contactPerson === 'string' && personData.contactPerson.trim() !== "") || 
-                               (personData.email && typeof personData.email === 'string' && personData.email.trim() !== ""))) {
+          (personData.email && typeof personData.email === 'string' && personData.email.trim() !== ""))) {
           try {
             const newPersonData = {
               contactPerson: personData.contactPerson || null,
@@ -91,7 +93,7 @@ exports.createActivity = async (req, res) => {
               masterUserID: req.adminId,
             };
             
-            personRecord = await Person.create(newPersonData);
+            personRecord = await LeadPerson.create(newPersonData);
             console.log(`Created new person with ID: ${personRecord.personId}`, newPersonData);
           } catch (personCreateError) {
             console.error("Error creating new person during activity creation:", personCreateError);
@@ -124,7 +126,7 @@ exports.createActivity = async (req, res) => {
     } else {
       // Fallback to single contact person logic for backward compatibility
       if (personId) {
-        const person = await Person.findByPk(personId);
+        const person = await LeadPerson.findByPk(personId);
         if (person) {
           contactPerson = person.contactPerson;
           email = person.email;
@@ -142,7 +144,7 @@ exports.createActivity = async (req, res) => {
     // Fetch organization details
     let organization = null;
     if (leadOrganizationId) {
-      const org = await Organizations.findByPk(leadOrganizationId);
+      const org = await LeadOrganization.findByPk(leadOrganizationId);
       if (org) {
         organization = org.organization;
       }
@@ -298,7 +300,9 @@ exports.getActivities = async (req, res) => {
 
     let { entityType } = req.query; // Extract entityType from query parameters
 
-    const pref = await ActivityColumnPreference.findOne();
+    const { LeadOrganization, LeadPerson, Activity, Lead, Deal, MasterUser, ActivityColumn, LeadFilter, Product, DealProduct, CustomField, CustomFieldValue } = req.models;
+
+    const pref = await ActivityColumn.findOne();
     let attributes = [];
     let dealColumns = [];
     let hasDealColumns = false;
@@ -373,8 +377,6 @@ exports.getActivities = async (req, res) => {
 
       // Load Product and DealProduct model fields
       try {
-        const Product = require("../../models/product/productModel");
-        const DealProduct = require("../../models/product/dealProductModel");
         productFields = Object.keys(Product.rawAttributes);
         dealProductFields = Object.keys(DealProduct.rawAttributes);
         console.log("- Product fields:", productFields);
@@ -405,7 +407,7 @@ exports.getActivities = async (req, res) => {
           } else if (cond.entity === "product") {
             if (productFields.includes(cond.field)) {
               if (!productWhere[Op.and]) productWhere[Op.and] = [];
-              const condition = buildCondition(cond);
+              const condition = buildCondition(cond, Activity);
               if (condition && Object.keys(condition).length > 0) {
                 productWhere[Op.and].push(condition);
                 console.log(`[DEBUG] Added Product AND condition for field: ${cond.field}`);
@@ -414,14 +416,14 @@ exports.getActivities = async (req, res) => {
           } else if (cond.entity === "dealproduct") {
             if (dealProductFields.includes(cond.field)) {
               if (!dealProductWhere[Op.and]) dealProductWhere[Op.and] = [];
-              const condition = buildCondition(cond);
+              const condition = buildCondition(cond, Activity);
               if (condition && Object.keys(condition).length > 0) {
                 dealProductWhere[Op.and].push(condition);
                 console.log(`[DEBUG] Added DealProduct AND condition for field: ${cond.field}`);
               }
             }
           } else if (activityFields.includes(cond.field)) {
-            const condition = buildCondition(cond);
+            const condition = buildCondition(cond, Activity);
             if (condition && Object.keys(condition).length > 0) {
               filterWhere[Op.and].push(condition);
             }
@@ -452,7 +454,7 @@ exports.getActivities = async (req, res) => {
           } else if (cond.entity === "product") {
             if (productFields.includes(cond.field)) {
               if (!productWhere[Op.or]) productWhere[Op.or] = [];
-              const condition = buildCondition(cond);
+              const condition = buildCondition(cond, Activity);
               if (condition && Object.keys(condition).length > 0) {
                 productWhere[Op.or].push(condition);
                 console.log(`[DEBUG] Added Product OR condition for field: ${cond.field}`);
@@ -461,14 +463,14 @@ exports.getActivities = async (req, res) => {
           } else if (cond.entity === "dealproduct") {
             if (dealProductFields.includes(cond.field)) {
               if (!dealProductWhere[Op.or]) dealProductWhere[Op.or] = [];
-              const condition = buildCondition(cond);
+              const condition = buildCondition(cond, Activity);
               if (condition && Object.keys(condition).length > 0) {
                 dealProductWhere[Op.or].push(condition);
                 console.log(`[DEBUG] Added DealProduct OR condition for field: ${cond.field}`);
               }
             }
           } else if (activityFields.includes(cond.field)) {
-            const condition = buildCondition(cond);
+            const condition = buildCondition(cond, Activity);
             if (condition && Object.keys(condition).length > 0) {
               filterWhere[Op.or].push(condition);
             }
@@ -747,9 +749,9 @@ exports.getActivities = async (req, res) => {
               : undefined,
         },
         {
-          model: Organizations,
+          model: LeadOrganization,
           as: "ActivityOrganization",
-          attributes: Object.keys(Organizations.rawAttributes),
+          attributes: Object.keys(LeadOrganization.rawAttributes),
           required: entityType === "Organization", // Apply filter only for Organization
           where:
             entityType === "Organization" &&
@@ -758,9 +760,9 @@ exports.getActivities = async (req, res) => {
               : undefined,
         },
         {
-          model: Person,
+          model: LeadPerson,
           as: "ActivityPerson",
-          attributes: Object.keys(Person.rawAttributes),
+          attributes: Object.keys(LeadPerson.rawAttributes),
           required: entityType === "Person", // Apply filter only for Person
           where:
             entityType === "Person" &&
@@ -1261,6 +1263,8 @@ exports.getActivityById = async (req, res) => {
     const masterUserID = req.adminId;
     const role = req.role;
 
+     const { LeadOrganization, LeadPerson, Activity, Lead, Deal, MasterUser, ActivityColumn, LeadFilter, Product, DealProduct, CustomField, CustomFieldValue } = req.models;
+
     // Build the where condition based on role
     const whereCondition = { activityId: activityId };
     
@@ -1289,13 +1293,13 @@ exports.getActivityById = async (req, res) => {
           attributes: ["dealId", "title", "value", "currency", "status", "pipelineStage"]
         },
         {
-          model: Organizations,
+          model: LeadOrganization,
           as: "ActivityOrganization",
           required: false,
           attributes: ["leadOrganizationId", "organization", "address", "organizationLabels"]
         },
         {
-          model: Person,
+          model: LeadPerson,
           as: "ActivityPerson",
           required: false,
           attributes: ["personId", "contactPerson", "email", "phone", "jobTitle"]
@@ -1558,7 +1562,7 @@ const operatorMap = {
   // Add more mappings if needed
 };
 
-function buildCondition(cond) {
+function buildCondition(cond, Activity) {
   const ops = {
     eq: Op.eq,
     ne: Op.ne,
@@ -1651,7 +1655,7 @@ exports.deleteActivity = async (req, res) => {
   const masterUserID = req.adminId;
   const role = req.role;
   const entityType = "activity";
-
+  const { LeadOrganization, LeadPerson, Activity, Lead, Deal, MasterUser, ActivityColumn, LeadFilter, Product, DealProduct, CustomField, CustomFieldValue } = req.models;
   try {
     // Build the where condition based on role
     const whereCondition = { activityId : activityId };
@@ -1720,7 +1724,7 @@ exports.deleteActivity = async (req, res) => {
 exports.markActivityAsDone = async (req, res) => {
   try {
     const { activityId } = req.params;
-
+    const {  Activity } = req.models;
     const activity = await Activity.findByPk(activityId);
     if (!activity) {
       return res.status(404).json({ message: "Activity not found" });
@@ -1771,7 +1775,7 @@ exports.updateActivity = async (req, res) => {
   try {
     const { activityId } = req.params;
     const updateFields = req.body;
-
+    const { LeadOrganization, LeadPerson, Activity, Lead, Deal, MasterUser } = req.models;
     // Helper function to safely check if a string is valid and not empty
     const isValidString = (str) => {
       return str && typeof str === 'string' && str.trim() !== '';
@@ -1808,19 +1812,19 @@ exports.updateActivity = async (req, res) => {
         
         // Strategy 1: Find by personId if provided
         if (personData.personId) {
-          personRecord = await Person.findByPk(personData.personId);
+          personRecord = await LeadPerson.findByPk(personData.personId);
           console.log(`Found person by personId ${personData.personId}:`, personRecord ? 'YES' : 'NO');
         }
         
         // Strategy 2: Find by email if no personId but email provided
         if (!personRecord && personData.email && typeof personData.email === 'string' && personData.email.trim() !== "") {
-          personRecord = await Person.findOne({ where: { email: personData.email } });
+          personRecord = await LeadPerson.findOne({ where: { email: personData.email } });
           console.log(`Found person by email ${personData.email}:`, personRecord ? 'YES' : 'NO');
         }
         
         // Strategy 3: Find by contactPerson name if no personId or email match
         if (!personRecord && personData.contactPerson && typeof personData.contactPerson === 'string' && personData.contactPerson.trim() !== "") {
-          personRecord = await Person.findOne({ where: { contactPerson: personData.contactPerson } });
+          personRecord = await LeadPerson.findOne({ where: { contactPerson: personData.contactPerson } });
           console.log(`Found person by contactPerson ${personData.contactPerson}:`, personRecord ? 'YES' : 'NO');
         }
         
@@ -1839,7 +1843,7 @@ exports.updateActivity = async (req, res) => {
           }
           
           if (Object.keys(personUpdateData).length > 0) {
-            await Person.update(personUpdateData, { 
+            await LeadPerson.update(personUpdateData, { 
               where: { personId: personRecord.personId } 
             });
             console.log(`Updated existing person ${personRecord.personId} with:`, personUpdateData);
@@ -1864,7 +1868,7 @@ exports.updateActivity = async (req, res) => {
               masterUserID: req.adminId,
             };
             
-            personRecord = await Person.create(newPersonData);
+            personRecord = await LeadPerson.create(newPersonData);
             console.log(`Created new person with ID: ${personRecord.personId}`, newPersonData);
             
             allContactPersons.push({
@@ -1902,19 +1906,19 @@ exports.updateActivity = async (req, res) => {
         
         // Strategy 1: Find by personId if provided
         if (updateFields.personId) {
-          personRecord = await Person.findByPk(updateFields.personId);
+          personRecord = await LeadPerson.findByPk(updateFields.personId);
           console.log(`Found person by personId ${updateFields.personId}:`, personRecord ? 'YES' : 'NO');
         }
         
         // Strategy 2: Find by email if no personId but email provided
         if (!personRecord && updateFields.email && typeof updateFields.email === 'string' && updateFields.email.trim() !== "") {
-          personRecord = await Person.findOne({ where: { email: updateFields.email } });
+          personRecord = await LeadPerson.findOne({ where: { email: updateFields.email } });
           console.log(`Found person by email ${updateFields.email}:`, personRecord ? 'YES' : 'NO');
         }
         
         // Strategy 3: Find by contactPerson name if no personId or email match
         if (!personRecord && updateFields.contactPerson && typeof updateFields.contactPerson === 'string' && updateFields.contactPerson.trim() !== "") {
-          personRecord = await Person.findOne({ where: { contactPerson: updateFields.contactPerson } });
+          personRecord = await LeadPerson.findOne({ where: { contactPerson: updateFields.contactPerson } });
           console.log(`Found person by contactPerson ${updateFields.contactPerson}:`, personRecord ? 'YES' : 'NO');
         }
         
@@ -1933,7 +1937,7 @@ exports.updateActivity = async (req, res) => {
           }
           
           if (Object.keys(personUpdateData).length > 0) {
-            await Person.update(personUpdateData, { 
+            await LeadPerson.update(personUpdateData, { 
               where: { personId: personRecord.personId } 
             });
             updateFields.personId = personRecord.personId;
@@ -1951,7 +1955,7 @@ exports.updateActivity = async (req, res) => {
               masterUserID: req.adminId,
             };
             
-            personRecord = await Person.create(newPersonData);
+            personRecord = await LeadPerson.create(newPersonData);
             updateFields.personId = personRecord.personId;
             console.log(`Created new person with ID: ${personRecord.personId}`, newPersonData);
           } catch (personCreateError) {
@@ -1977,17 +1981,17 @@ exports.updateActivity = async (req, res) => {
       
       if (updateFields.leadOrganizationId) {
         // Try to find existing organization by leadOrganizationId
-        orgRecord = await Organizations.findByPk(updateFields.leadOrganizationId);
+        orgRecord = await LeadOrganization.findByPk(updateFields.leadOrganizationId);
       } else {
         // Try to find organization by name
-        orgRecord = await Organizations.findOne({ 
+        orgRecord = await LeadOrganization.findOne({ 
           where: { organization: updateFields.organization } 
         });
       }
       
       if (orgRecord) {
         // Update existing organization
-        await Organizations.update(
+        await LeadOrganization.update(
           { organization: updateFields.organization },
           { where: { leadOrganizationId: orgRecord.leadOrganizationId } }
         );
@@ -1995,7 +1999,7 @@ exports.updateActivity = async (req, res) => {
       } else {
         // Create new organization if it doesn't exist
         try {
-          orgRecord = await Organizations.create({
+          orgRecord = await LeadOrganization.create({
             organization: updateFields.organization,
             masterUserID: req.adminId,
           });
@@ -2213,7 +2217,7 @@ exports.updateActivity = async (req, res) => {
 exports.saveAllActivityFieldsWithCheck = async (req, res) => {
   // Accept checked fields from req.body
   const { checkedFields } = req.body || {};
-
+  const {  Activity, Deal, DealColumn, ActivityColumn, } = req.models;
   try {
     // Get all field names from Activity model
     const activityFields = Object.keys(Activity.rawAttributes);
@@ -2262,10 +2266,10 @@ exports.saveAllActivityFieldsWithCheck = async (req, res) => {
     const allColumnsToSave = [...activityColumnsToSave, ...dealColumnsToSave];
 
     // Save everything in ActivityColumnPreference
-    let activityPref = await ActivityColumnPreference.findOne();
+    let activityPref = await ActivityColumn.findOne();
     if (!activityPref) {
       // Create the record if it doesn't exist
-      activityPref = await ActivityColumnPreference.create({ columns: allColumnsToSave });
+      activityPref = await ActivityColumn.create({ columns: allColumnsToSave });
     } else {
       // Update the existing record
       activityPref.columns = allColumnsToSave;
@@ -2289,6 +2293,7 @@ exports.saveAllActivityFieldsWithCheck = async (req, res) => {
 exports.updateActivityColumnChecks = async (req, res) => {
   // Expecting: { columns: [ { key: "columnName", check: true/false }, ... ] }
   const { columns } = req.body;
+  const { LeadOrganization, LeadPerson, Activity, Lead, Deal, MasterUser, ActivityColumn, LeadFilter, Product, DealProduct, CustomField, CustomFieldValue } = req.models;
 
   if (!Array.isArray(columns)) {
     return res.status(400).json({ message: "Columns array is required." });
@@ -2296,7 +2301,7 @@ exports.updateActivityColumnChecks = async (req, res) => {
 
   try {
     // Find the global ActivityColumnPreference record
-    let pref = await ActivityColumnPreference.findOne();
+    let pref = await ActivityColumn.findOne();
     if (!pref) {
       return res.status(404).json({ message: "Preferences not found." });
     }
@@ -2326,9 +2331,10 @@ exports.updateActivityColumnChecks = async (req, res) => {
 };
 
 exports.getActivityFields = async (req, res) => {
+   const { LeadOrganization, LeadPerson, Activity, Lead, Deal, MasterUser, ActivityColumn, LeadFilter, Product, DealProduct, CustomField, CustomFieldValue } = req.models;
   try {
     // Fetch data from ActivityColumnPreference table
-    const pref = await ActivityColumnPreference.findOne();
+    const pref = await ActivityColumn.findOne();
     
     if (!pref || !pref.columns) {
       return res.status(404).json({ 
@@ -2370,6 +2376,7 @@ exports.getActivityFields = async (req, res) => {
 };
 
 exports.getAllLeadsAndDeals = async (req, res) => {
+  const { LeadOrganization, LeadPerson, Activity, Lead, Deal, MasterUser, ActivityColumn, LeadFilter, Product, DealProduct, CustomField, CustomFieldValue } = req.models;
   try {
     // Pagination and search params
     const { page = 1, limit = 20, search = "" } = req.query;
@@ -2428,6 +2435,7 @@ exports.getAllLeadsAndDeals = async (req, res) => {
 };
 
 exports.getAllOrganizations = async (req, res) => {
+  const { LeadOrganization, LeadPerson, Activity, Lead, Deal, MasterUser, ActivityColumn, LeadFilter, Product, DealProduct, CustomField, CustomFieldValue } = req.models;
   try {
     // Pagination and search params
     const {
@@ -2449,7 +2457,7 @@ exports.getAllOrganizations = async (req, res) => {
 
     // Fetch organizations with pagination and search
     const { rows: organizations, count: total } =
-      await Organizations.findAndCountAll({
+      await LeadOrganization.findAndCountAll({
         attributes: ["leadOrganizationId", "organization"],
         where,
         limit: parseInt(limit),
@@ -2473,6 +2481,7 @@ exports.getAllOrganizations = async (req, res) => {
 };
 
 exports.getCalendarActivities = async (req, res) => {
+  const { LeadOrganization, LeadPerson, Activity, Lead, Deal, MasterUser, ActivityColumn, LeadFilter, Product, DealProduct, CustomField, CustomFieldValue } = req.models;
   try {
     // Optional filters: user, date range, type, etc.
     const {
@@ -2531,6 +2540,7 @@ exports.getCalendarActivities = async (req, res) => {
 
 // Helper function to update next activity date for a lead
 const updateNextActivityForLead = async (leadId) => {
+  const { LeadOrganization, LeadPerson, Activity, LeadDetail, Lead, Deal, MasterUser, ActivityColumn, LeadFilter, Product, DealProduct, CustomField, CustomFieldValue } = req.models;
   try {
     // Find the earliest upcoming activity for this lead that is not done
     const nextActivity = await Activity.findOne({
@@ -2567,7 +2577,7 @@ const updateNextActivityForLead = async (leadId) => {
     }
 
     // Update the lead details
-    await LeadDetails.update(
+    await LeadDetail.update(
       {
         nextActivityDate,
         nextActivityStatus,
@@ -2585,6 +2595,7 @@ const updateNextActivityForLead = async (leadId) => {
 
 // Helper function to update next activity date for a deal
 const updateNextActivityForDeal = async (dealId) => {
+  const { LeadOrganization, LeadPerson, DealDetail, Activity, Lead, Deal, MasterUser, ActivityColumn, LeadFilter, Product, DealProduct, CustomField, CustomFieldValue } = req.models;
   try {
     // Find the earliest upcoming activity for this deal that is not done
     const nextActivity = await Activity.findOne({
@@ -2630,9 +2641,9 @@ const updateNextActivityForDeal = async (dealId) => {
     );
 
     // Also update DealDetails if it exists
-    const dealDetails = await DealDetails.findOne({ where: { dealId } });
+    const dealDetails = await DealDetail.findOne({ where: { dealId } });
     if (dealDetails) {
-      await DealDetails.update(
+      await DealDetail.update(
         {
           nextActivityDate,
         },
@@ -2650,6 +2661,7 @@ const updateNextActivityForDeal = async (dealId) => {
 
 // Utility function to update next activity dates for all leads (can be called via API)
 exports.updateAllLeadsNextActivity = async (req, res) => {
+  const { LeadOrganization, LeadPerson, DealDetail, Activity, Lead, Deal, MasterUser, ActivityColumn, LeadFilter, Product, DealProduct, CustomField, CustomFieldValue } = req.models;
   try {
     // Get all leads that have activities
     const leadsWithActivities = await Activity.findAll({
@@ -2681,6 +2693,7 @@ exports.updateAllLeadsNextActivity = async (req, res) => {
 
 // Utility function to update next activity dates for all deals (can be called via API)
 exports.updateAllDealsNextActivity = async (req, res) => {
+  const { LeadOrganization, LeadPerson, DealDetail, Activity, Lead, Deal, MasterUser, ActivityColumn, LeadFilter, Product, DealProduct, CustomField, CustomFieldValue } = req.models;
   try {
     // Get all deals that have activities
     const dealsWithActivities = await Activity.findAll({
@@ -2713,6 +2726,7 @@ exports.updateAllDealsNextActivity = async (req, res) => {
 // Bulk edit activities functionality
 exports.bulkEditActivities = async (req, res) => {
   const { activityIds, updateData } = req.body;
+    const { LeadOrganization, LeadPerson, DealDetail, Activity, Lead, Deal, MasterUser, ActivityColumn, LeadFilter, Product, DealProduct, CustomField, CustomFieldValue } = req.models;
 
   // Validate input
   if (!activityIds || !Array.isArray(activityIds) || activityIds.length === 0) {
@@ -2796,7 +2810,7 @@ exports.bulkEditActivities = async (req, res) => {
         ) {
           const personId = updateData.personId || activity.personId;
           if (personId) {
-            const person = await Person.findByPk(personId);
+            const person = await LeadPerson.findByPk(personId);
             if (person) {
               contactPerson = person.contactPerson;
               email = person.email;
@@ -2809,7 +2823,7 @@ exports.bulkEditActivities = async (req, res) => {
           const orgId =
             updateData.leadOrganizationId || activity.leadOrganizationId;
           if (orgId) {
-            const org = await Organizations.findByPk(orgId);
+            const org = await LeadOrganization.findByPk(orgId);
             if (org) {
               organization = org.organization;
             }
@@ -2923,13 +2937,13 @@ exports.bulkEditActivities = async (req, res) => {
               attributes: ["leadId", "title"]
             },
             {
-              model: Person,
+              model: LeadPerson,
               as: "ActivityPerson",
               required: false,
               attributes: ["personId", "contactPerson", "email"]
             },
             {
-              model: Organizations,
+              model: LeadOrganization,
               as: "ActivityOrganization",
               required: false,
               attributes: ["leadOrganizationId", "organization"]
@@ -3029,7 +3043,7 @@ exports.bulkEditActivities = async (req, res) => {
 // Bulk delete activities functionality
 exports.bulkDeleteActivities = async (req, res) => {
   const { activityIds } = req.body;
-
+ const { LeadOrganization, LeadPerson, DealDetail, Activity, Lead, Deal, MasterUser, ActivityColumn, LeadFilter, Product, DealProduct, CustomField, CustomFieldValue } = req.models;
   // Validate input
   if (!activityIds || !Array.isArray(activityIds) || activityIds.length === 0) {
     return res.status(400).json({
@@ -3164,7 +3178,7 @@ exports.bulkDeleteActivities = async (req, res) => {
 // Bulk mark activities as done/undone
 exports.bulkMarkActivities = async (req, res) => {
   const { activityIds, isDone } = req.body;
-
+  const { LeadOrganization, LeadPerson, DealDetail, Activity, Lead, Deal, MasterUser, ActivityColumn, LeadFilter, Product, DealProduct, CustomField, CustomFieldValue } = req.models;
   // Validate input
   if (!activityIds || !Array.isArray(activityIds) || activityIds.length === 0) {
     return res.status(400).json({
@@ -3321,7 +3335,7 @@ exports.bulkMarkActivities = async (req, res) => {
 // Bulk reassign activities to different users
 exports.bulkReassignActivities = async (req, res) => {
   const { activityIds, assignedTo } = req.body;
-
+  const { LeadOrganization, LeadPerson, DealDetail, Activity, Lead, Deal, MasterUser, ActivityColumn, LeadFilter, Product, DealProduct, CustomField, CustomFieldValue } = req.models;
   // Validate input
   if (!activityIds || !Array.isArray(activityIds) || activityIds.length === 0) {
     return res.status(400).json({
@@ -3468,6 +3482,7 @@ exports.bulkReassignActivities = async (req, res) => {
 };
 
 exports.getActivityFilterFields = async (req, res) => {
+  const { LeadOrganization, LeadPerson, DealDetail, Activity, Lead, Deal, MasterUser, ActivityColumn, LeadFilter, Product, DealProduct, CustomField, CustomFieldValue } = req.models;
   try {
     // Helper function to convert field type to readable format
     const getFieldType = (sequelizeType) => {
@@ -3593,7 +3608,7 @@ exports.getConnectedData = async (req, res) => {
   try {
     const { leadId, dealId } = req.query;
     const masterUserID = req.adminId;
-
+    const { LeadOrganization, LeadPerson, DealDetail, Activity, Lead, Deal, MasterUser, ActivityColumn, LeadFilter, Product, DealProduct, CustomField, CustomFieldValue } = req.models;
     console.log(`🔍 [CONNECTED-DATA] Request for user ${masterUserID}:`, { leadId, dealId });
 
     // Validate that at least one ID is provided
@@ -3640,7 +3655,7 @@ exports.getConnectedData = async (req, res) => {
         ],
         include: [
           {
-            model: Person,
+            model: LeadPerson,
             as: "LeadPerson",
             required: false,
             attributes: [
@@ -3654,7 +3669,7 @@ exports.getConnectedData = async (req, res) => {
             ]
           },
           {
-            model: Organizations,
+            model: LeadOrganization,
             as: "LeadOrganization",
             required: false,
             attributes: [
@@ -3761,7 +3776,7 @@ exports.getConnectedData = async (req, res) => {
         ],
         include: [
           {
-            model: Person,
+            model: LeadPerson,
             as: "Person",
             required: false,
             attributes: [
@@ -3775,7 +3790,7 @@ exports.getConnectedData = async (req, res) => {
             ]
           },
           {
-            model: Organizations,
+            model: LeadOrganization,
             as: "Organization",
             required: false,
             attributes: [

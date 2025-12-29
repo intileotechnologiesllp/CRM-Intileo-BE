@@ -32,11 +32,12 @@ const labelUpdateSchema = Joi.object({
 // Create label
 exports.createLabel = async (req, res) => {
   const { labelName, labelColor, entityType, description, isActive } = req.body;
-
+  const { History, AuditTrail, Label } = req.models;
   // Validate the request body
   const { error } = labelSchema.validate(req.body);
   if (error) {
     await logAuditTrail(
+      AuditTrail,
       PROGRAMS.LABEL_MASTER, // Program ID for label management
       "CREATE_LABEL", // Mode
       req.role, // Admin role from the authenticated request
@@ -74,6 +75,7 @@ exports.createLabel = async (req, res) => {
     });
 
     await historyLogger(
+      History,
       PROGRAMS.LABEL_MASTER, // Program ID for label management
       "CREATE_LABEL", // Mode
       label.createdById, // Created by (Admin ID)
@@ -84,6 +86,7 @@ exports.createLabel = async (req, res) => {
     );
 
     await logAuditTrail(
+      AuditTrail,
       PROGRAMS.LABEL_MASTER, // Program ID for label management
       "CREATE_LABEL", // Mode
       req.role, // Admin role from the authenticated request
@@ -106,6 +109,7 @@ exports.createLabel = async (req, res) => {
   } catch (error) {
     console.error("Error creating label:", error);
     await logAuditTrail(
+      AuditTrail,
       PROGRAMS.LABEL_MASTER, // Program ID for label management
       "CREATE_LABEL", // Mode
       req.role, // Admin role from the authenticated request
@@ -120,11 +124,13 @@ exports.createLabel = async (req, res) => {
 exports.editLabel = async (req, res) => {
   const { labelId } = req.params;
   const { labelName, labelColor, entityType, description, isActive } = req.body;
-
+  const { History, AuditTrail, Label } = req.models;
+  
   // Validate the request body
   const { error } = labelUpdateSchema.validate(req.body);
   if (error) {
     await logAuditTrail(
+      AuditTrail,
       PROGRAMS.LABEL_MASTER, // Program ID for label management
       "EDIT_LABEL", // Mode
       req.role, // Admin role from the authenticated request
@@ -189,6 +195,7 @@ exports.editLabel = async (req, res) => {
     };
 
     await historyLogger(
+      History,
       PROGRAMS.LABEL_MASTER, // Program ID for label management
       "EDIT_LABEL", // Mode
       req.adminId, // Updated by (Admin ID)
@@ -199,6 +206,7 @@ exports.editLabel = async (req, res) => {
     );
 
     await logAuditTrail(
+      AuditTrail,
       PROGRAMS.LABEL_MASTER, // Program ID for label management
       "EDIT_LABEL", // Mode
       req.role, // Admin role from the authenticated request
@@ -221,6 +229,7 @@ exports.editLabel = async (req, res) => {
   } catch (error) {
     console.error("Error updating label:", error);
     await logAuditTrail(
+      AuditTrail,
       PROGRAMS.LABEL_MASTER, // Program ID for label management
       "EDIT_LABEL", // Mode
       req.role, // Admin role from the authenticated request
@@ -234,7 +243,7 @@ exports.editLabel = async (req, res) => {
 // Delete label (soft delete)
 exports.deleteLabel = async (req, res) => {
   const { labelId } = req.params;
-
+  const { History, AuditTrail, Label } = req.models;
   try {
     const label = await Label.findByPk(labelId);
     if (!label) {
@@ -256,6 +265,7 @@ exports.deleteLabel = async (req, res) => {
     });
 
     await historyLogger(
+      History,
       PROGRAMS.LABEL_MASTER, // Program ID for label management
       "DELETE_LABEL", // Mode
       req.adminId, // Deleted by (Admin ID)
@@ -266,6 +276,7 @@ exports.deleteLabel = async (req, res) => {
     );
 
     await logAuditTrail(
+      AuditTrail,
       PROGRAMS.LABEL_MASTER, // Program ID for label management
       "DELETE_LABEL", // Mode
       req.role, // Admin role from the authenticated request
@@ -279,6 +290,7 @@ exports.deleteLabel = async (req, res) => {
   } catch (error) {
     console.error("Error deleting label:", error);
     await logAuditTrail(
+      AuditTrail,
       PROGRAMS.LABEL_MASTER, // Program ID for label management
       "DELETE_LABEL", // Mode
       req.role, // Admin role from the authenticated request
@@ -291,6 +303,7 @@ exports.deleteLabel = async (req, res) => {
 
 // Get all labels
 exports.getLabels = async (req, res) => {
+  const { AuditTrail, Label } = req.models;
   try {
     const { entityType, isActive, page = 1, limit = 100, search } = req.query;
 
@@ -334,6 +347,7 @@ exports.getLabels = async (req, res) => {
     });
 
     await logAuditTrail(
+      AuditTrail,
       PROGRAMS.LABEL_MASTER, // Program ID for label management
       "GET_LABELS", // Mode
       req.role, // Admin role from the authenticated request
@@ -354,6 +368,7 @@ exports.getLabels = async (req, res) => {
   } catch (error) {
     console.error("Error retrieving labels:", error);
     await logAuditTrail(
+      AuditTrail,
       PROGRAMS.LABEL_MASTER, // Program ID for label management
       "GET_LABELS", // Mode
       req.role, // Admin role from the authenticated request
@@ -367,7 +382,7 @@ exports.getLabels = async (req, res) => {
 // Get label by ID
 exports.getLabelById = async (req, res) => {
   const { labelId } = req.params;
-
+  const { Label } = req.models;
   try {
     const label = await Label.findByPk(labelId);
     if (!label) {
@@ -397,6 +412,7 @@ exports.getLabelById = async (req, res) => {
 
 // Bulk update labels
 exports.bulkUpdateLabels = async (req, res) => {
+  const { AuditTrail, Label } = req.models;
   const { labelIds, updates } = req.body;
 
   if (!labelIds || !Array.isArray(labelIds) || labelIds.length === 0) {
@@ -436,6 +452,7 @@ exports.bulkUpdateLabels = async (req, res) => {
     });
 
     await logAuditTrail(
+      AuditTrail,
       PROGRAMS.LABEL_MASTER, // Program ID for label management
       "BULK_UPDATE_LABELS", // Mode
       req.role, // Admin role from the authenticated request
@@ -450,6 +467,7 @@ exports.bulkUpdateLabels = async (req, res) => {
   } catch (error) {
     console.error("Error bulk updating labels:", error);
     await logAuditTrail(
+      AuditTrail,
       PROGRAMS.LABEL_MASTER, // Program ID for label management
       "BULK_UPDATE_LABELS", // Mode
       req.role, // Admin role from the authenticated request

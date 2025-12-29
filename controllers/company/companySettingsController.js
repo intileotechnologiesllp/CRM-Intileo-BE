@@ -6,13 +6,14 @@ const CompanySettings = require("../../models/company/companySettingsModel");
  * @access Private (Admin only recommended)
  */
 exports.getCompanySettings = async (req, res) => {
+  const { CompanySetting } = req.models;
   try {
     // Get the first (and should be only) company settings record
-    let settings = await CompanySettings.findOne();
+    let settings = await CompanySetting.findOne();
 
     // If no settings exist, create default settings
     if (!settings) {
-      settings = await CompanySettings.create({
+      settings = await CompanySetting.create({
         companyName: "My Company",
         companyDomain: null,
         preferredMaintenanceTime: null,
@@ -41,6 +42,7 @@ exports.getCompanySettings = async (req, res) => {
  * @access Private (Admin only recommended)
  */
 exports.updateCompanySettings = async (req, res) => {
+  const { CompanySetting } = req.models;
   try {
     const { companyName, companyDomain, preferredMaintenanceTime, timezone } =
       req.body;
@@ -73,11 +75,11 @@ exports.updateCompanySettings = async (req, res) => {
     }
 
     // Get existing settings or create new
-    let settings = await CompanySettings.findOne();
+    let settings = await CompanySetting.findOne();
 
     if (!settings) {
       // Create new settings if none exist
-      settings = await CompanySettings.create({
+      settings = await CompanySetting.create({
         companyName: companyName.trim(),
         companyDomain: companyDomain ? companyDomain.toLowerCase().trim() : null,
         preferredMaintenanceTime: preferredMaintenanceTime || null,
@@ -199,6 +201,7 @@ exports.getMaintenanceTimeOptions = async (req, res) => {
  * @access Private
  */
 exports.checkDomainAvailability = async (req, res) => {
+  const { CompanySetting } = req.models;
   try {
     const { companyDomain } = req.body;
 
@@ -223,12 +226,12 @@ exports.checkDomainAvailability = async (req, res) => {
     }
 
     // Check if domain exists
-    const existingSettings = await CompanySettings.findOne({
+    const existingSettings = await CompanySetting.findOne({
       where: { companyDomain: domain },
     });
 
     // Get current settings to check if it's the same company
-    const currentSettings = await CompanySettings.findOne();
+    const currentSettings = await CompanySetting.findOne();
 
     const isAvailable =
       !existingSettings ||

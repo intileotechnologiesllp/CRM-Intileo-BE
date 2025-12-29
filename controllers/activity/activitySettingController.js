@@ -3,6 +3,7 @@ const { ActivityType } = require("../../models/activity/activityTypeModel");
 
 // Create a new activity type
 exports.createActivityType = async (req, res) => {
+  const { ActivityType } = req.models;
   try {
     const { name, icon, isActive = true } = req.body;
     if (!name || !icon) {
@@ -23,6 +24,7 @@ exports.createActivityType = async (req, res) => {
 
 // Get all activity types
 exports.getActivityTypes = async (req, res) => {
+  const { ActivityType } = req.models;
   try {
     const activityTypes = await ActivityType.findAll();
     res.status(200).json({ activityTypes });
@@ -33,6 +35,7 @@ exports.getActivityTypes = async (req, res) => {
 
 // Update activity type (activate/deactivate, change icon/name)
 exports.updateActivityType = async (req, res) => {
+  const { ActivityType } = req.models;
   try {
     const { id } = req.params;
     const { name, icon, isActive } = req.body;
@@ -52,6 +55,7 @@ exports.updateActivityType = async (req, res) => {
 
 // Delete activity type
 exports.deleteActivityType = async (req, res) => {
+  const { ActivityType } = req.models;
   try {
     const { id } = req.params;
     const activityType = await ActivityType.findByPk(id);
@@ -69,6 +73,7 @@ const ActivitySetting = require('../../models/activity/activitySettingModel');
 
 // Get activity settings for a company
 exports.getActivitySettings = async (req, res) => {
+  const { ActivitySetting } = req.models;
   try {
     const masterUserID = req.masterUserID || req.adminId; // Use masterUserID for scoping
     let settings = await ActivitySetting.findOne({ where: { masterUserID } });
@@ -107,6 +112,7 @@ exports.getActivitySettings = async (req, res) => {
 
 // Update activity settings for a company
 exports.updateActivitySettings = async (req, res) => {
+  const { ActivitySetting } = req.models;
   try {
     const masterUserID = req.masterUserID || req.adminId; // Use masterUserID for scoping
     let { 

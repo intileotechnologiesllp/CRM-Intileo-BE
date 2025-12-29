@@ -2,6 +2,7 @@
 exports.updateDefaultEmailVisibility = async (req, res) => {
   const { visibility } = req.body; // "shared" or "private"
   const masterUserID = req.adminId;
+  const { DefaultEmail, Email,} = req.models;
 
   try {
     // Validate visibility value
@@ -98,6 +99,7 @@ const MAX_CONCURRENT_USERS = 3; // Maximum users that can fetch emails simultane
  * This replaces all UserCredential.findOne() calls for better performance
  */
 const getUserCredentialCached = async (masterUserID, includePassword = false) => {
+  const {  UserCredential, } = req.models;
   try {
     // Try Redis cache first
     console.log(`🔍 [CACHE] Looking for UserCredential in cache: ${masterUserID}`);
@@ -150,6 +152,7 @@ const getUserCredentialCached = async (masterUserID, includePassword = false) =>
  * @returns {Promise<Object|null>} Email body object or null
  */
 const getEmailBodyCached = async (emailID, masterUserID) => {
+  const {  UserCredential, } = req.models;
   try {
     // L1 Cache: Try Redis first (fastest)
     const cachedBody = await redisService.getEmailBody(emailID, masterUserID);
@@ -193,6 +196,7 @@ const getEmailBodyCached = async (emailID, masterUserID) => {
  * @param {string} masterUserID - The user ID for cache key namespacing
  */
 const setEmailBodyCached = async (emailID, bodyData, masterUserID) => {
+   const {  UserCredential, } = req.models;
   try {
     // Save to MongoDB L2 cache (persistent)
     await emailBodyMongoService.saveEmailBody(emailID, bodyData);
@@ -1629,6 +1633,8 @@ exports.fetchInboxEmails = async (req, res) => {
     allUIDsInBatch,
     expectedCount,
   } = req.query;
+  const {  UserCredential, } = req.models;
+  
   batchSize = Math.min(Number(batchSize) || 50, MAX_BATCH_SIZE);
 
   const masterUserID = req.adminId;

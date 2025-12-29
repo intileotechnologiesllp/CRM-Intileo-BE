@@ -14,12 +14,14 @@ const leadColumnSchema = Joi.object({
 
 // Add leadColumn
 exports.createleadColumn = async (req, res) => {
+  const { History, AuditTrail, LeadColumn } = req.models;
   const { leadColumn_desc } = req.body;
   
   // Validate the request body
   const { error } = leadColumnSchema.validate({ leadColumn_desc });
   if (error) {
     await logAuditTrail(
+      AuditTrail,
       PROGRAMS.LEAD_COLUMN_MASTER, // Program ID for leadColumn management
       "CREATE_leadColumn", // Mode
        req.role, // Admin ID from the authenticated request
@@ -30,7 +32,7 @@ exports.createleadColumn = async (req, res) => {
   }
 
   try {
-    const leadColumn = await leadColumn.create({
+    const leadColumn = await LeadColumn.create({
      
       leadColumn_desc,
       createdBy: "admin",
@@ -38,6 +40,7 @@ exports.createleadColumn = async (req, res) => {
       mode: "added"
     });
     await historyLogger(
+      History,
       PROGRAMS.LEAD_COLUMN_MASTER, // Program ID for department management
       "CREATE_leadColumn", // Mode
       leadColumn.createdById, // Created by (Admin ID)
@@ -59,6 +62,7 @@ exports.createleadColumn = async (req, res) => {
     });
   } catch (error) {
     await logAuditTrail(
+      AuditTrail,
       PROGRAMS.LEAD_COLUMN_MASTER, // Program ID for department management
       "CREATE_leadColumn", // Mode
        req.role, // Admin ID from the authenticated request
@@ -73,6 +77,7 @@ exports.createleadColumn = async (req, res) => {
 
 // Edit leadColumn
 exports.editleadColumn = async (req, res) => {
+  const { History, AuditTrail, LeadColumn } = req.models;
   const { leadColumnId } = req.params; // Use leadColumnId instead of id
   const { leadColumn_desc } = req.body;
 
@@ -80,6 +85,7 @@ exports.editleadColumn = async (req, res) => {
   const { error } = leadColumnSchema.validate({ leadColumn_desc });
   if (error) {
     await logAuditTrail(
+      AuditTrail,
       PROGRAMS.LEAD_COLUMN_MASTER, // Program ID for leadColumn management
       "EDIT_leadColumn", // Mode
        req.role, // Admin ID from the authenticated request
@@ -90,9 +96,10 @@ exports.editleadColumn = async (req, res) => {
   }
 
   try {
-    const leadColumn = await leadColumn.findByPk(leadColumnId); // Find leadColumn by leadColumnId
+    const leadColumn = await LeadColumn.findByPk(leadColumnId); // Find leadColumn by leadColumnId
     if (!leadColumn) {
       await logAuditTrail(
+        AuditTrail,
         PROGRAMS.LEAD_COLUMN_MASTER, // Program ID for leadColumn management
         "EDIT_leadColumn", // Mode
          req.role, // Admin ID from the authenticated request
@@ -120,6 +127,7 @@ exports.editleadColumn = async (req, res) => {
       }
     }
     await historyLogger(
+      History,
       PROGRAMS.LEAD_COLUMN_MASTER, // Program ID for currency management
       "EDIT_leadColumn", // Mode
       leadColumn.createdById, // Admin ID from the authenticated request
@@ -140,6 +148,7 @@ exports.editleadColumn = async (req, res) => {
     });
   } catch (error) {
     await logAuditTrail(
+      AuditTrail,
       PROGRAMS.LEAD_COLUMN_MASTER, // Program ID for department management
       "EDIT_leadColumn", // Mode
        req.role, // Admin ID from the authenticated request
@@ -154,11 +163,13 @@ exports.editleadColumn = async (req, res) => {
 // Delete leadColumn
 exports.deleteleadColumn = async (req, res) => {
   const { leadColumnId } = req.params; // Use leadColumnId instead of id
+  const { History, AuditTrail, LeadColumn } = req.models;
 
   try {
-    const leadColumn = await leadColumn.findByPk(leadColumnId); // Find leadColumn by leadColumnId
+    const leadColumn = await LeadColumn.findByPk(leadColumnId); // Find leadColumn by leadColumnId
     if (!leadColumn) {
       await logAuditTrail(
+        AuditTrail,
         PROGRAMS.LEAD_COLUMN_MASTER, // Program ID for leadColumn management
         "DELETE_leadColumn", // Mode
          req.role, // Admin ID from the authenticated request
@@ -173,6 +184,7 @@ exports.deleteleadColumn = async (req, res) => {
 
     await leadColumn.destroy();
     await historyLogger(
+      History,
       PROGRAMS.LEAD_COLUMN_MASTER, // Program ID for currency management
       "DELETE_leadColumn", // Mode
       leadColumn.createdById, // Admin ID from the authenticated request
@@ -187,6 +199,7 @@ exports.deleteleadColumn = async (req, res) => {
     });
   } catch (error) {
     await logAuditTrail(
+      AuditTrail,
       PROGRAMS.LEAD_COLUMN_MASTER, // Program ID for department management
       "DELETE_leadColumn", // Mode
        req.role, // Admin ID from the authenticated request
@@ -200,6 +213,7 @@ exports.deleteleadColumn = async (req, res) => {
 
 // Search, paginate, and sort leadColumns
 exports.getleadColumns = async (req, res) => {
+  const { AuditTrail, LeadColumn } = req.models;
   const {
     search,
     createdBy,
@@ -224,6 +238,7 @@ exports.getleadColumns = async (req, res) => {
   const { error } = querySchema.validate(req.query);
   if (error) {
     await logAuditTrail(
+      AuditTrail,
       PROGRAMS.LEAD_COLUMN_MASTER, // Program ID for leadColumn management
       "GET_leadColumnS", // Mode
        req.role, // Admin ID from the authenticated request
@@ -245,7 +260,7 @@ exports.getleadColumns = async (req, res) => {
       ...(mode && { mode }), // Filter by mode
     };
 
-    const leadColumns = await leadColumn.findAndCountAll({
+    const leadColumns = await LeadColumn.findAndCountAll({
       where: whereClause, // Apply filters
       order: [[sortBy, order]], // Sorting
       limit: parseInt(limit), // Pagination limit
@@ -267,6 +282,7 @@ exports.getleadColumns = async (req, res) => {
     });
   } catch (error) {
     await logAuditTrail(
+      AuditTrail,
       PROGRAMS.LEAD_COLUMN_MASTER, // Program ID for leadColumn management
       "GET_leadColumnS", // Mode
        req.role, // Admin ID from the authenticated request

@@ -14,12 +14,14 @@ const sectoralscopeSchema = Joi.object({
 
 // Add sectoralscope
 exports.createsectoralscope = async (req, res) => {
+  const { History, AuditTrail, Sectoralscope } = req.models;
   const { sectoralscope_desc } = req.body;
 
   // Validate the request body
   const { error } = sectoralscopeSchema.validate({ sectoralscope_desc });
   if (error) {
     await logAuditTrail(
+      AuditTrail,
       PROGRAMS.SECTORAL_SCOPE_MASTER, // Program ID for sectoralscope management
       "CREATE_SECTORALSCOPE", // Mode
        req.role, // Admin ID from the authenticated request
@@ -37,6 +39,7 @@ exports.createsectoralscope = async (req, res) => {
       mode: "added"
     });
     await historyLogger(
+      History,
       PROGRAMS.SECTORAL_SCOPE_MASTER, // Program ID for currency management
       "CREATE_SECTORALSCOPE", // Mode
       sectoralscope.createdById, // Created by (Admin ID)
@@ -58,6 +61,7 @@ exports.createsectoralscope = async (req, res) => {
     });
   } catch (error) {
     await logAuditTrail(
+      AuditTrail,
       PROGRAMS.SECTORAL_SCOPE_MASTER, // Program ID for sectoralscope management
       "CREATE_SECTORALSCOPE", // Mode
        req.role, // Admin ID from the authenticated request
@@ -71,6 +75,7 @@ exports.createsectoralscope = async (req, res) => {
 
 // Edit sectoralscope
 exports.editsectoralscope = async (req, res) => {
+  const { History, AuditTrail, Sectoralscope } = req.models;
   const { sectoralscopeId } = req.params; // Use sectoralscopeId instead of id
   const { sectoralscope_desc } = req.body;
 
@@ -78,6 +83,7 @@ exports.editsectoralscope = async (req, res) => {
   const { error } = sectoralscopeSchema.validate({ sectoralscope_desc });
   if (error) {
     await logAuditTrail(
+      AuditTrail,
       PROGRAMS.SECTORAL_SCOPE_MASTER, // Program ID for sectoralscope management
       "EDIT_SECTORALSCOPE", // Mode
        req.role, // Admin ID from the authenticated request
@@ -91,6 +97,7 @@ exports.editsectoralscope = async (req, res) => {
     const sectoralscope = await Sectoralscope.findByPk(sectoralscopeId); // Find sectoralscope by sectoralscopeId
     if (!sectoralscope) {
       await logAuditTrail(
+        AuditTrail,
         PROGRAMS.SECTORAL_SCOPE_MASTER, // Program ID for sectoralscope management
         "EDIT_SECTORALSCOPE", // Mode
          req.role, // Admin ID from the authenticated request
@@ -117,6 +124,7 @@ const originalData = {
       }
     }
     await historyLogger(
+      History,
       PROGRAMS.SECTORAL_SCOPE_MASTER, // Program ID for currency management
       "EDIT_SECTORALSCOPE", // Mode
       sectoralscope.createdById, // Admin ID from the authenticated request
@@ -137,6 +145,7 @@ const originalData = {
     });
   } catch (error) {
     await logAuditTrail(
+      AuditTrail,
       PROGRAMS.SECTORAL_SCOPE_MASTER, // Program ID for sectoralscope management
       "EDIT_SECTORALSCOPE", // Mode
        req.role, // Admin ID from the authenticated request
@@ -151,11 +160,12 @@ const originalData = {
 // Delete sectoralscope
 exports.deletesectoralscope = async (req, res) => {
   const { sectoralscopeId } = req.params; // Use sectoralscopeId instead of id
-
+  const { History, AuditTrail, Sectoralscope } = req.models;
   try {
     const sectoralscope = await Sectoralscope.findByPk(sectoralscopeId); // Find sectoralscope by sectoralscopeId
     if (!sectoralscope) {
       await logAuditTrail(
+        AuditTrail,
         PROGRAMS.SECTORAL_SCOPE_MASTER, // Program ID for sectoralscope management
         "DELETE_SECTORALSCOPE", // Mode
          req.role, // Admin ID from the authenticated request
@@ -170,6 +180,7 @@ exports.deletesectoralscope = async (req, res) => {
 
     await sectoralscope.destroy();
     await historyLogger(
+      History,
       PROGRAMS.SECTORAL_SCOPE_MASTER, // Program ID for currency management
       "DELETE_SECTORALSCOPE", // Mode
       sectoralscope.createdById, // Admin ID from the authenticated request
@@ -184,6 +195,7 @@ exports.deletesectoralscope = async (req, res) => {
     });
   } catch (error) {
     await logAuditTrail(
+      AuditTrail,
       PROGRAMS.SECTORAL_SCOPE_MASTER, // Program ID for sectoralscope management
       "DELETE_SECTORALSCOPE", // Mode
        req.role, // Admin ID from the authenticated request
@@ -206,6 +218,7 @@ exports.getsectoralscopes = async (req, res) => {
     sortBy = "creationDate",
     order = "DESC",
   } = req.query;
+  const { History, AuditTrail, Sectoralscope } = req.models;
 
   // Validate query parameters using Joi
   const querySchema = Joi.object({
@@ -221,6 +234,7 @@ exports.getsectoralscopes = async (req, res) => {
   const { error } = querySchema.validate(req.query);
   if (error) {
     await logAuditTrail(
+      AuditTrail,
       PROGRAMS.SECTORAL_SCOPE_MASTER, // Program ID for sectoralscope management
       "GET_SECTORALSCOPE", // Mode
        req.role, // Admin ID from the authenticated request
@@ -264,6 +278,7 @@ exports.getsectoralscopes = async (req, res) => {
     });
   } catch (error) {
     await logAuditTrail(
+      AuditTrail,
       PROGRAMS.SECTORAL_SCOPE_MASTER, // Program ID for sectoralscope management
       "GET_SECTORALSCOPE", // Mode
        req.role, // Admin ID from the authenticated request

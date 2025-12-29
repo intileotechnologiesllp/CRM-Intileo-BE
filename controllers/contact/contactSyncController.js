@@ -8,6 +8,7 @@ const googleContactsService = require("../../services/googleContactsService");
  * Get Google OAuth authorization URL
  */
 exports.getGoogleAuthUrl = async (req, res) => {
+  const { ContactSyncConfig, ContactSyncHistory, ContactChangeLog } = req.models;
   try {
     const masterUserID = req.adminId;
     
@@ -34,6 +35,7 @@ exports.getGoogleAuthUrl = async (req, res) => {
  * Handle Google OAuth callback
  */
 exports.handleGoogleCallback = async (req, res) => {
+  const { ContactSyncConfig, ContactSyncHistory, ContactChangeLog } = req.models;
   try {
     const { code, state } = req.query;
     
@@ -216,6 +218,7 @@ exports.handleGoogleCallback = async (req, res) => {
  * Create or update sync configuration
  */
 exports.createOrUpdateSyncConfig = async (req, res) => {
+  const { ContactSyncConfig, ContactSyncHistory, ContactChangeLog } = req.models;
   try {
     const masterUserID = req.adminId;
     const {
@@ -298,6 +301,7 @@ exports.createOrUpdateSyncConfig = async (req, res) => {
  * Get sync configuration
  */
 exports.getSyncConfig = async (req, res) => {
+  const { ContactSyncConfig, ContactSyncHistory, ContactChangeLog } = req.models;
   try {
     const masterUserID = req.adminId;
 
@@ -331,6 +335,7 @@ exports.getSyncConfig = async (req, res) => {
  * Start manual sync
  */
 exports.startSync = async (req, res) => {
+  const { ContactSyncConfig, ContactSyncHistory, ContactChangeLog } = req.models;
   try {
     const masterUserID = req.adminId;
 
@@ -376,6 +381,7 @@ exports.startSync = async (req, res) => {
  * Get sync history
  */
 exports.getSyncHistory = async (req, res) => {
+  const { ContactSyncConfig, ContactSyncHistory, ContactChangeLog } = req.models;
   try {
     const masterUserID = req.adminId;
     const { page = 1, limit = 20 } = req.query;
@@ -413,6 +419,7 @@ exports.getSyncHistory = async (req, res) => {
  * Get specific sync history details
  */
 exports.getSyncHistoryDetails = async (req, res) => {
+  const { ContactSyncConfig, ContactSyncHistory, ContactChangeLog } = req.models;
   try {
     const masterUserID = req.adminId;
     const { syncHistoryId } = req.params;
@@ -446,6 +453,7 @@ exports.getSyncHistoryDetails = async (req, res) => {
  * Get change logs for a sync
  */
 exports.getChangeLogs = async (req, res) => {
+  const { ContactSyncConfig, ContactSyncHistory, ContactChangeLog } = req.models;
   try {
     const masterUserID = req.adminId;
     const { syncHistoryId } = req.params;
@@ -489,6 +497,7 @@ exports.getChangeLogs = async (req, res) => {
  * Get change logs for a specific contact
  */
 exports.getContactChangeLogs = async (req, res) => {
+  const { ContactSyncConfig, ContactSyncHistory, ContactChangeLog } = req.models;
   try {
     const masterUserID = req.adminId;
     const { personId } = req.params;
@@ -527,6 +536,7 @@ exports.getContactChangeLogs = async (req, res) => {
  * Disconnect Google account
  */
 exports.disconnectGoogle = async (req, res) => {
+  const { ContactSyncConfig, ContactSyncHistory, ContactChangeLog } = req.models;
   try {
     const masterUserID = req.adminId;
 
@@ -564,6 +574,7 @@ exports.disconnectGoogle = async (req, res) => {
  * Get sync statistics
  */
 exports.getSyncStats = async (req, res) => {
+  const { ContactSyncConfig, ContactSyncHistory, ContactChangeLog } = req.models;
   try {
     const masterUserID = req.adminId;
 

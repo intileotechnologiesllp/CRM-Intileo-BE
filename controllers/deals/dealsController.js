@@ -41,6 +41,7 @@ const fs = require('fs').promises;
 // Create a new deal with validation
 
 exports.createDeal = async (req, res) => {
+  const { DealParticipant, DealStageHistory, DealDetails, History, AuditTrail, Deal, Lead, LeadOrganization, LeadPerson, MasterUser, Email, CustomField, CustomFieldValue, PermissionSet, DealNote, LeadNote, LeadFilter,  DealColumnPreference, UserCredential, PipelineStage, Currency, DealFile, DealProduct, Product, ProductVariation, GroupVisibility, Activity, LeadFile} = req.models;
   try {
   const dealProgramId = getProgramId("DEALS");
   // Declare ownerId at the top before any usage
@@ -81,6 +82,7 @@ exports.createDeal = async (req, res) => {
     // Validate required fields
     if (!contactPerson || !organization || !title || !email) {
       await logAuditTrail(
+        AuditTrail,
         dealProgramId,
         "DEAL_CREATION",
         req.role,
@@ -95,6 +97,7 @@ exports.createDeal = async (req, res) => {
     // Validate contactPerson
     if (typeof contactPerson !== "string" || !contactPerson.trim()) {
       await logAuditTrail(
+        AuditTrail,
         dealProgramId,
         "DEAL_CREATION",
         req.role,
@@ -109,6 +112,7 @@ exports.createDeal = async (req, res) => {
     // Validate organization
     if (typeof organization !== "string" || !organization.trim()) {
       await logAuditTrail(
+        AuditTrail,
         dealProgramId,
         "DEAL_CREATION",
         req.role,
@@ -123,6 +127,7 @@ exports.createDeal = async (req, res) => {
     // Validate title
     if (typeof title !== "string" || !title.trim()) {
       await logAuditTrail(
+        AuditTrail,
         dealProgramId,
         "DEAL_CREATION",
         req.role,
@@ -141,6 +146,7 @@ exports.createDeal = async (req, res) => {
       
       if (!emailRegex.test(email) || email.length > 254) {
         await logAuditTrail(
+          AuditTrail,
           dealProgramId,
           "DEAL_CREATION",
           req.role,
@@ -160,6 +166,7 @@ exports.createDeal = async (req, res) => {
       
       if (!phoneRegex.test(phone.trim())) {
         await logAuditTrail(
+          AuditTrail,
           dealProgramId,
           "DEAL_CREATION",
           req.role,
@@ -178,6 +185,7 @@ exports.createDeal = async (req, res) => {
       sanitizedProposalValue = null;
     } else if (proposalValue && proposalValue < 0) {
       await logAuditTrail(
+        AuditTrail,
         dealProgramId,
         "DEAL_CREATION",
         req.role,
@@ -195,6 +203,7 @@ exports.createDeal = async (req, res) => {
       sanitizedValue = null;
     } else if (value && value < 0) {
       await logAuditTrail(
+        AuditTrail,
         dealProgramId,
         "DEAL_CREATION",
         req.role,
@@ -257,6 +266,7 @@ exports.createDeal = async (req, res) => {
     if (sanitizedSourceOrgin === "2" || sanitizedSourceOrgin === 2) {
       if (!leadId) {
         await logAuditTrail(
+          AuditTrail,
           dealProgramId,
           "DEAL_CREATION",
           req.role,
@@ -270,6 +280,7 @@ exports.createDeal = async (req, res) => {
       existingLead = await Lead.findByPk(leadId);
       if (!existingLead) {
         await logAuditTrail(
+          AuditTrail,
           dealProgramId,
           "DEAL_CREATION",
           req.role,
@@ -285,9 +296,9 @@ exports.createDeal = async (req, res) => {
     // 1. Find or create Organization
     let org = null;
     if (organization) {
-      org = await Organization.findOne({ where: { organization } });
+      org = await LeadOrganization.findOne({ where: { organization } });
       if (!org) {
-        org = await Organization.create({
+        org = await LeadOrganization.create({
           organization,
           masterUserID, // make sure this is set
         });
@@ -298,9 +309,9 @@ exports.createDeal = async (req, res) => {
     if (contactPerson) {
       const masterUserID = req.adminId;
 
-      person = await Person.findOne({ where: { email } });
+      person = await LeadPerson.findOne({ where: { email } });
       if (!person) {
-        person = await Person.create({
+        person = await LeadPerson.create({
           contactPerson,
           email,
           phone,
@@ -315,6 +326,7 @@ exports.createDeal = async (req, res) => {
     if (sanitizedSourceOrgin === "2" || sanitizedSourceOrgin === 2) {
       if (!leadId) {
         await logAuditTrail(
+          AuditTrail,
           dealProgramId,
           "DEAL_CREATION",
           req.role,
@@ -332,6 +344,7 @@ exports.createDeal = async (req, res) => {
       // Prevent conversion if already converted to a deal
       if (existingLead.dealId) {
         await logAuditTrail(
+          AuditTrail,
           dealProgramId,
           "DEAL_CREATION",
           req.role,
@@ -423,6 +436,7 @@ exports.createDeal = async (req, res) => {
         } else {
           // Log the activity linking in history
           await historyLogger(
+            History,
             dealProgramId,
             "ACTIVITY_LINKING",
             req.adminId,
@@ -476,7 +490,6 @@ exports.createDeal = async (req, res) => {
         console.log(`✅ [ACTIVITIES] Moved ${activitiesUpdateResult[0]} activities from Lead ${existingLead.leadId} to Deal ${deal.dealId}`);
         
         // ✅ 2. Move Notes from Lead to Deal
-        const LeadNote = require("../../models/leads/leadNoteModel");
         const leadNotes = await LeadNote.findAll({
           where: { leadId: existingLead.leadId }
         });
@@ -499,7 +512,6 @@ exports.createDeal = async (req, res) => {
         console.log(`✅ [NOTES] Moved ${movedNotesCount} notes from Lead ${existingLead.leadId} to Deal ${deal.dealId}`);
         
         // ✅ 3. Move Files from Lead to Deal
-        const LeadFile = require("../../models/leads/leadFileModel");
         let movedFilesCount = 0;
         
         try {
@@ -538,6 +550,7 @@ exports.createDeal = async (req, res) => {
         
         // Log the successful data migration
         await historyLogger(
+          History,
           dealProgramId,
           "LEAD_TO_DEAL_MIGRATION",
           deal.masterUserID,
@@ -578,7 +591,7 @@ exports.createDeal = async (req, res) => {
           console.log(`✅ [ACTIVITIES] Moved ${activitiesUpdateResult[0]} activities from Lead ${leadId} to Deal ${deal.dealId}`);
           
           // Move Notes
-          const LeadNote = require("../../models/leads/leadNoteModel");
+
           const leadNotes = await LeadNote.findAll({
             where: { leadId: leadId }
           });
@@ -600,7 +613,6 @@ exports.createDeal = async (req, res) => {
           
           // Move Files
           try {
-            const LeadFile = require("../../models/leads/leadFileModel");
             const leadFiles = await LeadFile.findAll({
               where: { leadId: leadId }
             });
@@ -826,6 +838,7 @@ exports.createDeal = async (req, res) => {
     }
 
     await historyLogger(
+      History,
       dealProgramId,
       "DEAL_CREATION",
       deal.masterUserID,
@@ -906,6 +919,7 @@ exports.createDeal = async (req, res) => {
 };
 
 exports.getDeals = async (req, res) => {
+  const { DealParticipant, DealStageHistory, DealDetails, History, AuditTrail, Deal, Lead, LeadOrganization, LeadPerson, MasterUser, Email, CustomField, CustomFieldValue, PermissionSet, DealNote, LeadNote, LeadFilter,  DealColumnPreference, UserCredential, PipelineStage, Currency, DealFile, DealProduct, Product, ProductVariation, GroupVisibility, Activity, LeadFile} = req.models;
   const {
     page = 1,
     limit = 20,
@@ -1034,16 +1048,16 @@ exports.getDeals = async (req, res) => {
 
           if (dealFields.includes(cond.field)) {
             console.log(`Field '${cond.field}' found in Deal fields`);
-            filterWhere[Op.and].push(buildCondition(cond));
+            filterWhere[Op.and].push(buildCondition(cond, Deal, DealProduct, DealDetails, Product));
           } else if (dealDetailsFields.includes(cond.field)) {
             console.log(`Field '${cond.field}' found in DealDetails fields`);
-            dealDetailsWhere[Op.and].push(buildCondition(cond));
+            dealDetailsWhere[Op.and].push(buildCondition(cond, Deal, DealProduct, DealDetails, Product));
           } else if (dealProductFields.includes(cond.field)) {
             console.log(`Field '${cond.field}' found in DealProduct fields`);
-            dealProductWhere[Op.and].push(buildCondition(cond));
+            dealProductWhere[Op.and].push(buildCondition(cond, Deal, DealProduct, DealDetails, Product));
           } else if (productFields.includes(cond.field)) {
             console.log(`Field '${cond.field}' found in Product fields`);
-            productWhere[Op.and].push(buildCondition(cond));
+            productWhere[Op.and].push(buildCondition(cond, Deal, DealProduct, DealDetails, Product));
           } else {
             console.log(
               `Field '${cond.field}' NOT found in standard fields, treating as custom field`
@@ -1073,13 +1087,13 @@ exports.getDeals = async (req, res) => {
 
         any.forEach((cond) => {
           if (dealFields.includes(cond.field)) {
-            filterWhere[Op.or].push(buildCondition(cond));
+            filterWhere[Op.or].push(buildCondition(cond, Deal, DealProduct, DealDetails, Product));
           } else if (dealDetailsFields.includes(cond.field)) {
-            dealDetailsWhere[Op.or].push(buildCondition(cond));
+            dealDetailsWhere[Op.or].push(buildCondition(cond, Deal, DealProduct, DealDetails, Product));
           } else if (dealProductFields.includes(cond.field)) {
-            dealProductWhere[Op.or].push(buildCondition(cond));
+            dealProductWhere[Op.or].push(buildCondition(cond, Deal, DealProduct, DealDetails, Product));
           } else if (productFields.includes(cond.field)) {
-            productWhere[Op.or].push(buildCondition(cond));
+            productWhere[Op.or].push(buildCondition(cond, Deal, DealProduct, DealDetails, Product));
           } else {
             // Handle custom fields
             customFieldsConditions.any.push(cond);
@@ -1251,7 +1265,8 @@ exports.getDeals = async (req, res) => {
 
         const customFieldFilters = await buildCustomFieldFilters(
           customFieldsConditions,
-          req.adminId
+          req.adminId,
+          CustomField
         );
         console.log("Built custom field filters:", customFieldFilters);
 
@@ -1259,7 +1274,10 @@ exports.getDeals = async (req, res) => {
           // Apply custom field filtering by finding deals that match the custom field conditions
           const matchingDealIds = await getDealIdsByCustomFieldFilters(
             customFieldFilters,
-            req.adminId
+            req.adminId,
+            CustomFieldValue,
+            CustomField,
+            Deal
           );
 
           console.log(
@@ -3036,7 +3054,7 @@ exports.getDeals = async (req, res) => {
 // };
 
 // Helper functions for custom field filtering
-async function buildCustomFieldFilters(customFieldsConditions, masterUserID) {
+async function buildCustomFieldFilters(customFieldsConditions, masterUserID, CustomField) {
   const filters = [];
 
   // Handle 'all' conditions (AND logic)
@@ -3186,7 +3204,10 @@ async function buildCustomFieldFilters(customFieldsConditions, masterUserID) {
 
 async function getDealIdsByCustomFieldFilters(
   customFieldFilters,
-  masterUserID
+  masterUserID,
+  CustomFieldValue,
+  CustomField,
+  Deal
 ) {
   if (customFieldFilters.length === 0) return [];
 
@@ -3416,7 +3437,7 @@ const operatorMap = {
 };
 
 // Helper to build a single condition
-function buildCondition(cond) {
+function buildCondition(cond, Deal, DealProduct, DealDetails, Product) {
   const ops = {
     eq: Op.eq,
     ne: Op.ne,
@@ -3568,6 +3589,7 @@ function buildCondition(cond) {
 }
 
 exports.changeDealOwner = async (req, res) => {
+   const { DealParticipant, DealStageHistory, DealDetails, History, AuditTrail, Deal, Lead, LeadOrganization, LeadPerson, MasterUser, Email, CustomField, CustomFieldValue, PermissionSet, DealNote, LeadNote, LeadFilter,  DealColumnPreference, UserCredential, PipelineStage, Currency, DealFile, DealProduct, Product, ProductVariation, GroupVisibility, Activity, LeadFile} = req.models;
   try {
     const { dealId } = req.params;
     const { newOwnerId } = req.body;
@@ -3610,6 +3632,7 @@ exports.changeDealOwner = async (req, res) => {
       
       if (!user) {
         await logAuditTrail(
+          AuditTrail,
           getProgramId("DEALS"),
           "DEAL_OWNER_CHANGE",
           req.role,
@@ -3630,6 +3653,7 @@ exports.changeDealOwner = async (req, res) => {
       
       if (!permissionSetId) {
         await logAuditTrail(
+          AuditTrail,
           getProgramId("DEALS"),
           "DEAL_OWNER_CHANGE",
           req.role,
@@ -3642,7 +3666,7 @@ exports.changeDealOwner = async (req, res) => {
       }
       
       // Fetch permission set
-      const userPermissionSet = await permissionSet.findByPk(permissionSetId);
+      const userPermissionSet = await PermissionSet.findByPk(permissionSetId);
       
       console.log(`🔍 Permission Set ${permissionSetId} details:`, {
         permissionSetId: userPermissionSet?.permissionSetId,
@@ -3652,6 +3676,7 @@ exports.changeDealOwner = async (req, res) => {
       
       if (!userPermissionSet || !userPermissionSet.permissions) {
         await logAuditTrail(
+          AuditTrail,
           getProgramId("DEALS"),
           "DEAL_OWNER_CHANGE",
           req.role,
@@ -3676,6 +3701,7 @@ exports.changeDealOwner = async (req, res) => {
       
       if (!hasEditOwnerPermission) {
         await logAuditTrail(
+          AuditTrail,
           getProgramId("DEALS"),
           "DEAL_OWNER_CHANGE",
           req.role,
@@ -3701,6 +3727,7 @@ exports.changeDealOwner = async (req, res) => {
 
     // Log the ownership change
     await historyLogger(
+      History,
       getProgramId("DEALS"),
       "DEAL_OWNER_CHANGE",
       req.adminId,
@@ -3729,6 +3756,7 @@ exports.changeDealOwner = async (req, res) => {
     
     // Log the error
     await logAuditTrail(
+      AuditTrail,
       getProgramId("DEALS"),
       "DEAL_OWNER_CHANGE_ERROR",
       req.role,
@@ -3744,6 +3772,7 @@ exports.changeDealOwner = async (req, res) => {
 };
 
 exports.updateDeal = async (req, res) => {
+  const { DealParticipant, DealStageHistory, DealDetails, History, AuditTrail, Deal, Lead, LeadOrganization, LeadPerson, MasterUser, Email, CustomField, CustomFieldValue, PermissionSet, DealNote, LeadNote, LeadFilter,  DealColumnPreference, UserCredential, PipelineStage, Currency, DealFile, DealProduct, Product, ProductVariation, GroupVisibility, Activity, LeadFile} = req.models;
   try {
     const { dealId } = req.params;
 
@@ -3777,6 +3806,7 @@ exports.updateDeal = async (req, res) => {
     const deal = await Deal.findByPk(dealId);
     if (!deal) {
       await logAuditTrail(
+        AuditTrail,
         getProgramId("DEALS"),
         "DEAL_UPDATE",
         req.role,
@@ -3801,6 +3831,7 @@ exports.updateDeal = async (req, res) => {
       
       if (!user) {
         await logAuditTrail(
+          AuditTrail,
           getProgramId("DEALS"),
           "DEAL_UPDATE",
           req.role,
@@ -3821,6 +3852,7 @@ exports.updateDeal = async (req, res) => {
       
       if (!permissionSetId) {
         await logAuditTrail(
+          AuditTrail,
           getProgramId("DEALS"),
           "DEAL_UPDATE",
           req.role,
@@ -3833,7 +3865,7 @@ exports.updateDeal = async (req, res) => {
       }
       
       // Fetch permission set
-      const userPermissionSet = await permissionSet.findByPk(permissionSetId);
+      const userPermissionSet = await PermissionSet.findByPk(permissionSetId);
       
       console.log(`🔍 Permission Set ${permissionSetId} details:`, {
         permissionSetId: userPermissionSet?.permissionSetId,
@@ -3843,6 +3875,7 @@ exports.updateDeal = async (req, res) => {
       
       if (!userPermissionSet || !userPermissionSet.permissions) {
         await logAuditTrail(
+          AuditTrail,
           getProgramId("DEALS"),
           "DEAL_UPDATE",
           req.role,
@@ -3867,6 +3900,7 @@ exports.updateDeal = async (req, res) => {
       
       if (!hasEditOthersPermission) {
         await logAuditTrail(
+          AuditTrail,
           getProgramId("DEALS"),
           "DEAL_UPDATE",
           req.role,
@@ -3891,6 +3925,7 @@ exports.updateDeal = async (req, res) => {
       
       if (!phoneRegex.test(updateFields.phone.trim())) {
         await logAuditTrail(
+          AuditTrail,
           getProgramId("DEALS"),
           "DEAL_UPDATE",
           req.role,
@@ -3910,6 +3945,7 @@ exports.updateDeal = async (req, res) => {
       
       if (!emailRegex.test(updateFields.email) || updateFields.email.length > 254) {
         await logAuditTrail(
+          AuditTrail,
           getProgramId("DEALS"),
           "DEAL_UPDATE",
           req.role,
@@ -3994,7 +4030,7 @@ exports.updateDeal = async (req, res) => {
     if (Object.keys(updateFields).length > 0) {
       // Synchronize to Person if Person exists and relevant fields were updated
       if (deal.personId) {
-        const person = await Person.findByPk(deal.personId);
+        const person = await LeadPerson.findByPk(deal.personId);
         if (person) {
           const personSyncData = {};
           const syncedPersonFields = [];
@@ -4023,7 +4059,7 @@ exports.updateDeal = async (req, res) => {
       
       // Synchronize to Organization if Organization exists and relevant fields were updated
       if (deal.leadOrganizationId) {
-        const org = await Organization.findByPk(deal.leadOrganizationId);
+        const org = await LeadOrganization.findByPk(deal.leadOrganizationId);
         if (org) {
           const orgSyncData = {};
           const syncedOrgFields = [];
@@ -4096,10 +4132,10 @@ exports.updateDeal = async (req, res) => {
 
     // Update all fields of Person
     if (deal.personId) {
-      const person = await Person.findByPk(deal.personId);
+      const person = await LeadPerson.findByPk(deal.personId);
       if (person) {
         // Only update fields that exist in the Person model
-        const personAttributes = Object.keys(Person.rawAttributes);
+        const personAttributes = Object.keys(LeadPerson.rawAttributes);
         const personUpdate = {};
         for (const key of personAttributes) {
           if (key in req.body) {
@@ -4139,10 +4175,10 @@ exports.updateDeal = async (req, res) => {
 
     // Update all fields of Organization
     if (deal.leadOrganizationId) {
-      const org = await Organization.findByPk(deal.leadOrganizationId);
+      const org = await LeadOrganization.findByPk(deal.leadOrganizationId);
       if (org) {
         // Only update fields that exist in the Organization model
-        const orgAttributes = Object.keys(Organization.rawAttributes);
+        const orgAttributes = Object.keys(LeadOrganization.rawAttributes);
         const orgUpdate = {};
         for (const key of orgAttributes) {
           if (key in req.body) {
@@ -4470,6 +4506,7 @@ exports.updateDeal = async (req, res) => {
 
     //res.status(200).json({ message: "Deal, person, and organization updated successfully",deal });
     await historyLogger(
+      History,
       getProgramId("DEALS"),
       "DEAL_UPDATE",
       req.adminId,
@@ -4535,6 +4572,7 @@ exports.updateDeal = async (req, res) => {
 //   }
 // };
 exports.getDealSummary = async (req, res) => {
+  const { DealParticipant, DealStageHistory, DealDetails, History, AuditTrail, Deal, Lead, LeadOrganization, LeadPerson, MasterUser, Email, CustomField, CustomFieldValue, PermissionSet, DealNote, LeadNote, LeadFilter,  DealColumnPreference, UserCredential, PipelineStage, Currency, DealFile, DealProduct, Product, ProductVariation, GroupVisibility, Activity, LeadFile} = req.models;
   try {
     // Fetch all deals with value, currency, and pipelineStage, excluding converted deals
     const deals = await Deal.findAll({
@@ -4613,6 +4651,7 @@ exports.getDealSummary = async (req, res) => {
   }
 };
 exports.archiveDeal = async (req, res) => {
+  const { DealParticipant, DealStageHistory, DealDetails, History, AuditTrail, Deal, Lead, LeadOrganization, LeadPerson, MasterUser, Email, CustomField, CustomFieldValue, PermissionSet, DealNote, LeadNote, LeadFilter,  DealColumnPreference, UserCredential, PipelineStage, Currency, DealFile, DealProduct, Product, ProductVariation, GroupVisibility, Activity, LeadFile} = req.models;
   try {
     const { dealId } = req.params;
     const deal = await Deal.findByPk(dealId);
@@ -4628,6 +4667,7 @@ exports.archiveDeal = async (req, res) => {
   }
 };
 exports.unarchiveDeal = async (req, res) => {
+  const { DealParticipant, DealStageHistory, DealDetails, History, AuditTrail, Deal, Lead, LeadOrganization, LeadPerson, MasterUser, Email, CustomField, CustomFieldValue, PermissionSet, DealNote, LeadNote, LeadFilter,  DealColumnPreference, UserCredential, PipelineStage, Currency, DealFile, DealProduct, Product, ProductVariation, GroupVisibility, Activity, LeadFile} = req.models;
   try {
     const { dealId } = req.params;
     const deal = await Deal.findByPk(dealId);
@@ -4644,6 +4684,7 @@ exports.unarchiveDeal = async (req, res) => {
 };
 
 exports.getDealsByStage = async (req, res) => {
+  const { DealParticipant, DealStageHistory, DealDetails, History, AuditTrail, Deal, Lead, LeadOrganization, LeadPerson, MasterUser, Email, CustomField, CustomFieldValue, PermissionSet, DealNote, LeadNote, LeadFilter,  DealColumnPreference, UserCredential, PipelineStage, Currency, DealFile, DealProduct, Product, ProductVariation, GroupVisibility, Activity, LeadFile, Pipeline} = req.models;
   try {
     const { pipeline, pipelineId, includeActivities = false } = req.query;
     
@@ -4657,8 +4698,6 @@ exports.getDealsByStage = async (req, res) => {
 
     try {
       // Import pipeline models
-      const Pipeline = require("../../models/deals/pipelineModel");
-      const PipelineStage = require("../../models/deals/pipelineStageModel");
 
       let pipelineWhere = {
         isActive: true
@@ -4795,13 +4834,13 @@ exports.getDealsByStage = async (req, res) => {
     // Build include array for associations
     const includeArray = [
       {
-        model: Person,
+        model: LeadPerson,
         as: "Person",
         attributes: ["personId","email", "phone"],
         required: false,
       },
       {
-        model: Organization,
+        model: LeadOrganization,
         as: "Organization", 
         attributes: ["leadOrganizationId"],
         required: false,
@@ -5230,6 +5269,7 @@ exports.getDealsByStage = async (req, res) => {
 
 // ...existing code...
 exports.getDealDetail = async (req, res) => {
+  const { DealParticipant, DealStageHistory, DealDetails, History, AuditTrail, Deal, Lead, LeadOrganization, LeadPerson, MasterUser, Email, CustomField, CustomFieldValue, PermissionSet, DealNote, LeadNote, LeadFilter,  DealColumnPreference, UserCredential, PipelineStage, Currency, DealFile, DealProduct, Product, ProductVariation, GroupVisibility, Activity, LeadFile, Pipeline} = req.models;
   try {
     const { dealId } = req.params;
 
@@ -5242,8 +5282,8 @@ exports.getDealDetail = async (req, res) => {
     const deal = await Deal.findByPk(dealId, {
       include: [
         { model: DealDetails, as: "details" },
-        { model: Person, as: "Person" },
-        { model: Organization, as: "Organization" },
+        { model: LeadPerson, as: "Person" },
+        { model: LeadOrganization, as: "Organization" },
       ],
     });
 
@@ -5775,7 +5815,7 @@ exports.getDealDetail = async (req, res) => {
       // Bulk fetch all related entities for these email addresses
       const [connectedPersons, connectedOrganizations, connectedLeads, connectedDeals] = await Promise.all([
         // Find persons by email
-        Person.findAll({
+        LeadPerson.findAll({
           where: {
             email: { [Op.in]: uniqueEmailAddresses }
           },
@@ -5784,9 +5824,9 @@ exports.getDealDetail = async (req, res) => {
         }),
         
         // Find organizations by email (if organizations have email field)
-        Organization.findAll({
+        LeadOrganization.findAll({
           where: {
-            ...(Organization.rawAttributes.email ? { email: { [Op.in]: uniqueEmailAddresses } } : {})
+            ...(LeadOrganization.rawAttributes.email ? { email: { [Op.in]: uniqueEmailAddresses } } : {})
           },
           attributes: ['leadOrganizationId', 'organization','address'],
           raw: true
@@ -6856,6 +6896,7 @@ exports.getDealDetail = async (req, res) => {
 // };
 
 exports.deleteDeal = async (req, res) => {
+  const { DealParticipant, DealStageHistory, DealDetails, History, AuditTrail, Deal, Lead, LeadOrganization, LeadPerson, MasterUser, Email, CustomField, CustomFieldValue, PermissionSet, DealNote, LeadNote, LeadFilter,  DealColumnPreference, UserCredential, PipelineStage, Currency, DealFile, DealProduct, Product, ProductVariation, GroupVisibility, Activity, LeadFile} = req.models;
   const { dealId } = req.params;
   const masterUserID = req.adminId;
   const role = req.role;
@@ -6953,6 +6994,7 @@ exports.deleteDeal = async (req, res) => {
 };
 
 exports.linkParticipant = async (req, res) => {
+  const { DealParticipant, } = req.models;
   try {
     const { dealId } = req.params;
     const { personId } = req.body;
@@ -6988,6 +7030,7 @@ exports.linkParticipant = async (req, res) => {
 };
 
 exports.createNote = async (req, res) => {
+  const { DealNote, } = req.models;
   try {
     const { dealId } = req.params;
     const { content } = req.body;
@@ -7011,6 +7054,7 @@ exports.createNote = async (req, res) => {
 };
 
 exports.getNotes = async (req, res) => {
+  const { DealNote, } = req.models;
   try {
     const { dealId } = req.params;
     const notes = await DealNote.findAll({
@@ -7024,6 +7068,7 @@ exports.getNotes = async (req, res) => {
 };
 
 exports.saveAllDealFieldsWithCheck = async (req, res) => {
+  const { DealColumn, DealDetails, Deal } = req.models;
   // Get all field names from Deal and DealDetails models
   const dealFields = Object.keys(Deal.rawAttributes);
   const dealDetailsFields = DealDetails
@@ -7052,10 +7097,10 @@ exports.saveAllDealFieldsWithCheck = async (req, res) => {
   });
 
   try {
-    let pref = await DealColumnPreference.findOne();
+    let pref = await DealColumn.findOne();
     if (!pref) {
       // Create the record if it doesn't exist
-      pref = await DealColumnPreference.create({ columns: columnsToSave });
+      pref = await DealColumn.create({ columns: columnsToSave });
     } else {
       // Update the existing record
       pref.columns = columnsToSave;
@@ -7070,9 +7115,10 @@ exports.saveAllDealFieldsWithCheck = async (req, res) => {
   }
 };
 exports.getDealFields = async (req, res) => {
+  const { DealColumn, CustomField, Deal } = req.models;
   try {
     // Get deal column preferences
-    const pref = await DealColumnPreference.findOne({ where: {} });
+    const pref = await DealColumn.findOne({ where: {} });
 
     let columns = [];
     if (pref) {
@@ -7367,6 +7413,7 @@ exports.getDealFields = async (req, res) => {
 };
 exports.updateDealColumnChecks = async (req, res) => {
   // Expecting: { columns: [ { key: "columnName", check: true/false, dealCheck: true/false }, ... ] }
+  const { DealColumn, CustomField, Deal } = req.models;
   const { columns } = req.body;
 
   if (!Array.isArray(columns)) {
@@ -7379,7 +7426,7 @@ exports.updateDealColumnChecks = async (req, res) => {
     console.log("adminId:", req.adminId);
 
     // Find the global DealColumnPreference record
-    let pref = await DealColumnPreference.findOne();
+    let pref = await DealColumn.findOne();
     if (!pref) {
       return res.status(404).json({ message: "Preferences not found." });
     }
@@ -7648,6 +7695,7 @@ exports.updateDealColumnChecks = async (req, res) => {
 };
 
 exports.markDealAsWon = async (req, res) => {
+  const { DealColumn, CustomField, Deal, DealDetails, DealStageHistory, LeadOrganization, ActivitySetting } = req.models;
   try {
     const { dealId } = req.params;
     const masterUserID = req.masterUserID || req.adminId;
@@ -7686,11 +7734,9 @@ exports.markDealAsWon = async (req, res) => {
 
     // --- Update wonDeals count for connected leadOrganizationId ---
     if (deal.leadOrganizationId) {
-      const Organization = require("../../models/leads/leadOrganizationModel");
-      const org = await Organization.findByPk(deal.leadOrganizationId);
+      const org = await LeadOrganization.findByPk(deal.leadOrganizationId);
       if (org) {
         // Count all deals for this organization with status 'won'
-        const Deal = require("../../models/deals/dealsModels");
         const wonDealsCount = await Deal.count({
           where: {
             leadOrganizationId: deal.leadOrganizationId,
@@ -7702,7 +7748,6 @@ exports.markDealAsWon = async (req, res) => {
     }
 
     // --- Fetch Deal Won Activity Settings ---
-    const ActivitySetting = require('../../models/activity/activitySettingModel');
     let dealWonPopupSettings = {
       showDealWonPopup: true,
       dealWonActivityType: 'Task',
@@ -7740,6 +7785,7 @@ exports.markDealAsWon = async (req, res) => {
   }
 };
 exports.checkDealQuestionSharedStatus = async (req, res) => {
+  const { CustomFieldValue, DealColumn, CustomField, Deal, DealDetails, DealStageHistory, LeadOrganization, ActivitySetting } = req.models;
   try {
     const { dealId } = req.params;
     const adminId = req.adminId;
@@ -7776,6 +7822,7 @@ res.status(200).json({
 
 
 exports.markDealAsLost = async (req, res) => {
+  const { CustomFieldValue, DealColumn, CustomField, Deal, DealDetails, DealStageHistory, LeadOrganization, ActivitySetting, UserCredential } = req.models;
   try {
     const { dealId } = req.params;
     const { lostReason, questionShared, skipQuestionCheck = false } = req.body; // Accept lostReason, questionShared, and skipQuestionCheck
@@ -7788,7 +7835,7 @@ exports.markDealAsLost = async (req, res) => {
       where: { dealId },
       include: [
         {
-          model: Person,
+          model: LeadPerson,
           as: "Person",
           attributes: ["contactPerson", "email"],
         },
@@ -8075,6 +8122,7 @@ exports.updateQuestionShared = async (req, res) => {
     const { dealId } = req.params;
     const { questionShared } = req.body;
     const adminId = req.adminId;
+    const { CustomFieldValue, DealColumn, CustomField, Deal, DealDetails, DealStageHistory, LeadOrganization, ActivitySetting, UserCredential } = req.models;
 
     console.log(`[UPDATE_QUESTION] Updating questionShared custom field for deal ${dealId} to: ${questionShared}`);
 
@@ -8180,6 +8228,7 @@ exports.updateQuestionShared = async (req, res) => {
 };
 
 exports.markDealAsOpen = async (req, res) => {
+  const { CustomFieldValue, DealColumn, CustomField, Deal, DealDetails, DealStageHistory, LeadOrganization, ActivitySetting, UserCredential } = req.models;
   try {
     const { dealId } = req.params;
     const initialStage = "Qualified"; // Set your initial pipeline stage here
@@ -8218,6 +8267,7 @@ exports.markDealAsOpen = async (req, res) => {
   }
 };
 exports.getDealFieldsForFilter = async (req, res) => {
+  const { CustomFieldValue, DealColumn, CustomField, Deal, DealDetails, DealStageHistory, LeadOrganization, ActivitySetting, UserCredential } = req.models;
   try {
     console.log('🔍 [getDealFieldsForFilter] ===== API CALL START =====');
     console.log('🔍 [getDealFieldsForFilter] Request headers:', {
@@ -8416,6 +8466,7 @@ exports.getDealFieldsForFilter = async (req, res) => {
 
 // Bulk edit deals functionality
 exports.bulkEditDeals = async (req, res) => {
+  const { CustomFieldValue, DealColumn, CustomField, Deal, DealDetails, DealStageHistory, LeadOrganization, ActivitySetting, UserCredential, LeadPerson, MasterUser, AuditTrail, History } = req.models;
   const { dealIds, updateData } = req.body;
 
   // Validate input
@@ -8489,6 +8540,7 @@ exports.bulkEditDeals = async (req, res) => {
     // Check access permissions
     if (!["admin", "general", "master"].includes(req.role)) {
       await logAuditTrail(
+        AuditTrail,
         getProgramId("DEALS"),
         "BULK_DEAL_UPDATE",
         null,
@@ -8504,8 +8556,8 @@ exports.bulkEditDeals = async (req, res) => {
     // Get all columns for different models
     const dealFields = Object.keys(Deal.rawAttributes);
     const dealDetailsFields = Object.keys(DealDetails.rawAttributes);
-    const personFields = Object.keys(Person.rawAttributes);
-    const organizationFields = Object.keys(Organization.rawAttributes);
+    const personFields = Object.keys(LeadPerson.rawAttributes);
+    const organizationFields = Object.keys(LeadOrganization.rawAttributes);
 
     // Split the update data by model
     const dealData = {};
@@ -8557,12 +8609,12 @@ exports.bulkEditDeals = async (req, res) => {
           required: false,
         },
         {
-          model: Person,
+          model: LeadPerson,
           as: "Person",
           required: false,
         },
         {
-          model: Organization,
+          model: LeadOrganization,
           as: "Organization",
           required: false,
         },
@@ -8717,7 +8769,7 @@ exports.bulkEditDeals = async (req, res) => {
         // Update Person table
         if (Object.keys(personData).length > 0 && deal.personId) {
           try {
-            const person = await Person.findByPk(deal.personId);
+            const person = await LeadPerson.findByPk(deal.personId);
             if (person) {
               await person.update(personData);
               console.log(`Updated person ${deal.personId}:`, personData);
@@ -8755,7 +8807,7 @@ exports.bulkEditDeals = async (req, res) => {
           deal.leadOrganizationId
         ) {
           try {
-            const organization = await Organization.findByPk(
+            const organization = await LeadOrganization.findByPk(
               deal.leadOrganizationId
             );
             if (organization) {
@@ -8890,6 +8942,7 @@ exports.bulkEditDeals = async (req, res) => {
 
         // Log audit trail for successful update
         await historyLogger(
+          History,
           getProgramId("DEALS"),
           "BULK_DEAL_UPDATE",
           req.adminId,
@@ -8925,6 +8978,7 @@ exports.bulkEditDeals = async (req, res) => {
         }
 
         await logAuditTrail(
+          AuditTrail,
           getProgramId("DEALS"),
           "BULK_DEAL_UPDATE",
           req.adminId,
@@ -8993,6 +9047,7 @@ exports.bulkEditDeals = async (req, res) => {
     console.error("Error in bulk edit deals:", error);
 
     await logAuditTrail(
+      AuditTrail,
       getProgramId("DEALS"),
       "BULK_DEAL_UPDATE",
       null,
@@ -9014,6 +9069,7 @@ exports.bulkEditDeals = async (req, res) => {
  * POST /api/deals/duplicate/:dealId
  */
 exports.duplicateDeal = async (req, res) => {
+  const { CustomFieldValue, DealColumn, CustomField, Deal, DealDetails, DealStageHistory, LeadOrganization, ActivitySetting, UserCredential, LeadPerson, MasterUser, AuditTrail, History, Pipeline, PipelineStage } = req.models;
   const { dealId } = req.params;
   const masterUserID = req.adminId;
   const entityType = "deal";
@@ -9053,10 +9109,6 @@ exports.duplicateDeal = async (req, res) => {
       if (req.role !== 'admin') {
         whereCondition.masterUserID = masterUserID;
       }
-      
-      // Import pipeline models for fetching pipeline and stage data
-      const Pipeline = require("../../models/deals/pipelineModel");
-      const PipelineStage = require("../../models/deals/pipelineStageModel");
       
       const originalDeal = await Deal.findOne({
         where: whereCondition,
@@ -9184,6 +9236,7 @@ exports.duplicateDeal = async (req, res) => {
         const PROGRAMS = require("../../utils/programConstants");
         
         await logAuditTrail(
+          AuditTrail,
           masterUserID,
           PROGRAMS.DEAL_MANAGEMENT || "DEAL_MANAGEMENT",
           `Duplicated deal: "${originalDeal.title}" → "${newTitle}"`,
@@ -9202,6 +9255,7 @@ exports.duplicateDeal = async (req, res) => {
         const historyLogger = require("../../utils/historyLogger").logHistory;
         
         await historyLogger(
+          History,
           "Deal",
           "create",
           newDeal.dealId,
@@ -9302,6 +9356,7 @@ exports.duplicateDeal = async (req, res) => {
  * POST /api/deals/duplicate-batch
  */
 exports.duplicateDealsInBatch = async (req, res) => {
+  const { CustomFieldValue, DealColumn, CustomField, Deal, DealDetails, DealStageHistory, LeadOrganization, ActivitySetting, UserCredential, LeadPerson, MasterUser, AuditTrail, History, Pipeline, PipelineStage } = req.models;
   const { dealIds } = req.body;
   const masterUserID = req.adminId;
 
@@ -9396,6 +9451,7 @@ exports.duplicateDealsInBatch = async (req, res) => {
 
 // Bulk disconnect deals from leads
 exports.bulkConvertDealsToLeads = async (req, res) => {
+  const { CustomFieldValue, DealColumn, CustomField, Deal, DealDetails, DealStageHistory, LeadOrganization, ActivitySetting, UserCredential, LeadPerson, MasterUser, AuditTrail, History, Pipeline, PipelineStage, Lead } = req.models;
   let transaction;
   
   try {
@@ -9484,6 +9540,7 @@ exports.bulkConvertDealsToLeads = async (req, res) => {
           // Log audit trail
           try {
             await logAuditTrail({
+              AuditTrail,
               action: "DEAL_DISCONNECTED_FROM_LEAD",
               entity: "Deal",
               entityId: dealId,
@@ -9503,7 +9560,7 @@ exports.bulkConvertDealsToLeads = async (req, res) => {
 
           // Log history
           try {
-            await historyLogger("Deal", dealId, "disconnected from lead and converted to lead", {
+            await historyLogger(History, "Deal", dealId, "disconnected from lead and converted to lead", {
               previousLeadId: originalLeadId,
               disconnectedBy: userId,
               isConvertedToLead: true,
@@ -9573,6 +9630,7 @@ exports.bulkConvertDealsToLeads = async (req, res) => {
 
 // Reset conversion flag for a deal (for testing/admin purposes)
 exports.resetDealConversionFlag = async (req, res) => {
+  const { CustomFieldValue, DealColumn, CustomField, Deal, DealDetails, DealStageHistory, LeadOrganization, ActivitySetting, UserCredential, LeadPerson, MasterUser, AuditTrail, History, Pipeline, PipelineStage, Lead } = req.models;
   try {
     const { dealId } = req.params;
     const userId = req.adminId;
@@ -9604,7 +9662,7 @@ exports.resetDealConversionFlag = async (req, res) => {
 
     // Log the action
     try {
-      await historyLogger("Deal", dealId, "conversion flag reset", {
+      await historyLogger(History, "Deal", dealId, "conversion flag reset", {
         resetBy: userId,
         resetAt: new Date()
       }, userId);
@@ -9631,6 +9689,7 @@ exports.resetDealConversionFlag = async (req, res) => {
 
 // Bulk delete deals
 exports.bulkDeleteDeals = async (req, res) => {
+  const { CustomFieldValue, DealColumn, CustomField, Deal, DealDetails, DealStageHistory, LeadOrganization, ActivitySetting, UserCredential, LeadPerson, MasterUser, AuditTrail, History, Pipeline, PipelineStage, Lead, DealNote, DealParticipant, Email, Activity } = req.models;
   const { dealIds } = req.body;
 
   // Validate input
@@ -9646,6 +9705,7 @@ exports.bulkDeleteDeals = async (req, res) => {
     // Check access permissions
     if (!["admin", "general", "master"].includes(req.role)) {
       await logAuditTrail(
+        AuditTrail,
         PROGRAMS.DEAL_MANAGEMENT,
         "BULK_DEAL_DELETE",
         null,
@@ -9749,6 +9809,7 @@ exports.bulkDeleteDeals = async (req, res) => {
 
         // Log audit trail for successful deletion
         await historyLogger(
+          History,
           PROGRAMS.DEAL_MANAGEMENT,
           "BULK_DEAL_DELETE",
           req.adminId,
@@ -9769,6 +9830,7 @@ exports.bulkDeleteDeals = async (req, res) => {
         console.error(`Error deleting deal ${deal.dealId}:`, dealError);
 
         await logAuditTrail(
+          AuditTrail,
           PROGRAMS.DEAL_MANAGEMENT,
           "BULK_DEAL_DELETE",
           req.adminId,
@@ -9811,6 +9873,7 @@ exports.bulkDeleteDeals = async (req, res) => {
     console.error("Error in bulk delete deals:", error);
 
     await logAuditTrail(
+      AuditTrail,
       PROGRAMS.DEAL_MANAGEMENT,
       "BULK_DEAL_DELETE",
       null,
@@ -9882,6 +9945,7 @@ const upload = multer({
  * Upload file(s) to a deal
  */
 exports.uploadDealFiles = async (req, res) => {
+   const { DealFile, CustomFieldValue, DealColumn, CustomField, Deal, DealDetails, DealStageHistory, LeadOrganization, ActivitySetting, UserCredential, LeadPerson, MasterUser, AuditTrail, History, Pipeline, PipelineStage, Lead, DealNote, DealParticipant, Email, Activity } = req.models;
   try {
     const { dealId } = req.params;
     const masterUserID = req.adminId;
@@ -9989,6 +10053,7 @@ exports.uploadDealFiles = async (req, res) => {
  * Get all files for a deal
  */
 exports.getDealFiles = async (req, res) => {
+  const { DealFile, CustomFieldValue, DealColumn, CustomField, Deal, DealDetails, DealStageHistory, LeadOrganization, ActivitySetting, UserCredential, LeadPerson, MasterUser, AuditTrail, History, Pipeline, PipelineStage, Lead, DealNote, DealParticipant, Email, Activity } = req.models;
   try {
     const { dealId } = req.params;
     const masterUserID = req.adminId;
@@ -10119,6 +10184,7 @@ exports.getDealFiles = async (req, res) => {
  * Download a specific file
  */
 exports.downloadDealFile = async (req, res) => {
+  const { DealFile, CustomFieldValue, DealColumn, CustomField, Deal, DealDetails, DealStageHistory, LeadOrganization, ActivitySetting, UserCredential, LeadPerson, MasterUser, AuditTrail, History, Pipeline, PipelineStage, Lead, DealNote, DealParticipant, Email, Activity } = req.models;
   try {
     const { dealId, fileId } = req.params;
     const masterUserID = req.adminId;
@@ -10160,6 +10226,7 @@ exports.downloadDealFile = async (req, res) => {
 
     // Log audit trail
     await logAuditTrail(
+      AuditTrail,
       PROGRAMS.DEAL_MANAGEMENT,
       "DEAL_FILE_DOWNLOADED",
       req.user?.id || req.adminId,
@@ -10181,6 +10248,7 @@ exports.downloadDealFile = async (req, res) => {
  * Delete a file
  */
 exports.deleteDealFile = async (req, res) => {
+  const { DealFile, CustomFieldValue, DealColumn, CustomField, Deal, DealDetails, DealStageHistory, LeadOrganization, ActivitySetting, UserCredential, LeadPerson, MasterUser, AuditTrail, History, Pipeline, PipelineStage, Lead, DealNote, DealParticipant, Email, Activity } = req.models;
   try {
     const { dealId, fileId } = req.params;
     const masterUserID = req.adminId;
@@ -10209,6 +10277,7 @@ exports.deleteDealFile = async (req, res) => {
 
     // Log audit trail
     await logAuditTrail(
+      AuditTrail,
       PROGRAMS.DEAL_MANAGEMENT,
       "DEAL_FILE_DELETED",
       req.user?.id || req.adminId,
@@ -10239,6 +10308,7 @@ exports.deleteDealFile = async (req, res) => {
  * Update file metadata
  */
 exports.updateDealFile = async (req, res) => {
+  const { DealFile, CustomFieldValue, DealColumn, CustomField, Deal, DealDetails, DealStageHistory, LeadOrganization, ActivitySetting, UserCredential, LeadPerson, MasterUser, AuditTrail, History, Pipeline, PipelineStage, Lead, DealNote, DealParticipant, Email, Activity } = req.models;
   try {
     const { dealId, fileId } = req.params;
     const { fileDisplayName, description, tags, isPublic } = req.body;
@@ -10267,6 +10337,7 @@ exports.updateDealFile = async (req, res) => {
 
     // Log audit trail
     await logAuditTrail(
+      AuditTrail,
       PROGRAMS.DEAL_MANAGEMENT,
       "DEAL_FILE_UPDATED",
       req.user?.id || req.adminId,

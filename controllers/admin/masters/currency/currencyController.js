@@ -45,7 +45,7 @@ const generateCurrencyCode = (currency_desc) => {
 };
 
 // Function to ensure unique currency code
-const ensureUniqueCode = async (baseCode, excludeId = null) => {
+const ensureUniqueCode = async (baseCode, excludeId = null, Currency) => {
   let code = baseCode;
   let counter = 1;
   
@@ -70,6 +70,7 @@ const ensureUniqueCode = async (baseCode, excludeId = null) => {
 
 // Add currency
 exports.createcurrency = async (req, res) => {
+  const { History, AuditTrail, Currency } = req.models;
   const { currency_desc, symbol, decimalPoints = 2, code, isActive = true } = req.body;
 
   // Validate the request body
@@ -83,6 +84,7 @@ exports.createcurrency = async (req, res) => {
   
   if (error) {
     await logAuditTrail(
+      AuditTrail,
       PROGRAMS.CURRENCY_MASTER,
       "CREATE_CURRENCY",
       req.role,
@@ -103,10 +105,10 @@ exports.createcurrency = async (req, res) => {
     let finalCode = code;
     if (!finalCode) {
       const baseCode = generateCurrencyCode(currency_desc);
-      finalCode = await ensureUniqueCode(baseCode);
+      finalCode = await ensureUniqueCode(baseCode, Currency);
     } else {
       // Ensure provided code is unique
-      finalCode = await ensureUniqueCode(code);
+      finalCode = await ensureUniqueCode(code, Currency);
     }
 
     // Check if currency with same description already exists
@@ -137,6 +139,7 @@ exports.createcurrency = async (req, res) => {
     });
 
     await historyLogger(
+      History,
       PROGRAMS.CURRENCY_MASTER,
       "CREATE_CURRENCY",
       currency.createdById,
@@ -165,6 +168,7 @@ exports.createcurrency = async (req, res) => {
   } catch (error) {
     console.error("Error creating currency:", error);
     await logAuditTrail(
+      AuditTrail,
       PROGRAMS.CURRENCY_MASTER,
       "CREATE_CURRENCY",
       req.role,
@@ -185,6 +189,7 @@ exports.createcurrency = async (req, res) => {
 
 // Edit currency
 exports.editcurrency = async (req, res) => {
+  const { History, AuditTrail, Currency } = req.models;
   const { currencyId } = req.params;
   const { currency_desc, symbol, decimalPoints, code, isActive } = req.body;
 
@@ -201,6 +206,7 @@ exports.editcurrency = async (req, res) => {
   const { error } = updateSchema.validate({ currency_desc, symbol, decimalPoints, code, isActive });
   if (error) {
     await logAuditTrail(
+      AuditTrail,
       PROGRAMS.CURRENCY_MASTER,
       "EDIT_CURRENCY",
       req.role,
@@ -263,7 +269,7 @@ exports.editcurrency = async (req, res) => {
 
     if (code !== undefined) {
       // Ensure new code is unique (excluding current currency)
-      const finalCode = await ensureUniqueCode(code, currencyId);
+      const finalCode = await ensureUniqueCode(code, currencyId, Currency);
       updateData.code = finalCode;
     }
 
@@ -286,6 +292,7 @@ exports.editcurrency = async (req, res) => {
     }
 
     await historyLogger(
+      History,
       PROGRAMS.CURRENCY_MASTER,
       "EDIT_CURRENCY",
       currency.createdById,
@@ -313,6 +320,7 @@ exports.editcurrency = async (req, res) => {
   } catch (error) {
     console.error("Error updating currency:", error);
     await logAuditTrail(
+      AuditTrail,
       PROGRAMS.CURRENCY_MASTER,
       "EDIT_CURRENCY",
       req.role,
@@ -334,11 +342,12 @@ exports.editcurrency = async (req, res) => {
 // Delete currency (soft delete by deactivating)
 exports.deletecurrency = async (req, res) => {
   const { currencyId } = req.params;
-
+  const { History, AuditTrail, Currency } = req.models;
   try {
     const currency = await Currency.findByPk(currencyId);
     if (!currency) {
       await logAuditTrail(
+        AuditTrail,
         PROGRAMS.CURRENCY_MASTER,
         "DELETE_CURRENCY",
         req.role,
@@ -355,6 +364,7 @@ exports.deletecurrency = async (req, res) => {
     });
 
     await historyLogger(
+      History,
       PROGRAMS.CURRENCY_MASTER,
       "DELETE_CURRENCY",
       currency.createdById,
@@ -371,6 +381,7 @@ exports.deletecurrency = async (req, res) => {
   } catch (error) {
     console.error("Error deactivating currency:", error);
     await logAuditTrail(
+      AuditTrail,
       PROGRAMS.CURRENCY_MASTER,
       "DELETE_CURRENCY",
       req.role,
@@ -394,7 +405,7 @@ exports.getcurrencys = async (req, res) => {
     sortBy = "creationDate",
     order = "DESC",
   } = req.query;
-
+  const { History, AuditTrail, Currency } = req.models;
   // Validate query parameters using Joi
   const querySchema = Joi.object({
     search: Joi.string().optional(),
@@ -411,6 +422,7 @@ exports.getcurrencys = async (req, res) => {
   const { error } = querySchema.validate(req.query);
   if (error) {
     await logAuditTrail(
+      AuditTrail,
       PROGRAMS.CURRENCY_MASTER,
       "GET_CURRENCYS",
       req.role,
@@ -492,6 +504,7 @@ exports.getcurrencys = async (req, res) => {
   } catch (error) {
     console.error("Error fetching currencies:", error);
     await logAuditTrail(
+      AuditTrail,
       PROGRAMS.CURRENCY_MASTER,
       "GET_CURRENCY",
       req.role,
@@ -505,6 +518,7 @@ exports.getcurrencys = async (req, res) => {
 // Generate a different currency code
 exports.getDifferentCode = async (req, res) => {
   const { currency_desc } = req.body;
+  const { History, AuditTrail, Currency } = req.models;
 
   if (!currency_desc) {
     return res.status(400).json({ 
@@ -519,20 +533,20 @@ exports.getDifferentCode = async (req, res) => {
     const codeOptions = [];
 
     // Option 1: Standard 3-letter code
-    codeOptions.push(await ensureUniqueCode(baseCode));
+    codeOptions.push(await ensureUniqueCode(baseCode, Currency));
 
     // Option 2: First 2 letters + first letter of second word
     const words = currency_desc.split(' ');
     if (words.length > 1) {
       const altCode = (words[0].substring(0, 2) + words[1].substring(0, 1)).toUpperCase();
-      codeOptions.push(await ensureUniqueCode(altCode));
+      codeOptions.push(await ensureUniqueCode(altCode, Currency));
     }
 
     // Option 3: Random 3-letter combination from currency description
     const letters = currency_desc.replace(/[^a-zA-Z]/g, '').toUpperCase();
     if (letters.length >= 3) {
       const randomCode = letters[0] + letters[Math.floor(letters.length/2)] + letters[letters.length-1];
-      codeOptions.push(await ensureUniqueCode(randomCode));
+      codeOptions.push(await ensureUniqueCode(randomCode, Currency));
     }
 
     // Remove duplicates
@@ -552,6 +566,7 @@ exports.getDifferentCode = async (req, res) => {
 
 // Refresh/Populate standard currencies (like the standard ISO currencies)
 exports.refreshCurrencies = async (req, res) => {
+  const { History, AuditTrail, Currency } = req.models;
   try {
     const standardCurrencies = [
       { currency_desc: "US Dollar", symbol: "$", code: "USD", decimalPoints: 2 },
@@ -622,6 +637,7 @@ exports.refreshCurrencies = async (req, res) => {
     }
 
     await historyLogger(
+      History,
       PROGRAMS.CURRENCY_MASTER,
       "REFRESH_CURRENCIES",
       req.adminId || 0,
@@ -645,6 +661,7 @@ exports.refreshCurrencies = async (req, res) => {
   } catch (error) {
     console.error("Error refreshing currencies:", error);
     await logAuditTrail(
+      AuditTrail,
       PROGRAMS.CURRENCY_MASTER,
       "REFRESH_CURRENCIES",
       req.role,
@@ -657,6 +674,7 @@ exports.refreshCurrencies = async (req, res) => {
 
 // Search currencies (for autocomplete/lookup)
 exports.searchCurrencies = async (req, res) => {
+  const { History, AuditTrail, Currency } = req.models;
   const { q, limit = 10, activeOnly = true } = req.query;
 
   if (!q || q.length < 1) {

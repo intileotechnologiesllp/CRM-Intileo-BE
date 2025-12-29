@@ -15,12 +15,14 @@ const programSchema = Joi.object({
 
 // Add program
 exports.createprogram = async (req, res) => {
+  const { History, AuditTrail, Program } = req.models;
   const { program_desc } = req.body;
 
   // Validate the request body
   const { error } = programSchema.validate({ program_desc });
   if (error) {
     await logAuditTrail(
+      AuditTrail,
       PROGRAMS.PROGRAM_MASTER, // Program ID for program management
       "CREATE_PROGRAM", // Mode
        req.role, // Admin ID from the authenticated request
@@ -38,6 +40,7 @@ exports.createprogram = async (req, res) => {
       mode: "added"
     });
     await historyLogger(
+      History,
       PROGRAMS.PROGRAM_MASTER, // Program ID for department management
       "CREATE_PROGRAM", // Mode
       program.createdById, // Created by (Admin ID)
@@ -60,6 +63,7 @@ exports.createprogram = async (req, res) => {
   } catch (error) {
     console.error("Error creating program:", error);
     await logAuditTrail(
+      AuditTrail,
       PROGRAMS.PROGRAM_MASTER, // Program ID for program management
       "CREATE_PROGRAM", // Mode
        req.role, // Admin ID from the authenticated request
@@ -72,6 +76,7 @@ exports.createprogram = async (req, res) => {
 
 // Edit program
 exports.editprogram = async (req, res) => {
+  const { History, AuditTrail, Program } = req.models;
   const { programId } = req.params; // Use programId instead of id
   const { program_desc } = req.body;
 
@@ -79,6 +84,7 @@ exports.editprogram = async (req, res) => {
   const { error } = programSchema.validate({ program_desc });
   if (error) {
     await logAuditTrail(
+      AuditTrail,
       PROGRAMS.PROGRAM_MASTER, // Program ID for program management
       "EDIT_PROGRAM", // Mode
        req.role, // Admin ID from the authenticated request
@@ -92,6 +98,7 @@ exports.editprogram = async (req, res) => {
     const program = await Program.findByPk(programId); // Find program by programId
     if (!program) {
       await logAuditTrail(
+        AuditTrail,
         PROGRAMS.PROGRAM_MASTER, // Program ID for program management
         "EDIT_PROGRAM", // Mode
          req.role, // Admin ID from the authenticated request
@@ -120,6 +127,7 @@ exports.editprogram = async (req, res) => {
       }
     }
     await historyLogger(
+      History,
       PROGRAMS.PROGRAM_MASTER, // Program ID for currency management
       "EDIT_PROGRAM", // Mode
       program.createdById, // Admin ID from the authenticated request
@@ -141,6 +149,7 @@ exports.editprogram = async (req, res) => {
     });
   } catch (error) {
     await logAuditTrail(
+      AuditTrail,
       PROGRAMS.PROGRAM_MASTER, // Program ID for program management
       "EDIT_PROGRAM", // Mode
        req.role, // Admin ID from the authenticated request
@@ -155,11 +164,12 @@ exports.editprogram = async (req, res) => {
 // Delete program
 exports.deleteprogram = async (req, res) => {
   const { programId } = req.params; // Use programId instead of id
-
+  const { History, AuditTrail, Program } = req.models;
   try {
     const program = await Program.findByPk(programId); // Find program by programId
     if (!program) {
       await logAuditTrail(
+        AuditTrail,
         PROGRAMS.PROGRAM_MASTER, // Program ID for program management
         "DELETE_PROGRAM", // Mode
          req.role, // Admin ID from the authenticated request
@@ -175,6 +185,7 @@ exports.deleteprogram = async (req, res) => {
 
     await program.destroy();
     await historyLogger(
+      History,
       PROGRAMS.PROGRAM_MASTER, // Program ID for currency management
       "DELETE_PROGRAM", // Mode
       program.createdById, // Admin ID from the authenticated request
@@ -189,6 +200,7 @@ exports.deleteprogram = async (req, res) => {
     });
   } catch (error) {
     await logAuditTrail(
+      AuditTrail,
       PROGRAMS.PROGRAM_MASTER, // Program ID for program management
       "DELETE_PROGRAM", // Mode
        req.role, // Admin ID from the authenticated request
@@ -211,7 +223,7 @@ exports.getprograms = async (req, res) => {
     sortBy = "creationDate",
     order = "DESC",
   } = req.query;
-
+  const { AuditTrail, Program } = req.models;
   // Validate query parameters using Joi
   const querySchema = Joi.object({
     search: Joi.string().optional(),
@@ -226,6 +238,7 @@ exports.getprograms = async (req, res) => {
   const { error } = querySchema.validate(req.query);
   if (error) {
     await logAuditTrail(
+      AuditTrail,
       PROGRAMS.PROGRAM_MASTER, // Program ID for program management
       "GET_PROGRAMS", // Mode
        req.role, // Admin ID from the authenticated request
@@ -269,6 +282,7 @@ exports.getprograms = async (req, res) => {
     });
   } catch (error) {
     await logAuditTrail(
+      AuditTrail,
       PROGRAMS.PROGRAM_MASTER, // Program ID for program management
       "GET_PROGRAMS", // Mode
        req.role, // Admin ID from the authenticated request

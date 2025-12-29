@@ -17,6 +17,7 @@ const {
  * @param {Object} res - Express response object
  */
 const getDealsByStage = async (req, res) => {
+  const { Deal, MasterUser} = req.models;
   try {
     const { pipelineId } = req.params;
     const userId = req.adminId;
@@ -69,7 +70,7 @@ const getDealsByStage = async (req, res) => {
         order: [["createdAt", "DESC"]],
         include: [
           {
-            model: require("../../models/master/masterUserModel"),
+            model: MasterUser,
             as: "owner",
             attributes: ["firstName", "lastName", "email"],
           },
@@ -139,6 +140,7 @@ const getDealsByStage = async (req, res) => {
  * @param {Object} res - Express response object
  */
 const getAllDeals = async (req, res) => {
+  const { Deal, MasterUser, GroupMembership, VisibilityGroup, Pipeline, PipelineVisibilityRule } = req.models;
   try {
     const userId = req.adminId;
     const userRole = req.role;
@@ -222,7 +224,7 @@ const getAllDeals = async (req, res) => {
       order: [["createdAt", "DESC"]],
       include: [
         {
-          model: require("../../models/master/masterUserModel"),
+          model: MasterUser,
           as: "owner",
           attributes: ["firstName", "lastName", "email"],
         },

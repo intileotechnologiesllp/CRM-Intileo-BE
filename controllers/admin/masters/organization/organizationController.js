@@ -14,12 +14,14 @@ const organizationSchema = Joi.object({
 
 // Add organization
 exports.createorganization = async (req, res) => {
+  const { History, AuditTrail, Organization } = req.models;
   const { organization_desc } = req.body;
 
   // Validate the request body
   const { error } = organizationSchema.validate({ organization_desc });
   if (error) {
     await logAuditTrail(
+      AuditTrail,
       PROGRAMS.ORGANIZATION_MASTER, // Program ID for organization management
       "CREATE_ORGANIZATION", // Mode
        req.role, // Admin ID from the authenticated request
@@ -38,6 +40,7 @@ exports.createorganization = async (req, res) => {
       mode: "added"
     });
     await historyLogger(
+      History,
       PROGRAMS.ORGANIZATION_MASTER, // Program ID for department management
       "CREATE_ORGANIZATION", // Mode
       organization.createdById, // Created by (Admin ID)
@@ -59,6 +62,7 @@ exports.createorganization = async (req, res) => {
     });
   } catch (error) {
     await logAuditTrail(
+      AuditTrail,
       PROGRAMS.ORGANIZATION_MASTER, // Program ID for designation management
       "CREATE_ORGANIZATION", // Mode
        req.role, // Admin ID from the authenticated request
@@ -72,6 +76,7 @@ exports.createorganization = async (req, res) => {
 
 // Edit organization
 exports.editorganization = async (req, res) => {
+  const { History, AuditTrail, Organization } = req.models;
   const { organizationId } = req.params; // Use organizationId instead of id
   const { organization_desc } = req.body;
 
@@ -79,6 +84,7 @@ exports.editorganization = async (req, res) => {
   const { error } = organizationSchema.validate({ organization_desc });
   if (error) {
     await logAuditTrail(
+      AuditTrail,
       PROGRAMS.ORGANIZATION_MASTER, // Program ID for organization management
       "EDIT_ORGANIZATION", // Mode
        req.role, // Admin ID from the authenticated request
@@ -92,6 +98,7 @@ exports.editorganization = async (req, res) => {
     const organization = await Organization.findByPk(organizationId); // Find organization by organizationId
     if (!organization) {
       await logAuditTrail(
+        AuditTrail,
         PROGRAMS.ORGANIZATION_MASTER, // Program ID for organization management
         "EDIT_ORGANIZATION", // Mode
          req.role, // Admin ID from the authenticated request
@@ -119,6 +126,7 @@ exports.editorganization = async (req, res) => {
               }
             }
             await historyLogger(
+              History,
               PROGRAMS.ORGANIZATION_MASTER, // Program ID for currency management
               "EDIT_ORGANIZATION", // Mode
               organization.createdById, // Admin ID from the authenticated request
@@ -139,6 +147,7 @@ exports.editorganization = async (req, res) => {
     });
   } catch (error) {
     await logAuditTrail(
+      AuditTrail,
       PROGRAMS.ORGANIZATION_MASTER, // Program ID for organization management
       "EDIT_ORGANIZATION", // Mode
        req.role, // Admin ID from the authenticated request
@@ -152,12 +161,14 @@ exports.editorganization = async (req, res) => {
 
 // Delete organization
 exports.deleteorganization = async (req, res) => {
+  const { History, AuditTrail, Organization } = req.models;
   const { organizationId } = req.params; // Use organizationId instead of id
 
   try {
     const organization = await Organization.findByPk(organizationId); // Find organization by organizationId
     if (!organization) {
       await logAuditTrail(
+        AuditTrail,
         PROGRAMS.ORGANIZATION_MASTER, // Program ID for organization management
         "DELETE_ORGANIZATION", // Mode
          req.role, // Admin ID from the authenticated request
@@ -173,6 +184,7 @@ exports.deleteorganization = async (req, res) => {
 
     await organization.destroy();
     await historyLogger(
+      History,
       PROGRAMS.ORGANIZATION_MASTER, // Program ID for currency management
       "DELETE_ORGANIZATION", // Mode
       organization.createdById, // Admin ID from the authenticated request
@@ -209,7 +221,7 @@ exports.getorganizations = async (req, res) => {
     sortBy = "creationDate",
     order = "DESC",
   } = req.query;
-
+  const { AuditTrail, Organization } = req.models;
   // Validate query parameters using Joi
   const querySchema = Joi.object({
     search: Joi.string().optional(),
@@ -224,6 +236,7 @@ exports.getorganizations = async (req, res) => {
   const { error } = querySchema.validate(req.query);
   if (error) {
     await logAuditTrail(
+      AuditTrail,
       PROGRAMS.ORGANIZATION_MASTER, // Program ID for organization management
       "GET_ORGANIZATIONS", // Mode
        req.role, // Admin ID from the authenticated request
@@ -268,6 +281,7 @@ exports.getorganizations = async (req, res) => {
     });
   } catch (error) {
     await logAuditTrail(
+      AuditTrail,
       PROGRAMS.ORGANIZATION_MASTER, // Program ID for organization management
       "GET_ORGANIZATION", // Mode
        req.role, // Admin ID from the authenticated request

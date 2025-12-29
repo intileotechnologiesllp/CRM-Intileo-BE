@@ -3,6 +3,7 @@ const ActivityType  = require("../../models/activity/activityTypeModel");
 
 // Create a new activity type
 exports.createActivityType = async (req, res) => {
+  const { ActivityType } = req.models;
   try {
     const { name, icon, isActive = true } = req.body;
     if (!name || !icon) {
@@ -23,6 +24,7 @@ exports.createActivityType = async (req, res) => {
 
 // Optionally: get all activity types (for listing)
 exports.getActivityTypes = async (req, res) => {
+  const { ActivityType } = req.models;
   try {
     const activityTypes = await ActivityType.findAll();
     res.status(200).json({ activityTypes });
@@ -33,6 +35,7 @@ exports.getActivityTypes = async (req, res) => {
 
 // Optionally: update activity type (activate/deactivate, change icon/name)
 exports.updateActivityType = async (req, res) => {
+  const { ActivityType } = req.models;
   try {
     const { id } = req.params;
     const { name, icon, isActive } = req.body;
@@ -52,6 +55,7 @@ exports.updateActivityType = async (req, res) => {
 
 // Optionally: delete activity type
 exports.deleteActivityType = async (req, res) => {
+  const { ActivityType } = req.models;
   try {
     const { id } = req.params;
     const activityType = await ActivityType.findByPk(id);

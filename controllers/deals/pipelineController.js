@@ -9,6 +9,7 @@ const historyLogger = require("../../utils/historyLogger").logHistory;
 
 // Create a new pipeline (Admin only)
 exports.createPipeline = async (req, res) => {
+  const { LostReason, PipelineStage, Pipeline, History, AuditTrail } = req.models;
   const {
     pipelineName,
     description,
@@ -82,6 +83,7 @@ exports.createPipeline = async (req, res) => {
     }
 
     await historyLogger(
+      History,
       PROGRAMS.LEAD_MANAGEMENT,
       "PIPELINE_CREATION",
       masterUserID,
@@ -99,6 +101,7 @@ exports.createPipeline = async (req, res) => {
   } catch (error) {
     console.error("Error creating pipeline:", error);
     await logAuditTrail(
+      AuditTrail,
       PROGRAMS.LEAD_MANAGEMENT,
       "PIPELINE_CREATION",
       null,
@@ -114,6 +117,7 @@ exports.createPipeline = async (req, res) => {
 
 // Get all pipelines with stages
 exports.getPipelines = async (req, res) => {
+  const { LostReason, PipelineStage, Pipeline, History, AuditTrail } = req.models;
   const { includeInactive = "false" } = req.query;
   // const masterUserID = req.adminId;
 
@@ -158,6 +162,7 @@ exports.getPipelines = async (req, res) => {
 
 // Get a single pipeline with its stages
 exports.getPipelineById = async (req, res) => {
+  const { LostReason, PipelineStage, Pipeline, History, AuditTrail } = req.models;
   const { pipelineId } = req.params;
   // const masterUserID = req.adminId;
 
@@ -196,6 +201,7 @@ exports.getPipelineById = async (req, res) => {
 
 // Update a pipeline
 exports.updatePipeline = async (req, res) => {
+  const { LostReason, PipelineStage, Pipeline, History, AuditTrail } = req.models;
   const { pipelineId } = req.params;
   const {
     pipelineName,
@@ -317,6 +323,7 @@ exports.updatePipeline = async (req, res) => {
     }
 
     await historyLogger(
+      History,
       PROGRAMS.LEAD_MANAGEMENT,
       "PIPELINE_UPDATE",
       masterUserID,
@@ -349,6 +356,7 @@ exports.updatePipeline = async (req, res) => {
 
 // Delete a pipeline
 exports.deletePipeline = async (req, res) => {
+  const { LostReason, PipelineStage, Pipeline, History, AuditTrail, Deal } = req.models;
   const { pipelineId } = req.params;
   const masterUserID = req.adminId;
 
@@ -385,6 +393,7 @@ exports.deletePipeline = async (req, res) => {
     await pipeline.destroy();
 
     await historyLogger(
+      History,
       PROGRAMS.LEAD_MANAGEMENT,
       "PIPELINE_DELETION",
       masterUserID,
@@ -408,6 +417,7 @@ exports.deletePipeline = async (req, res) => {
 
 // Create a new stage for a pipeline
 exports.createStage = async (req, res) => {
+  const { LostReason, PipelineStage, Pipeline, History, AuditTrail, Deal } = req.models;
   const { pipelineId } = req.params;
   const {
     stageName,
@@ -476,6 +486,7 @@ exports.createStage = async (req, res) => {
     });
 
     await historyLogger(
+      History,
       PROGRAMS.LEAD_MANAGEMENT,
       "PIPELINE_STAGE_CREATION",
       masterUserID,
@@ -501,6 +512,7 @@ exports.createStage = async (req, res) => {
 // Update a stage
 exports.updateStage = async (req, res) => {
   const { stageId } = req.params;
+  const { LostReason, PipelineStage, Pipeline, History, AuditTrail, Deal } = req.models;
   const {
     stageName,
     stageOrder,
@@ -564,6 +576,7 @@ exports.updateStage = async (req, res) => {
     });
 
     await historyLogger(
+      History,
       PROGRAMS.LEAD_MANAGEMENT,
       "PIPELINE_STAGE_UPDATE",
       masterUserID,
@@ -588,6 +601,7 @@ exports.updateStage = async (req, res) => {
 
 // Delete a stage
 exports.deleteStage = async (req, res) => {
+  const { LostReason, PipelineStage, Pipeline, History, AuditTrail, Deal } = req.models;
   const { stageId } = req.params;
   const masterUserID = req.adminId;
 
@@ -625,6 +639,7 @@ exports.deleteStage = async (req, res) => {
     await stage.destroy();
 
     await historyLogger(
+      History,
       PROGRAMS.LEAD_MANAGEMENT,
       "PIPELINE_STAGE_DELETION",
       masterUserID,
@@ -648,6 +663,7 @@ exports.deleteStage = async (req, res) => {
 
 // Reorder stages in a pipeline
 exports.reorderStages = async (req, res) => {
+  const { LostReason, PipelineStage, Pipeline, History, AuditTrail, Deal } = req.models;
   const { pipelineId } = req.params;
   const { stageOrders } = req.body; // Array of { stageId, stageOrder }
   const masterUserID = req.adminId;
@@ -673,6 +689,7 @@ exports.reorderStages = async (req, res) => {
     }
 
     await historyLogger(
+      History,
       PROGRAMS.LEAD_MANAGEMENT,
       "PIPELINE_STAGE_REORDER",
       masterUserID,
@@ -696,6 +713,7 @@ exports.reorderStages = async (req, res) => {
 
 // Get pipeline statistics
 exports.getPipelineStats = async (req, res) => {
+  const { LostReason, PipelineStage, Pipeline, History, AuditTrail, Deal } = req.models;
   const { pipelineId } = req.params;
   const masterUserID = req.adminId;
 

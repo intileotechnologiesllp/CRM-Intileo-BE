@@ -10,6 +10,7 @@ const historyLogger = require("../../utils/historyLogger").logHistory;
 
 // Get users in a specific group
 exports.getGroupUsers = async (req, res) => {
+  const { VisibilityGroup, GroupMembership, MasterUser } = req.models;
   const { groupId } = req.params;
   const masterUserID = req.adminId;
 
@@ -78,6 +79,7 @@ exports.getGroupUsers = async (req, res) => {
 
 // Add users to a group
 exports.addUsersToGroup = async (req, res) => {
+  const { VisibilityGroup, GroupMembership, MasterUser, History } = req.models;
   const { groupId } = req.params;
   const { userIds } = req.body;
   const masterUserID = req.adminId;
@@ -158,6 +160,7 @@ exports.addUsersToGroup = async (req, res) => {
 
     // Log the action
     await historyLogger(
+      History,
       PROGRAMS.LEAD_MANAGEMENT,
       "GROUP_MEMBERSHIP_ADD",
       masterUserID,
@@ -183,6 +186,7 @@ exports.addUsersToGroup = async (req, res) => {
 
 // Remove a user from a group
 exports.removeUserFromGroup = async (req, res) => {
+  const { VisibilityGroup, GroupMembership, MasterUser, History } = req.models;
   const { groupId, userId } = req.params;
   const masterUserID = req.adminId;
 
@@ -245,6 +249,7 @@ exports.removeUserFromGroup = async (req, res) => {
     }
 
     await historyLogger(
+      History,
       PROGRAMS.LEAD_MANAGEMENT,
       "GROUP_MEMBERSHIP_REMOVE",
       masterUserID,
@@ -270,6 +275,7 @@ exports.removeUserFromGroup = async (req, res) => {
 
 // Move user between groups
 exports.moveUserToGroup = async (req, res) => {
+  const { VisibilityGroup, GroupMembership, MasterUser, History } = req.models;
   const { userId } = req.params;
   const { targetGroupId } = req.body;
   const masterUserID = req.adminId;
@@ -322,6 +328,7 @@ exports.moveUserToGroup = async (req, res) => {
     });
 
     await historyLogger(
+      History,
       PROGRAMS.LEAD_MANAGEMENT,
       "GROUP_MEMBERSHIP_MOVE",
       masterUserID,
@@ -354,6 +361,7 @@ exports.moveUserToGroup = async (req, res) => {
 
 // Get available users (not in any group or available for reassignment)
 exports.getAvailableUsers = async (req, res) => {
+  const { VisibilityGroup, GroupMembership, MasterUser } = req.models;
   const masterUserID = req.adminId;
 
   try {

@@ -14,12 +14,14 @@ const statusSchema = Joi.object({
 
 // Add status
 exports.createstatus = async (req, res) => {
+  const { History, AuditTrail, Status } = req.models;
   const { status_desc } = req.body;
 
   // Validate the request body
   const { error } = statusSchema.validate({ status_desc });
   if (error) {
     await logAuditTrail(
+      AuditTrail,
       PROGRAMS.STATUS_MASTER, // Program ID for status management
       "CREATE_STATUS", // Mode
        req.role, // Admin ID from the authenticated request
@@ -37,6 +39,7 @@ exports.createstatus = async (req, res) => {
       mode: "added"
     });
     await historyLogger(
+      History,
       PROGRAMS.STATUS_MASTER, // Program ID for currency management
       "CREATE_STATUS", // Mode
       status.createdById, // Created by (Admin ID)
@@ -58,6 +61,7 @@ exports.createstatus = async (req, res) => {
     });
   } catch (error) {
     await logAuditTrail(
+      AuditTrail,
       PROGRAMS.STATUS_MASTER, // Program ID for status management
       "CREATE_STATUS", // Mode
        req.role, // Admin ID from the authenticated request
@@ -71,6 +75,7 @@ exports.createstatus = async (req, res) => {
 
 // Edit status
 exports.editstatus = async (req, res) => {
+  const { History, AuditTrail, Status } = req.models;
   const { statusId } = req.params; // Use statusId instead of id
   const { status_desc } = req.body;
 
@@ -78,6 +83,7 @@ exports.editstatus = async (req, res) => {
   const { error } = statusSchema.validate({ status_desc });
   if (error) {
     await logAuditTrail(
+      AuditTrail,
       PROGRAMS.STATUS_MASTER, // Program ID for status management
       "EDIT_STATUS", // Mode
        req.role, // Admin ID from the authenticated request
@@ -91,6 +97,7 @@ exports.editstatus = async (req, res) => {
     const status = await Status.findByPk(statusId); // Find status by statusId
     if (!status) {
       await logAuditTrail(
+        AuditTrail,
         PROGRAMS.STATUS_MASTER, // Program ID for status management
         "EDIT_STATUS", // Mode
          req.role, // Admin ID from the authenticated request
@@ -118,6 +125,7 @@ exports.editstatus = async (req, res) => {
       }
     }
     await historyLogger(
+      History,
       PROGRAMS.STATUS_MASTER, // Program ID for currency management
       "EDIT_STATUS", // Mode
       status.createdById, // Admin ID from the authenticated request
@@ -138,6 +146,7 @@ exports.editstatus = async (req, res) => {
     });
   } catch (error) {
     await logAuditTrail(
+      AuditTrail,
       PROGRAMS.STATUS_MASTER, // Program ID for status management
       "EDIT_STATUS", // Mode
        req.role, // Admin ID from the authenticated request
@@ -152,11 +161,12 @@ exports.editstatus = async (req, res) => {
 // Delete status
 exports.deletestatus = async (req, res) => {
   const { statusId } = req.params; // Use statusId instead of id
-
+  const { History, AuditTrail, Status } = req.models;
   try {
     const status = await Status.findByPk(statusId); // Find status by statusId
     if (!status) {
       await logAuditTrail(
+        AuditTrail,
         PROGRAMS.STATUS_MASTER, // Program ID for status management
         "DELETE_STATUS", // Mode
          req.role, // Admin ID from the authenticated request
@@ -171,6 +181,7 @@ exports.deletestatus = async (req, res) => {
 
     await status.destroy();
     await historyLogger(
+      History,
       PROGRAMS.STATUS_MASTER, // Program ID for currency management
       "DELETE_STATUS", // Mode
       status.createdById, // Admin ID from the authenticated request
@@ -185,6 +196,7 @@ exports.deletestatus = async (req, res) => {
     });
   } catch (error) {
     await logAuditTrail(
+      AuditTrail,
       PROGRAMS.STATUS_MASTER, // Program ID for status management
       "DELETE_STATUS", // Mode
        req.role, // Admin ID from the authenticated request
@@ -207,7 +219,7 @@ exports.getstatuss = async (req, res) => {
     sortBy = "creationDate",
     order = "DESC",
   } = req.query;
-
+  const { History, AuditTrail, Status } = req.models;
   // Validate query parameters using Joi
   const querySchema = Joi.object({
     search: Joi.string().optional(),
@@ -222,6 +234,7 @@ exports.getstatuss = async (req, res) => {
   const { error } = querySchema.validate(req.query);
   if (error) {
     await logAuditTrail(
+      AuditTrail,
       PROGRAMS.STATUS_MASTER, // Program ID for status management
       "GET_STATUS", // Mode
        req.role, // Admin ID from the authenticated request
@@ -266,6 +279,7 @@ exports.getstatuss = async (req, res) => {
     });
   } catch (error) {
     await logAuditTrail(
+      AuditTrail,
       PROGRAMS.STATUS_MASTER, // Program ID for status management
       "GET_STATUS", // Mode
        req.role, // Admin ID from the authenticated request

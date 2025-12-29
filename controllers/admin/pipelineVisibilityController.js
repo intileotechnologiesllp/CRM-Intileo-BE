@@ -10,6 +10,7 @@ const historyLogger = require("../../utils/historyLogger").logHistory;
 
 // Get pipeline visibility rules for a group
 exports.getGroupPipelineRules = async (req, res) => {
+  const { VisibilityGroup, Pipeline, MasterUser, PipelineVisibilityRule } = req.models;
   const { groupId } = req.params;
   const masterUserID = req.adminId;
 
@@ -108,6 +109,7 @@ exports.getGroupPipelineRules = async (req, res) => {
 
 // Update pipeline visibility rules for a group
 exports.updateGroupPipelineRules = async (req, res) => {
+  const { VisibilityGroup, Pipeline, PipelineVisibilityRule, History } = req.models;
   const { groupId } = req.params;
   const { pipelineRules } = req.body;
   const masterUserID = req.adminId;
@@ -217,6 +219,7 @@ exports.updateGroupPipelineRules = async (req, res) => {
     );
 
     await historyLogger(
+      History,
       PROGRAMS.LEAD_MANAGEMENT,
       "PIPELINE_VISIBILITY_UPDATE",
       masterUserID,
@@ -249,6 +252,7 @@ exports.updateGroupPipelineRules = async (req, res) => {
 
 // Grant access to specific pipeline for a group
 exports.grantPipelineAccess = async (req, res) => {
+  const { VisibilityGroup, Pipeline, PipelineVisibilityRule, History, AuditTrail } = req.models;
   const { groupId, pipelineId } = req.params;
   const {
     canView = true,
@@ -311,6 +315,7 @@ exports.grantPipelineAccess = async (req, res) => {
     }
 
     await historyLogger(
+      History,
       PROGRAMS.LEAD_MANAGEMENT,
       "PIPELINE_ACCESS_GRANTED",
       masterUserID,
@@ -346,6 +351,7 @@ exports.grantPipelineAccess = async (req, res) => {
 
 // Revoke access to specific pipeline for a group
 exports.revokePipelineAccess = async (req, res) => {
+  const { VisibilityGroup, Pipeline, PipelineVisibilityRule, History } = req.models;
   const { groupId, pipelineId } = req.params;
   const masterUserID = req.adminId;
 
@@ -386,6 +392,7 @@ exports.revokePipelineAccess = async (req, res) => {
     });
 
     await historyLogger(
+      History,
       PROGRAMS.LEAD_MANAGEMENT,
       "PIPELINE_ACCESS_REVOKED",
       masterUserID,

@@ -10,6 +10,7 @@ const { Op } = require("sequelize");
  * @access Private
  */
 exports.createLostReason = async (req, res) => {
+  const { LostReason, MasterUser, } = req.models;
   try {
     const { reason, description, isActive = true, sortOrder = 0 } = req.body;
     const masterUserID = req.adminId || req.user?.id;
@@ -66,6 +67,7 @@ exports.createLostReason = async (req, res) => {
  * @access Private
  */
 exports.getLostReasons = async (req, res) => {
+   const { LostReason, MasterUser, LostReasonSetting } = req.models;
   try {
     const masterUserID = req.adminId || req.user?.id;
     const { includeInactive = false, includeSystem = true } = req.query;
@@ -125,6 +127,7 @@ exports.getLostReasons = async (req, res) => {
  * @access Private
  */
 exports.getLostReason = async (req, res) => {
+  const { LostReason, MasterUser, LostReasonSetting } = req.models;
   try {
     const { id } = req.params;
     const masterUserID = req.adminId || req.user?.id;
@@ -163,6 +166,7 @@ exports.getLostReason = async (req, res) => {
  * @access Private
  */
 exports.updateLostReason = async (req, res) => {
+  const { LostReason, MasterUser, LostReasonSetting } = req.models;
   try {
     const { id } = req.params;
     const { reason, description, isActive, sortOrder } = req.body;
@@ -227,6 +231,7 @@ exports.updateLostReason = async (req, res) => {
  * @access Private
  */
 exports.deleteLostReason = async (req, res) => {
+  const { LostReason, MasterUser, LostReasonSetting } = req.models;
   try {
     const { id } = req.params;
     const masterUserID = req.adminId || req.user?.id;
@@ -289,6 +294,7 @@ exports.deleteLostReason = async (req, res) => {
  * @access Private
  */
 exports.updateLostReasonSettings = async (req, res) => {
+  const { LostReason, MasterUser, LostReasonSetting } = req.models;
   try {
     const { allowFreeFormReasons, requireReasonSelection } = req.body;
     const masterUserID = req.adminId || req.user?.id;
@@ -346,6 +352,7 @@ exports.updateLostReasonSettings = async (req, res) => {
  * @access Private
  */
 exports.getLostReasonSettings = async (req, res) => {
+  const { LostReason, MasterUser, LostReasonSetting } = req.models;
   try {
     const masterUserID = req.adminId || req.user?.id;
 
@@ -391,6 +398,7 @@ exports.getLostReasonSettings = async (req, res) => {
  * @access Private
  */
 exports.bulkUpdateLostReasons = async (req, res) => {
+  const { LostReason, MasterUser, LostReasonSetting } = req.models;
   try {
     const { reasons, action } = req.body;
     const masterUserID = req.adminId || req.user?.id;
@@ -465,6 +473,7 @@ exports.bulkUpdateLostReasons = async (req, res) => {
  * @access Private
  */
 exports.createDefaultLostReasons = async (req, res) => {
+  const { LostReason, MasterUser, LostReasonSetting } = req.models;
   try {
     const masterUserID = req.adminId || req.user?.id;
 

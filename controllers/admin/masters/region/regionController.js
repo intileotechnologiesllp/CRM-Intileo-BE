@@ -7,6 +7,7 @@ const PROGRAMS = require("../../../../utils/programConstants"); // Import progra
 const historyLogger = require("../../../../utils/historyLogger").logHistory; // Import history logger
 // Add Region
 exports.createRegion = async (req, res) => {
+  const { History, AuditTrail, Country, Region } = req.models;
   const regionSchema = Joi.object({
     region_desc: Joi.string().min(3).max(100).required().messages({
       "string.empty": "Region description cannot be empty",
@@ -23,6 +24,7 @@ exports.createRegion = async (req, res) => {
   const { error } = regionSchema.validate(req.body);
   if (error) {
     await logAuditTrail(
+      AuditTrail,
       PROGRAMS.REGION_MASTER, // Program ID for region management
       "CREATE_REGION", // Mode
       req.role, // Admin ID from the authenticated request
@@ -38,6 +40,7 @@ exports.createRegion = async (req, res) => {
     const country = await Country.findByPk(countryId);
     if (!country) {
       await logAuditTrail(
+        AuditTrail,
         PROGRAMS.REGION_MASTER, // Program ID for region management
         "CREATE_REGION", // Mode
         req.role, // Admin ID from the authenticated request
@@ -56,6 +59,7 @@ exports.createRegion = async (req, res) => {
       mode: "added", // Set mode to "added"
     });
     await historyLogger(
+      History,
       PROGRAMS.REGION_MASTER, // Program ID for department management
       "CREATE_REGION", // Mode
       region.createdById, // Created by (Admin ID)
@@ -68,6 +72,7 @@ exports.createRegion = async (req, res) => {
     res.status(201).json({ message: "Region created successfully", region });
   } catch (error) {
     await logAuditTrail(
+      AuditTrail,
       PROGRAMS.REGION_MASTER, // Program ID for region management
       "CREATE_REGION", // Mode
       req.role, // Admin ID from the authenticated request
@@ -81,6 +86,7 @@ exports.createRegion = async (req, res) => {
 
 // Add Regions in Bulk
 exports.createRegions = async (req, res) => {
+   const { History, AuditTrail, Country, Region } = req.models;
   const schema = Joi.object({
     countryId: Joi.number().integer().required().messages({
       "number.base": "Country ID must be a number",
@@ -109,6 +115,7 @@ exports.createRegions = async (req, res) => {
   const { error } = schema.validate(req.body);
   if (error) {
     await logAuditTrail(
+      AuditTrail,
       PROGRAMS.REGION_MASTER, // Program ID for region management
       "CREATE_BULK_REGIONS", // Mode
       req.role, // Admin ID from the authenticated request
@@ -126,6 +133,7 @@ exports.createRegions = async (req, res) => {
     const country = await Country.findByPk(countryId);
     if (!country) {
       await logAuditTrail(
+        AuditTrail,
         PROGRAMS.REGION_MASTER, // Program ID for region management
         "CREATE_BULK_REGIONS", // Mode
         req.role, // Admin ID from the authenticated request
@@ -149,6 +157,7 @@ exports.createRegions = async (req, res) => {
     // Log each region creation in the history table
     for (const region of createdRegions) {
       await historyLogger(
+        History,
         PROGRAMS.REGION_MASTER, // Program ID for region management
         "CREATE_BULK_REGIONS", // Mode
         region.createdById, // Created by (Admin ID)
@@ -165,6 +174,7 @@ exports.createRegions = async (req, res) => {
     });
   } catch (error) {
     await logAuditTrail(
+      AuditTrail,
       PROGRAMS.REGION_MASTER, // Program ID for region management
       "CREATE_BULK_REGIONS", // Mode
       req.role, // Admin ID from the authenticated request
@@ -179,6 +189,7 @@ exports.createRegions = async (req, res) => {
 // Get Regions by Country
 exports.getRegionsByCountry = async (req, res) => {
   const { countryId } = req.params;
+  const { Region } = req.models;
 
   try {
     const regions = await Region.findAll({
@@ -221,6 +232,7 @@ exports.getRegions = async (req, res) => {
     sortBy = "creationDate",
     order = "DESC",
   } = req.query;
+  const { History, AuditTrail, Country, Region } = req.models;
 
   const querySchema = Joi.object({
     search: Joi.string().optional(),
@@ -234,6 +246,7 @@ exports.getRegions = async (req, res) => {
   const { error } = querySchema.validate(req.query);
   if (error) {
     await logAuditTrail(
+      AuditTrail,
       PROGRAMS.REGION_MASTER, // Program ID for region management
       "GET_REGIONS", // Mode
       req.role, // Admin ID from the authenticated request
@@ -277,6 +290,7 @@ exports.getRegions = async (req, res) => {
   } catch (error) {
     console.error("Error fetching regions:", error);
     await logAuditTrail(
+      AuditTrail,
       PROGRAMS.REGION_MASTER, // Program ID for region management
       "GET_REGION", // Mode
       req.role, // Admin ID from the authenticated request
@@ -289,6 +303,7 @@ exports.getRegions = async (req, res) => {
 
 // Edit Region
 exports.editRegion = async (req, res) => {
+  const { History, AuditTrail, Country, Region } = req.models;
   const regionSchema = Joi.object({
     region_desc: Joi.string().min(3).max(100).required().messages({
       "string.empty": "Region description cannot be empty",
@@ -305,6 +320,7 @@ exports.editRegion = async (req, res) => {
   const { error } = regionSchema.validate(req.body);
   if (error) {
     await logAuditTrail(
+      AuditTrail,
       PROGRAMS.REGION_MASTER, // Program ID for region management
       "EDIT_REGION", // Mode
       req.role, // Admin ID from the authenticated request
@@ -321,6 +337,7 @@ exports.editRegion = async (req, res) => {
     const region = await Region.findByPk(regionID);
     if (!region) {
       await logAuditTrail(
+        AuditTrail,
         PROGRAMS.REGION_MASTER, // Program ID for region management
         "EDIT_REGION", // Mode
         req.role, // Admin ID from the authenticated request
@@ -349,6 +366,7 @@ exports.editRegion = async (req, res) => {
       }
     }
     await historyLogger(
+      History,
       PROGRAMS.REGION_MASTER, // Program ID for currency management
       "EDIT_REGION", // Mode
       region.createdById, // Admin ID from the authenticated request
@@ -361,6 +379,7 @@ exports.editRegion = async (req, res) => {
     res.status(200).json({ message: "Region updated successfully", region });
   } catch (error) {
     await logAuditTrail(
+      AuditTrail,
       PROGRAMS.REGION_MASTER, // Program ID for region management
       "EDIT_REGION", // Mode
       req.role, // Admin ID from the authenticated request
@@ -385,13 +404,14 @@ exports.deleteRegion = async (req, res) => {
   // if (error) {
   //   return res.status(400).json({ message: error.details[0].message });
   // }
-
+  const { History, AuditTrail, Country, Region } = req.models;
   const { regionID } = req.params;
 
   try {
     const region = await Region.findByPk(regionID);
     if (!region) {
       await logAuditTrail(
+        AuditTrail,
         PROGRAMS.REGION_MASTER, // Program ID for region management
         "DELETE_REGION", // Mode
         req.role, // Admin ID from the authenticated request
@@ -405,6 +425,7 @@ exports.deleteRegion = async (req, res) => {
 
     await region.destroy();
     await historyLogger(
+      History,
       PROGRAMS.REGION_MASTER, // Program ID for currency management
       "DELETE_REGION", // Mode
       region.createdById, // Admin ID from the authenticated request
@@ -416,6 +437,7 @@ exports.deleteRegion = async (req, res) => {
     res.status(200).json({ message: "Region deleted successfully" });
   } catch (error) {
     await logAuditTrail(
+      AuditTrail,
       PROGRAMS.REGION_MASTER, // Program ID for region management
       "DELETE_REGION", // Mode
       req.role, // Admin ID from the authenticated request
@@ -429,6 +451,7 @@ exports.deleteRegion = async (req, res) => {
 
 // Bulk Edit Regions
 exports.bulkEditRegions = async (req, res) => {
+   const { History, AuditTrail, Country, Region } = req.models;
   const schema = Joi.object({
     regions: Joi.array()
       .items(
@@ -459,6 +482,7 @@ exports.bulkEditRegions = async (req, res) => {
   const { error } = schema.validate(req.body);
   if (error) {
     await logAuditTrail(
+      AuditTrail,
       PROGRAMS.REGION_MASTER, // Program ID for region management
       "BULK_EDIT_REGIONS", // Mode
       req.role, // Admin ID from the authenticated request
@@ -481,6 +505,7 @@ exports.bulkEditRegions = async (req, res) => {
       const region = await Region.findByPk(regionID);
       if (!region) {
         await logAuditTrail(
+          AuditTrail,
           PROGRAMS.REGION_MASTER, // Program ID for region management
           "BULK_EDIT_REGIONS", // Mode
           req.role, // Admin ID from the authenticated request
@@ -531,6 +556,7 @@ exports.bulkEditRegions = async (req, res) => {
 
     // Log the bulk edit in the history table as a single record
     await historyLogger(
+      History,
       PROGRAMS.REGION_MASTER, // Program ID for region management
       "BULK_EDIT_REGIONS", // Mode
       req.adminId, // Created by (Admin ID)
@@ -547,6 +573,7 @@ exports.bulkEditRegions = async (req, res) => {
     });
   } catch (error) {
     await logAuditTrail(
+      AuditTrail,
       PROGRAMS.REGION_MASTER, // Program ID for region management
       "BULK_EDIT_REGIONS", // Mode
       req.role, // Admin ID from the authenticated request

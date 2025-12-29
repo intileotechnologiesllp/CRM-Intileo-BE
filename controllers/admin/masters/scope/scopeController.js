@@ -14,12 +14,14 @@ const scopeSchema = Joi.object({
 
 // Add scope
 exports.createscope = async (req, res) => {
+  const { History, AuditTrail, Scope } = req.models;
   const { scope_desc } = req.body;
 
   // Validate the request body
   const { error } = scopeSchema.validate({ scope_desc });
   if (error) {
     await logAuditTrail(
+      AuditTrail,
       PROGRAMS.SCOPE_MASTER, // Program ID for scope management
       "CREATE_SCOPE", // Mode
        req.role, // Admin ID from the authenticated request
@@ -37,6 +39,7 @@ exports.createscope = async (req, res) => {
       mode: "added"
     });
     await historyLogger(
+      History,
       PROGRAMS.SCOPE_MASTER, // Program ID for currency management
       "CREATE_SCOPE", // Mode
       scope.createdById, // Created by (Admin ID)
@@ -58,6 +61,7 @@ exports.createscope = async (req, res) => {
     });
   } catch (error) {
     await logAuditTrail(
+      AuditTrail,
       PROGRAMS.SCOPE_MASTER, // Program ID for scope management
       "CREATE_SCOPE", // Mode
        req.role, // Admin ID from the authenticated request
@@ -71,6 +75,7 @@ exports.createscope = async (req, res) => {
 
 // Edit scope
 exports.editscope = async (req, res) => {
+  const { History, AuditTrail, Scope } = req.models;
   const { scopeId } = req.params; // Use scopeId instead of id
   const { scope_desc } = req.body;
 
@@ -78,6 +83,7 @@ exports.editscope = async (req, res) => {
   const { error } = scopeSchema.validate({ scope_desc });
   if (error) {
     await logAuditTrail(
+      AuditTrail,
       PROGRAMS.SCOPE_MASTER, // Program ID for scope management
       "EDIT_SCOPE", // Mode
        req.role, // Admin ID from the authenticated request
@@ -91,6 +97,7 @@ exports.editscope = async (req, res) => {
     const scope = await Scope.findByPk(scopeId); // Find scope by scopeId
     if (!scope) {
       await logAuditTrail(
+        AuditTrail,
         PROGRAMS.SCOPE_MASTER, // Program ID for scope management
         "EDIT_SCOPE", // Mode
          req.role, // Admin ID from the authenticated request
@@ -118,6 +125,7 @@ exports.editscope = async (req, res) => {
       }
     }
     await historyLogger(
+      History,
       PROGRAMS.SCOPE_MASTER, // Program ID for currency management
       "EDIT_SCOPE", // Mode
       scope.createdById, // Admin ID from the authenticated request
@@ -139,6 +147,7 @@ exports.editscope = async (req, res) => {
     });
   } catch (error) {
     await logAuditTrail(
+      AuditTrail,
       PROGRAMS.SCOPE_MASTER, // Program ID for scope management
       "EDIT_SCOPE", // Mode
        req.role, // Admin ID from the authenticated request
@@ -153,11 +162,13 @@ exports.editscope = async (req, res) => {
 // Delete scope
 exports.deletescope = async (req, res) => {
   const { scopeId } = req.params; // Use scopeId instead of id
+  const { History, AuditTrail, Scope } = req.models;
 
   try {
     const scope = await Scope.findByPk(scopeId); // Find scope by scopeId
     if (!scope) {
       await logAuditTrail(
+        AuditTrail,
         PROGRAMS.SCOPE_MASTER, // Program ID for scope management
         "DELETE_SCOPE", // Mode
          req.role, // Admin ID from the authenticated request
@@ -173,6 +184,7 @@ exports.deletescope = async (req, res) => {
 
     await scope.destroy();
     await historyLogger(
+      History,
       PROGRAMS.SCOPE_MASTER, // Program ID for currency management
       "DELETE_SCOPE", // Mode
       scope.createdById, // Admin ID from the authenticated request
@@ -187,6 +199,7 @@ exports.deletescope = async (req, res) => {
     });
   } catch (error) {
     await logAuditTrail(
+      AuditTrail,
       PROGRAMS.SCOPE_MASTER, // Program ID for scope management
       "DELETE_SCOPE", // Mode
        req.role, // Admin ID from the authenticated request
@@ -209,6 +222,7 @@ exports.getscopes = async (req, res) => {
     sortBy = "creationDate",
     order = "DESC",
   } = req.query;
+   const { History, AuditTrail, Scope } = req.models;
 
   // Validate query parameters using Joi
   const querySchema = Joi.object({
@@ -224,6 +238,7 @@ exports.getscopes = async (req, res) => {
   const { error } = querySchema.validate(req.query);
   if (error) {
     await logAuditTrail(
+      AuditTrail,
       PROGRAMS.SCOPE_MASTER, // Program ID for scope management
       "GET_SCOPES", // Mode
        req.role, // Admin ID from the authenticated request
@@ -267,6 +282,7 @@ exports.getscopes = async (req, res) => {
     });
   } catch (error) {
     await logAuditTrail(
+      AuditTrail,
       PROGRAMS.SCOPE_MASTER, // Program ID for scope management
       "GET_SCOPE", // Mode
        req.role, // Admin ID from the authenticated request

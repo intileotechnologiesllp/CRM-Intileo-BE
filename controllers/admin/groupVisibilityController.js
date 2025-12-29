@@ -14,6 +14,7 @@ const PROGRAMS = require("../../utils/programConstants");
 const historyLogger = require("../../utils/historyLogger").logHistory;
 
 exports.addPipelineToGroup = async (req, res) => {
+  const { GroupVisibility, Pipeline } = req.models;
   try {
     const { groupId } = req.params;
     const { pipelineId } = req.body;
@@ -60,6 +61,7 @@ exports.addPipelineToGroup = async (req, res) => {
   }
 }
 exports.addUserToGroup = async (req, res)=>{
+  const { GroupVisibility, Pipeline, MasterUser } = req.models;
   try{
     const { groupId } = req.params;
     const { masterUserID } = req.body;
@@ -108,6 +110,7 @@ exports.addUserToGroup = async (req, res)=>{
 }
 
 exports.getVisibilityGroups = async (req, res) => {
+  const { GroupVisibility, Pipeline, MasterUser } = req.models;
   try {
     // Get all groups
     const groups = await GroupVisibility.findAll({
@@ -240,6 +243,7 @@ exports.getVisibilityGroups = async (req, res) => {
 
 // Alternative: Get single group with users by ID
 exports.getVisibilityGroupsWithId = async (req, res) => {
+  const { GroupVisibility, Pipeline, MasterUser } = req.models;
   try {
     const { groupId } = req.params;
 
@@ -320,6 +324,7 @@ exports.getVisibilityGroupsWithId = async (req, res) => {
 
 // Create a new visibility group
 exports.createVisibilityGroup = async (req, res) => {
+  const { GroupVisibility, Pipeline, MasterUser } = req.models;
   const transaction = await sequelize.transaction();
   
   try {
@@ -440,6 +445,7 @@ exports.createVisibilityGroup = async (req, res) => {
 
 // Update a visibility group
 exports.updateVisibilityGroup = async (req, res) => {
+  const { GroupVisibility, Pipeline, MasterUser } = req.models;
   const transaction = await sequelize.transaction();
 
   try {
@@ -933,6 +939,7 @@ exports.updateVisibilityGroup = async (req, res) => {
 // };
 
 exports.deleteGroup = async (req, res) => {
+  const { GroupVisibility, Pipeline, MasterUser } = req.models;
   try {
     const { groupId } = req.params;
 
@@ -982,6 +989,7 @@ exports.deleteGroup = async (req, res) => {
 
 // Alternative: Soft delete (if you have deletedAt column)
 exports.softDeleteGroup = async (req, res) => {
+  const { GroupVisibility, Pipeline, MasterUser } = req.models;
   try {
     const { groupId } = req.params;
 
@@ -1029,6 +1037,7 @@ exports.softDeleteGroup = async (req, res) => {
 };
 
 exports.getMyGroups = async (req, res) => {
+  const { GroupVisibility, Pipeline, MasterUser } = req.models;
   try {
     const masterUserId = req.adminId; // Assuming this is set from authentication middleware
     console.log(masterUserId)
@@ -1093,6 +1102,7 @@ exports.getMyGroups = async (req, res) => {
 };
 
 exports.getGroupsByEntity = async (req, res) => {
+  const { GroupVisibility, Pipeline, MasterUser } = req.models;
   try {
     const {
       pipeline,

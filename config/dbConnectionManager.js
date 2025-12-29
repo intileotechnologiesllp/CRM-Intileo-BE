@@ -120,6 +120,9 @@ class DatabaseConnectionManager {
   static associatedModels = new Map();
   
   /**
+<<<<<<< Updated upstream
+   * Connect to database and ensure user exists
+=======
    * Get model instance for a specific connection
    */
   static getModel(connection, modelName) {
@@ -449,7 +452,6 @@ class DatabaseConnectionManager {
       Pipeline: this.getModel(connection, 'Pipeline'),
       PipelineStage: this.getModel(connection, 'PipelineStage'),
       PipelineVisibilityRule: this.getModel(connection, 'PipelineVisibilityRule'),
-      GroupMembership: this.getModel(connection, 'GroupMembership'),
       LeadColumn: this.getModel(connection, 'LeadColumn'),
       LeadOrganization: this.getModel(connection, 'LeadOrganization'),
       OrganizationColumnPreference: this.getModel(connection, 'OrganizationColumnPreference'),
@@ -532,14 +534,273 @@ class DatabaseConnectionManager {
       await models.MasterUser.sync({ alter: false, force: false });
       console.log("✅ MasterUsers table synced");
       
-      await models.LostReason.sync({ alter: false, force: false });
-      console.log("✅ LostReasons table synced");
-      
+      await models.AuditTrail.sync({ alter: false, force: false });
+      console.log("✅ AuditTrail table synced");
+
+      await models.History.sync({ alter: false, force: false });
+      console.log("✅ AuditTrail table synced");
+
+      await models.LoginHistory.sync({ alter: false, force: false });
+      console.log("✅ AuditTrail table synced");
+
+      await models.RecentLoginHistory.sync({ alter: false, force: false });
+      console.log("✅ RecentLoginHistory table synced");
+
+      await models.Admin.sync({ alter: false, force: false });
+      console.log("✅ AuditTrail table synced");
+
+      await models.CustomField.sync({ alter: false, force: false });
+      console.log("✅ CustomField table synced");
+
+      await models.CustomFieldValue.sync({ alter: false, force: false });
+      console.log("✅ CustomFieldValue table synced");
+  
+      await models.PermissionSet.sync({ alter: false, force: false });
+      console.log("✅ PermissionSet table synced");
+
+      await models.RecentSearch.sync({ alter: false, force: false });
+      console.log("✅ RecentSearch table synced");
+
+      await models.UserInterfacePreference.sync({ alter: false, force: false });
+      console.log("✅ UserInterfacePreference table synced");
+
+      await models.Country.sync({ alter: false, force: false });
+      console.log("✅ Country table synced");
+
+      await models.Currency.sync({ alter: false, force: false });
+      console.log("✅ Currency table synced");
+
+      await models.Department.sync({ alter: false, force: false });
+      console.log("✅ Department table synced");
+
+      await models.Designation.sync({ alter: false, force: false });
+      console.log("✅ Designation table synced");
+
+      await models.Label.sync({ alter: false, force: false });
+      console.log("✅ Label table synced");
+
+      await models.Organization.sync({ alter: false, force: false });
+      console.log("✅ Organization table synced");
+
+      await models.Program.sync({ alter: false, force: false });
+      console.log("✅ Program table synced");
+
+      await models.Region.sync({ alter: false, force: false });
+      console.log("✅ Region table synced");
+
+      await models.Scope.sync({ alter: false, force: false });
+      console.log("✅ Scope table synced");
+
+      await models.Sectoralscope.sync({ alter: false, force: false });
+      console.log("✅ Sectoralscope table synced");
+
+      await models.Status.sync({ alter: false, force: false });
+      console.log("✅ Status table synced");
+
+      await models.GroupVisibility.sync({ alter: false, force: false });
+      console.log("✅ GroupVisibility table synced");
+
+      await models.ItemVisibilityRule.sync({ alter: false, force: false });
+      console.log("✅ ItemVisibilityRule table synced");
+
+      await models.GroupMembership.sync({ alter: false, force: false });
+      console.log("✅ GroupMembership table synced");
+
+      await models.VisibilityGroup.sync({ alter: false, force: false });
+      console.log("✅ VisibilityGroup table synced");
+
+      await models.Pipeline.sync({ alter: false, force: false });
+      console.log("✅ Pipeline table synced");
+
+      await models.PipelineStage.sync({ alter: false, force: false });
+      console.log("✅ PipelineStage table synced");
+
+      await models.PipelineVisibilityRule.sync({ alter: false, force: false });
+      console.log("✅ PipelineVisibilityRule table synced");
+
+      await models.LeadColumn.sync({ alter: false, force: false });
+      console.log("✅ LeadColumn table synced");
+
       await models.LeadOrganization.sync({ alter: false, force: false });
-      console.log("✅ LeadOrganizations table synced");
-      
+      console.log("✅ LeadOrganization table synced");
+
+      await models.OrganizationColumnPreference.sync({ alter: false, force: false });
+      console.log("✅ OrganizationColumnPreference table synced");
+
+      await models.OrganizationFile.sync({ alter: false, force: false });
+      console.log("✅ OrganizationFile table synced");
+
+      await models.OrganizationNote.sync({ alter: false, force: false });
+      console.log("✅ OrganizationNote table synced");
+
+      await models.OrganizationSidebarPreference.sync({ alter: false, force: false });
+      console.log("✅ OrganizationSidebarPreference table synced");
+
+
       await models.LeadPerson.sync({ alter: false, force: false });
-      console.log("✅ LeadPersons table synced");
+      console.log("✅ LeadPerson table synced");
+
+
+      await models.PersonColumnPreference.sync({ alter: false, force: false });
+      console.log("✅ PersonColumnPreference table synced");
+
+      await models.PersonFile.sync({ alter: false, force: false });
+      console.log("✅ PersonFile table synced");
+
+      await models.PersonNote.sync({ alter: false, force: false });
+      console.log("✅ PersonNote table synced");
+
+      await models.PersonSidebarPreference.sync({ alter: false, force: false });
+      console.log("✅ PersonSidebarPreference table synced");
+
+      await models.Lead.sync({ alter: false, force: false });
+      console.log("✅ Lead table synced");
+
+      await models.LeadNote.sync({ alter: false, force: false });
+      console.log("✅ LeadNote table synced");
+
+      await models.LeadFilter.sync({ alter: false, force: false });
+      console.log("✅ LeadFilter table synced");
+
+      await models.LeadDetail.sync({ alter: false, force: false });
+      console.log("✅ LeadDetail table synced");
+
+      await models.LeadColumnPreference.sync({ alter: false, force: false });
+      console.log("✅ LeadColumnPreference table synced");
+
+      await models.EntityFile.sync({ alter: false, force: false });
+      console.log("✅ EntityFile table synced");
+
+      await models.Dashboard.sync({ alter: false, force: false });
+      console.log("✅ Dashboard table synced");
+
+      await models.Card.sync({ alter: false, force: false });
+      console.log("✅ Card table synced");
+
+      await models.Goal.sync({ alter: false, force: false });
+      console.log("✅ Goal table synced");
+
+      await models.ReportFolder.sync({ alter: false, force: false });
+      console.log("✅ ReportFolder table synced");
+
+      await models.Report.sync({ alter: false, force: false });
+      console.log("✅ Report table synced");
+
+      await models.ImportData.sync({ alter: false, force: false });
+      console.log("✅ ImportData table synced");
+
+      await models.UserGoogleToken.sync({ alter: false, force: false });
+      console.log("✅ UserGoogleToken table synced");
+
+      await models.UserFavorite.sync({ alter: false, force: false });
+      console.log("✅ UserFavorite table synced");
+
+      await models.Email.sync({ alter: false, force: false });
+      console.log("✅ Email table synced");
+
+      await models.Attachment.sync({ alter: false, force: false });
+      console.log("✅ Attachment table synced");
+
+      await models.DefaultEmail.sync({ alter: false, force: false });
+      console.log("✅ DefaultEmail table synced");
+
+      await models.Template.sync({ alter: false, force: false });
+      console.log("✅ Template table synced");
+
+      await models.UserCredential.sync({ alter: false, force: false });
+      console.log("✅ UserCredential table synced");
+
+      await models.DeviceActivity.sync({ alter: false, force: false });
+      console.log("✅ DeviceActivity table synced");
+
+      await models.LostReason.sync({ alter: false, force: false });
+      console.log("✅ LostReason table synced");
+
+      await models.LostReasonSetting.sync({ alter: false, force: false });
+      console.log("✅ LostReasonSetting table synced");
+
+      await models.Deal.sync({ alter: false, force: false });
+      console.log("✅ Deal table synced");
+
+      await models.DealStageHistory.sync({ alter: false, force: false });
+      console.log("✅ DealStageHistory table synced");
+
+      await models.DealNote.sync({ alter: false, force: false });
+      console.log("✅ DealNote table synced");
+
+      await models.DealDetail.sync({ alter: false, force: false });
+      console.log("✅ DealDetail table synced");
+
+      await models.DealParticipant.sync({ alter: false, force: false });
+      console.log("✅ DealParticipant table synced");
+
+      await models.DealFile.sync({ alter: false, force: false });
+      console.log("✅ DealFile table synced");
+
+      await models.DealColumn.sync({ alter: false, force: false });
+      console.log("✅ DealColumn table synced");
+
+      await models.ContactChangeLog.sync({ alter: false, force: false });
+      console.log("✅ ContactChangeLog table synced");
+
+      await models.ContactSyncHistory.sync({ alter: false, force: false });
+      console.log("✅ ContactSyncHistory table synced");
+
+      await models.ContactSyncConfig.sync({ alter: false, force: false });
+      console.log("✅ ContactSyncConfig table synced");
+
+      await models.ContactSyncMapping.sync({ alter: false, force: false });
+      console.log("✅ ContactSyncMapping table synced");
+
+      await models.CompanySetting.sync({ alter: false, force: false });
+      console.log("✅ CompanySetting table synced");
+
+      await models.Activity.sync({ alter: false, force: false });
+      console.log("✅ Activity table synced");
+
+      await models.ActivityColumn.sync({ alter: false, force: false });
+      console.log("✅ ActivityColumn table synced");
+
+      await models.ActivitySetting.sync({ alter: false, force: false });
+      console.log("✅ ActivitySetting table synced");
+
+      await models.ActivityType.sync({ alter: false, force: false });
+      console.log("✅ ActivityType table synced");
+
+      await models.Meeting.sync({ alter: false, force: false });
+      console.log("✅ Meeting table synced");
+
+      await models.SchedulingLink.sync({ alter: false, force: false });
+      console.log("✅ SchedulingLink table synced");
+
+      await models.MiscSetting.sync({ alter: false, force: false });
+      console.log("✅ MiscSetting table synced");
+
+      await models.Notification.sync({ alter: false, force: false });
+      console.log("✅ Notification table synced");
+
+      await models.NotificationPreference.sync({ alter: false, force: false });
+      console.log("✅ NotificationPreference table synced");
+
+      await models.PushSubscription.sync({ alter: false, force: false });
+      console.log("✅ PushSubscription table synced");
+
+      await models.MasterUserPrivileges.sync({ alter: false, force: false });
+      console.log("✅ MasterUserPrivileges table synced");
+
+      await models.Product.sync({ alter: false, force: false });
+      console.log("✅ Product table synced");
+
+      await models.ProductVariation.sync({ alter: false, force: false });
+      console.log("✅ ProductVariation table synced");
+
+      await models.DealProduct.sync({ alter: false, force: false });
+      console.log("✅ DealProduct table synced");
+
+      await models.ProductColumn.sync({ alter: false, force: false });
+      console.log("✅ ProductColumn table synced");
+
+
 
       console.log("✅ All models synced successfully");
       
@@ -559,10 +820,95 @@ class DatabaseConnectionManager {
           await connection.query('SET FOREIGN_KEY_CHECKS = 0');
           
           // Sync tables without foreign key constraints
-          await models.MasterUser.sync({ alter: true, force: false });
-          await models.LostReason.sync({ alter: true, force: false });
-          await models.LeadOrganization.sync({ alter: true, force: false });
-          await models.LeadPerson.sync({ alter: true, force: false });
+      await models.MasterUser.sync({ alter: false, force: false });
+      await models.AuditTrail.sync({ alter: false, force: false });
+      await models.History.sync({ alter: false, force: false });
+      await models.LoginHistory.sync({ alter: false, force: false });
+      await models.RecentLoginHistory.sync({ alter: false, force: false });
+      await models.Admin.sync({ alter: false, force: false });
+      await models.CustomField.sync({ alter: false, force: false });
+      await models.CustomFieldValue.sync({ alter: false, force: false });
+      await models.PermissionSet.sync({ alter: false, force: false });
+      await models.RecentSearch.sync({ alter: false, force: false });
+      await models.UserInterfacePreference.sync({ alter: false, force: false });
+      await models.Country.sync({ alter: false, force: false });
+      await models.Currency.sync({ alter: false, force: false });
+      await models.Department.sync({ alter: false, force: false });
+      await models.Designation.sync({ alter: false, force: false });
+      await models.Label.sync({ alter: false, force: false });
+      await models.Organization.sync({ alter: false, force: false });
+      await models.Program.sync({ alter: false, force: false });
+      await models.Region.sync({ alter: false, force: false });
+      await models.Scope.sync({ alter: false, force: false });
+      await models.Sectoralscope.sync({ alter: false, force: false });
+      await models.Status.sync({ alter: false, force: false });
+      await models.GroupVisibility.sync({ alter: false, force: false });
+      await models.ItemVisibilityRule.sync({ alter: false, force: false });
+      await models.GroupMembership.sync({ alter: false, force: false });
+      await models.VisibilityGroup.sync({ alter: false, force: false });
+      await models.Pipeline.sync({ alter: false, force: false });
+      await models.PipelineStage.sync({ alter: false, force: false });
+      await models.PipelineVisibilityRule.sync({ alter: false, force: false });
+      await models.LeadColumn.sync({ alter: false, force: false });
+      await models.LeadOrganization.sync({ alter: false, force: false });
+      await models.OrganizationColumnPreference.sync({ alter: false, force: false });
+      await models.OrganizationFile.sync({ alter: false, force: false });
+      await models.OrganizationNote.sync({ alter: false, force: false });
+      await models.OrganizationSidebarPreference.sync({ alter: false, force: false });
+      await models.LeadPerson.sync({ alter: false, force: false });
+      await models.PersonColumnPreference.sync({ alter: false, force: false });
+      await models.PersonFile.sync({ alter: false, force: false });
+      await models.PersonNote.sync({ alter: false, force: false });
+      await models.PersonSidebarPreference.sync({ alter: false, force: false });
+      await models.Lead.sync({ alter: false, force: false });
+      await models.LeadNote.sync({ alter: false, force: false });
+      await models.LeadFilter.sync({ alter: false, force: false });
+      await models.LeadDetail.sync({ alter: false, force: false });
+      await models.LeadColumnPreference.sync({ alter: false, force: false });
+      await models.EntityFile.sync({ alter: false, force: false });
+      await models.Dashboard.sync({ alter: false, force: false });
+      await models.Card.sync({ alter: false, force: false });
+      await models.Goal.sync({ alter: false, force: false });
+      await models.ReportFolder.sync({ alter: false, force: false });
+      await models.Report.sync({ alter: false, force: false });
+      await models.ImportData.sync({ alter: false, force: false });
+      await models.UserGoogleToken.sync({ alter: false, force: false });
+      await models.UserFavorite.sync({ alter: false, force: false });
+      await models.Email.sync({ alter: false, force: false });
+      await models.Attachment.sync({ alter: false, force: false });
+      await models.DefaultEmail.sync({ alter: false, force: false });
+      await models.Template.sync({ alter: false, force: false });
+      await models.UserCredential.sync({ alter: false, force: false });
+      await models.DeviceActivity.sync({ alter: false, force: false });
+      await models.LostReason.sync({ alter: false, force: false });
+      await models.LostReasonSetting.sync({ alter: false, force: false });
+      await models.Deal.sync({ alter: false, force: false });
+      await models.DealStageHistory.sync({ alter: false, force: false });
+      await models.DealNote.sync({ alter: false, force: false });
+      await models.DealDetail.sync({ alter: false, force: false });
+      await models.DealParticipant.sync({ alter: false, force: false });
+      await models.DealFile.sync({ alter: false, force: false });
+      await models.DealColumn.sync({ alter: false, force: false });
+      await models.ContactChangeLog.sync({ alter: false, force: false });
+      await models.ContactSyncHistory.sync({ alter: false, force: false });
+      await models.ContactSyncConfig.sync({ alter: false, force: false });
+      await models.ContactSyncMapping.sync({ alter: false, force: false });
+      await models.CompanySetting.sync({ alter: false, force: false });
+      await models.Activity.sync({ alter: false, force: false });
+      await models.ActivityColumn.sync({ alter: false, force: false });
+      await models.ActivitySetting.sync({ alter: false, force: false });
+      await models.ActivityType.sync({ alter: false, force: false });
+      await models.Meeting.sync({ alter: false, force: false });
+      await models.SchedulingLink.sync({ alter: false, force: false });
+      await models.MiscSetting.sync({ alter: false, force: false });
+      await models.Notification.sync({ alter: false, force: false });
+      await models.NotificationPreference.sync({ alter: false, force: false });
+      await models.PushSubscription.sync({ alter: false, force: false });
+      await models.MasterUserPrivileges.sync({ alter: false, force: false });
+      await models.Product.sync({ alter: false, force: false });
+      await models.ProductVariation.sync({ alter: false, force: false });
+      await models.DealProduct.sync({ alter: false, force: false });
+      await models.ProductColumn.sync({ alter: false, force: false });
           
           await connection.query('SET FOREIGN_KEY_CHECKS = 1');
           
@@ -579,23 +925,34 @@ class DatabaseConnectionManager {
   
   /**
    * Connect to client database and ensure user exists
+>>>>>>> Stashed changes
    */
   static async connectAndEnsureUser(email, password) {
     try {
-      // Step 1: Get client configuration
-      const client = await getClientConfig(email, password);
+      // Get client from central database
+      const client = await getClientByEmail(email);
       
-      // Step 2: Connect to client's database
-      const clientConnection = await getClientDbConnection(client);
+      if (!client) {
+        throw new Error("Client not found");
+      }
       
-      // Step 3: Get all models with associations
-      const models = this.getAllModels(clientConnection);
+      // Verify client password
+      const isPasswordValid = await bcrypt.compare(password, client.password);
+      if (!isPasswordValid) {
+        throw new Error("Invalid password");
+      }
       
-      // Step 4: Sync all models in correct order
-      await this.syncModels(clientConnection, models);
+      // Connect to client's database
+      const clientSequelize = await getClientDbConnection(client);
       
-      // Step 5: Check if user exists, create if not
-      const userInfo = await this.ensureUserExists(models.MasterUser, email, password, client);
+      // Initialize models for this client
+      await modelRegistry.initModelsForClient(client.id, clientSequelize);
+      
+      // Get models (they'll use the patched require)
+      const MasterUser = require('../models/master/masterUserModel');
+      
+      // Check if user exists, create if not
+      const userInfo = await this.ensureUserExists(email, password, client, MasterUser);
       
       return {
         clientConnection,

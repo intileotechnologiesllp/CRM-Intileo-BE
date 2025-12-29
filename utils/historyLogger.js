@@ -1,6 +1,7 @@
 const History = require("../models/reports/historyModel");
 
 exports.logHistory = async (
+  History,
   programId = null,
   mode = null,
   createdById = null,

@@ -14,6 +14,7 @@ const historyLogger = require("../../utils/historyLogger").logHistory;
 
 // Get all visibility groups for the current user
 exports.getVisibilityGroups = async (req, res) => {
+  const { VisibilityGroup, Pipeline, PipelineVisibilityRule, History, GroupMembership, MasterUser, ItemVisibilityRule } = req.models;
   const { includeInactive = "false" } = req.query;
   const masterUserID = req.adminId;
 
@@ -170,6 +171,7 @@ exports.getVisibilityGroups = async (req, res) => {
 
 // Get a single visibility group with details
 exports.getVisibilityGroupById = async (req, res) => {
+  const { VisibilityGroup, Pipeline, PipelineVisibilityRule, History, GroupMembership, MasterUser, ItemVisibilityRule } = req.models;
   const { groupId } = req.params;
   const masterUserID = req.adminId;
 
@@ -304,6 +306,7 @@ exports.getVisibilityGroupById = async (req, res) => {
 
 // Create a new visibility group
 exports.createVisibilityGroup = async (req, res) => {
+  const { VisibilityGroup, Pipeline, PipelineVisibilityRule, History, GroupMembership, MasterUser, ItemVisibilityRule, AuditTrail } = req.models;
   const {
     groupName,
     description,
@@ -505,6 +508,7 @@ exports.createVisibilityGroup = async (req, res) => {
       await transaction.commit();
 
       await historyLogger(
+        History,
         PROGRAMS.LEAD_MANAGEMENT,
         "VISIBILITY_GROUP_CREATION",
         masterUserID,
@@ -527,6 +531,7 @@ exports.createVisibilityGroup = async (req, res) => {
   } catch (error) {
     console.error("Error creating visibility group:", error);
     await logAuditTrail(
+      AuditTrail,
       PROGRAMS.LEAD_MANAGEMENT,
       "VISIBILITY_GROUP_CREATION",
       null,
@@ -542,6 +547,7 @@ exports.createVisibilityGroup = async (req, res) => {
 
 // Update a visibility group
 exports.updateVisibilityGroup = async (req, res) => {
+  const { VisibilityGroup, Pipeline, PipelineVisibilityRule, History, } = req.models;
   const { groupId } = req.params;
   const { groupName, description, parentGroupId, isDefault, isActive } =
     req.body;
@@ -643,6 +649,7 @@ exports.updateVisibilityGroup = async (req, res) => {
     });
 
     await historyLogger(
+      History,
       PROGRAMS.LEAD_MANAGEMENT,
       "VISIBILITY_GROUP_UPDATE",
       masterUserID,
@@ -667,6 +674,7 @@ exports.updateVisibilityGroup = async (req, res) => {
 
 // Delete a visibility group
 exports.deleteVisibilityGroup = async (req, res) => {
+  const { VisibilityGroup, Pipeline, PipelineVisibilityRule, History, GroupMembership, ItemVisibilityRule } = req.models;
   const { groupId } = req.params;
   const masterUserID = req.adminId;
 
@@ -729,6 +737,7 @@ exports.deleteVisibilityGroup = async (req, res) => {
     await group.destroy();
 
     await historyLogger(
+      History,
       PROGRAMS.LEAD_MANAGEMENT,
       "VISIBILITY_GROUP_DELETION",
       masterUserID,

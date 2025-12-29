@@ -15,11 +15,13 @@ const departmentSchema = Joi.object({
 // Add department
 exports.createdepartment = async (req, res) => {
   const { department_desc } = req.body;
+  const { History, AuditTrail, Department } = req.models;
 
   // Validate the request body
   const { error } = departmentSchema.validate({ department_desc });
   if (error) {
     await logAuditTrail(
+      AuditTrail,
       PROGRAMS.DEPARTMENT_MASTER, // Program ID for department management
       "CREATE_DEPARTMENT", // Mode
        req.role, // Admin ID from the authenticated request
@@ -37,6 +39,7 @@ exports.createdepartment = async (req, res) => {
       mode: "added",
     });
     await historyLogger(
+      History,
       PROGRAMS.DEPARTMENT_MASTER, // Program ID for department management
       "CREATE_DEPARTMENT", // Mode
       department.createdById, // Created by (Admin ID)
@@ -59,6 +62,7 @@ exports.createdepartment = async (req, res) => {
   } catch (error) {
     console.error("Error creating department:", error);
     await logAuditTrail(
+      AuditTrail,
       PROGRAMS.DEPARTMENT_MASTER, // Program ID for department management
       "CREATE_DEPARTMENT", // Mode
       req.role, // Admin ID from the authenticated request
@@ -73,11 +77,13 @@ exports.createdepartment = async (req, res) => {
 exports.editdepartment = async (req, res) => {
   const { departmentId } = req.params; // Use departmentId instead of id
   const { department_desc } = req.body;
+  const { History, AuditTrail, Department } = req.models;
 
   // Validate the request body
   const { error } = departmentSchema.validate({ department_desc });
   if (error) {
     await logAuditTrail(
+      AuditTrail,
       PROGRAMS.DEPARTMENT_MASTER, // Program ID for department management
       "EDIT_DEPARTMENT", // Mode
        req.role, // Admin ID from the authenticated request
@@ -91,6 +97,7 @@ exports.editdepartment = async (req, res) => {
     const department = await Department.findByPk(departmentId); // Find department by departmentId
     if (!department) {
       await logAuditTrail(
+        AuditTrail,
         PROGRAMS.DEPARTMENT_MASTER, // Program ID for department management
         "EDIT_DEPARTMENT", // Mode
          req.role, // Admin ID from the authenticated request
@@ -117,6 +124,7 @@ exports.editdepartment = async (req, res) => {
               }
             }
             await historyLogger(
+              History,
               PROGRAMS.DEPARTMENT_MASTER, // Program ID for currency management
               "EDIT_DEPARTMENT", // Mode
               department.createdById, // Admin ID from the authenticated request
@@ -138,6 +146,7 @@ exports.editdepartment = async (req, res) => {
   } catch (error) {
     console.error("Error updating department:", error);
     await logAuditTrail(
+      AuditTrail,
       PROGRAMS.DEPARTMENT_MASTER, // Program ID for country management
       "EDIT_DEPARTMENT", // Mode
       req.role, // Admin ID from the authenticated request
@@ -151,11 +160,12 @@ exports.editdepartment = async (req, res) => {
 // Delete department
 exports.deletedepartment = async (req, res) => {
   const { departmentId } = req.params; // Use departmentId instead of id
-
+  const { History, AuditTrail, Department } = req.models;
   try {
     const department = await Department.findByPk(departmentId); // Find department by departmentId
     if (!department) {
       await logAuditTrail(
+        AuditTrail,
         PROGRAMS.DEPARTMENT_MASTER, // Program ID for department management
         "DELETE_DEPARTMENT", // Mode
          req.role, // Admin ID from the authenticated request
@@ -170,6 +180,7 @@ exports.deletedepartment = async (req, res) => {
 
     await department.destroy();
     await historyLogger(
+      History,
       PROGRAMS.DEPARTMENT_MASTER, // Program ID for currency management
       "DELETE_DEPARTMENT", // Mode
       department.createdById, // Admin ID from the authenticated request
@@ -186,6 +197,7 @@ exports.deletedepartment = async (req, res) => {
   
     console.error("Error deleting department:", error);
     await logAuditTrail(
+      AuditTrail,
       PROGRAMS.DEPARTMENT_MASTER, // Program ID for country management
       "DELETE_DEPARTMENT", // Mode
       req.role, // Admin ID from the authenticated request
@@ -198,6 +210,7 @@ exports.deletedepartment = async (req, res) => {
 
 // Search, paginate, and sort departments
 exports.getdepartments = async (req, res) => {
+  const { AuditTrail, Department } = req.models;
   const {
     search,
     createdBy,
@@ -222,6 +235,7 @@ exports.getdepartments = async (req, res) => {
   const { error } = querySchema.validate(req.query);
   if (error) {
     await logAuditTrail(
+      AuditTrail,
       PROGRAMS.DEPARTMENT_MASTER, // Program ID for department management
       "GET_DEPARTMENTS", // Mode
        req.role, // Admin ID from the authenticated request
@@ -266,6 +280,7 @@ exports.getdepartments = async (req, res) => {
     });
   } catch (error) {
     await logAuditTrail(
+      AuditTrail,
       PROGRAMS.DEPARTMENT_MASTER, // Program ID for department management
       "GET_DEPARTMENTS", // Mode
        req.role, // Admin ID from the authenticated request

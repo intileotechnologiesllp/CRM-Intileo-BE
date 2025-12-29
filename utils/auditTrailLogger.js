@@ -1,6 +1,7 @@
 const AuditTrail = require("../models/reports/auditTrailModel");
 
 exports.logAuditTrail = async (
+  AuditTrail,
   programId = null,
   mode = null,
   createdBy = null,

@@ -23,6 +23,8 @@ exports.createCountry = async (req, res) => {
     }),
   });
 
+  const { History, AuditTrail, Country } = req.models;
+
   const { error } = countrySchema.validate(req.body);
   if (error) {
     return res.status(400).json({ message: error.details[0].message }); // Return validation error
@@ -42,6 +44,7 @@ exports.createCountry = async (req, res) => {
     // Get the creator ID from the country object
 
     await historyLogger(
+      History,
       PROGRAMS.COUNTRY_MASTER, // Program ID for country management
       "CREATE_COUNTRIES", // Mode
       country.createdById, // Created by (Admin ID)
@@ -54,6 +57,7 @@ exports.createCountry = async (req, res) => {
   } catch (error) {
     console.error("Error creating country:", error);
     await logAuditTrail(
+      AuditTrail,
       PROGRAMS.COUNTRY_MASTER, // Program ID for country management
       "CREATE_COUNTRIES", // Mode
       req.role, // Admin ID from the authenticated request
@@ -66,6 +70,7 @@ exports.createCountry = async (req, res) => {
 
 // Get Countries with Regions
 exports.getCountries = async (req, res) => {
+  const { History, AuditTrail, Country, Region } = req.models;
   const {
     search,
     createdBy,
@@ -90,6 +95,7 @@ exports.getCountries = async (req, res) => {
   const { error } = querySchema.validate(req.query);
   if (error) {
     await logAuditTrail(
+      AuditTrail,
       PROGRAMS.COUNTRY_MASTER, // Program ID for country management
       "GET_COUNTRIES", // Mode
       req.role, // Admin ID from the authenticated request
@@ -133,6 +139,7 @@ exports.getCountries = async (req, res) => {
   } catch (error) {
     console.error("Error fetching countries with regions:", error);
     await logAuditTrail(
+      AuditTrail,
       PROGRAMS.COUNTRY_MASTER, // Program ID for country management
       "GET_COUNTRIES", // Mode
       req.role, // Admin ID from the authenticated request
@@ -145,6 +152,7 @@ exports.getCountries = async (req, res) => {
 
 // Edit Country
 exports.editCountry = async (req, res) => {
+  const { History, AuditTrail, Country, Region } = req.models;
   const countrySchema = Joi.object({
     country_desc: Joi.string().min(3).max(100).required().messages({
       "string.empty": "Country description cannot be empty",
@@ -157,6 +165,7 @@ exports.editCountry = async (req, res) => {
   const { error } = countrySchema.validate(req.body);
   if (error) {
     await logAuditTrail(
+      AuditTrail,
       PROGRAMS.COUNTRY_MASTER, // Program ID for country management
       "EDIT_COUNTRY", // Mode
       req.role, // Admin ID from the authenticated request
@@ -173,6 +182,7 @@ exports.editCountry = async (req, res) => {
     const country = await Country.findByPk(countryID);
     if (!country) {
       await logAuditTrail(
+        AuditTrail,
         PROGRAMS.COUNTRY_MASTER, // Program ID for country management
         "EDIT_COUNTRY", // Mode
         req.role, // Admin ID from the authenticated request
@@ -205,6 +215,7 @@ exports.editCountry = async (req, res) => {
     }
 
     await historyLogger(
+      History,
       PROGRAMS.COUNTRY_MASTER, // Program ID for country management
       "EDIT_COUNTRY", // Mode
       country.createdById,
@@ -217,6 +228,7 @@ exports.editCountry = async (req, res) => {
   } catch (error) {
     console.error("Error updating country:", error);
     await logAuditTrail(
+      AuditTrail,
       PROGRAMS.COUNTRY_MASTER, // Program ID for country management
       "EDIT_COUNTRY", // Mode
       req.role, // Admin ID from the authenticated request
@@ -240,13 +252,14 @@ exports.deleteCountry = async (req, res) => {
   // if (error) {
   //   return res.status(400).json({ message: error.details[0].message }); // Return validation error
   // }
-
+  const { History, AuditTrail, Country, Region } = req.models;
   const { countryID } = req.params;
 
   try {
     const country = await Country.findByPk(countryID);
     if (!country) {
       await logAuditTrail(
+        AuditTrail,
         PROGRAMS.COUNTRY_MASTER, // Program ID for country management
         "DELETE_COUNTRY", // Mode
         req.role, // Admin ID from the authenticated request
@@ -256,6 +269,7 @@ exports.deleteCountry = async (req, res) => {
       return res.status(404).json({ message: "Country not found" });
     }
     await historyLogger(
+      History,
       PROGRAMS.COUNTRY_MASTER, // Program ID for country management
       "DELETE_COUNTRY", // Mode
       country.createdById,
@@ -272,6 +286,7 @@ exports.deleteCountry = async (req, res) => {
   } catch (error) {
     console.error("Error deleting country:", error);
     await logAuditTrail(
+      AuditTrail,
       PROGRAMS.COUNTRY_MASTER, // Program ID for country management
       "DELETE_COUNTRY", // Mode
       req.role, // Admin ID from the authenticated request
@@ -283,6 +298,7 @@ exports.deleteCountry = async (req, res) => {
 };
 
 exports.refreshCountries = async (req, res) => {
+  const { History, AuditTrail, Country, Region } = req.models;
   try {
     // const url = 'https://restcountries.com/v3.1/all';
     const url = 'https://restcountries.com/v3.1/all?fields=name,cca2,cca3'; // Fetch only necessary fields
@@ -319,6 +335,7 @@ exports.refreshCountries = async (req, res) => {
 
 // GET /api/countries?q= - autocomplete by prefix
 exports.searchCountries = async (req, res) => {
+  const { History, AuditTrail, Country, Region } = req.models;
   const country = (req.query.country || '').trim();
   if (!country) return res.status(400).json({ message: 'Query required.' });
   try {

@@ -15,11 +15,12 @@ const designationSchema = Joi.object({
 // Add Designation
 exports.createDesignation = async (req, res) => {
   const { designation_desc } = req.body;
-  
+  const { History, AuditTrail, Designation } = req.models;
   // Validate the request body
   const { error } = designationSchema.validate({ designation_desc });
   if (error) {
     await logAuditTrail(
+      AuditTrail,
       PROGRAMS.DESIGNATION_MASTER, // Program ID for designation management
       "CREATE_DESIGNATION", // Mode
        req.role, // Admin ID from the authenticated request
@@ -38,6 +39,7 @@ exports.createDesignation = async (req, res) => {
       mode: "added"
     });
     await historyLogger(
+      History,
       PROGRAMS.DESIGNATION_MASTER, // Program ID for department management
       "CREATE_DESIGNATION", // Mode
       designation.createdById, // Created by (Admin ID)
@@ -59,6 +61,7 @@ exports.createDesignation = async (req, res) => {
     });
   } catch (error) {
     await logAuditTrail(
+      AuditTrail,
       PROGRAMS.DESIGNATION_MASTER, // Program ID for department management
       "CREATE_DESIGNATION", // Mode
        req.role, // Admin ID from the authenticated request
@@ -75,11 +78,12 @@ exports.createDesignation = async (req, res) => {
 exports.editDesignation = async (req, res) => {
   const { designationId } = req.params; // Use designationId instead of id
   const { designation_desc } = req.body;
-
+  const { History, AuditTrail, Designation } = req.models;
   // Validate the request body
   const { error } = designationSchema.validate({ designation_desc });
   if (error) {
     await logAuditTrail(
+      AuditTrail,
       PROGRAMS.DESIGNATION_MASTER, // Program ID for designation management
       "EDIT_DESIGNATION", // Mode
        req.role, // Admin ID from the authenticated request
@@ -93,6 +97,7 @@ exports.editDesignation = async (req, res) => {
     const designation = await Designation.findByPk(designationId); // Find designation by designationId
     if (!designation) {
       await logAuditTrail(
+        AuditTrail,
         PROGRAMS.DESIGNATION_MASTER, // Program ID for designation management
         "EDIT_DESIGNATION", // Mode
          req.role, // Admin ID from the authenticated request
@@ -120,6 +125,7 @@ exports.editDesignation = async (req, res) => {
       }
     }
     await historyLogger(
+      History,
       PROGRAMS.DESIGNATION_MASTER, // Program ID for currency management
       "EDIT_DESIGNATION", // Mode
       designation.createdById, // Admin ID from the authenticated request
@@ -140,6 +146,7 @@ exports.editDesignation = async (req, res) => {
     });
   } catch (error) {
     await logAuditTrail(
+      AuditTrail,
       PROGRAMS.DESIGNATION_MASTER, // Program ID for department management
       "EDIT_DESIGNATION", // Mode
        req.role, // Admin ID from the authenticated request
@@ -154,11 +161,12 @@ exports.editDesignation = async (req, res) => {
 // Delete Designation
 exports.deleteDesignation = async (req, res) => {
   const { designationId } = req.params; // Use designationId instead of id
-
+  const { History, AuditTrail, Designation } = req.models;
   try {
     const designation = await Designation.findByPk(designationId); // Find designation by designationId
     if (!designation) {
       await logAuditTrail(
+        AuditTrail,
         PROGRAMS.DESIGNATION_MASTER, // Program ID for designation management
         "DELETE_DESIGNATION", // Mode
          req.role, // Admin ID from the authenticated request
@@ -173,6 +181,7 @@ exports.deleteDesignation = async (req, res) => {
 
     await designation.destroy();
     await historyLogger(
+      History,
       PROGRAMS.DESIGNATION_MASTER, // Program ID for currency management
       "DELETE_DESIGNATION", // Mode
       designation.createdById, // Admin ID from the authenticated request
@@ -187,6 +196,7 @@ exports.deleteDesignation = async (req, res) => {
     });
   } catch (error) {
     await logAuditTrail(
+      AuditTrail,
       PROGRAMS.DESIGNATION_MASTER, // Program ID for department management
       "DELETE_DESIGNATION", // Mode
        req.role, // Admin ID from the authenticated request
@@ -209,7 +219,7 @@ exports.getDesignations = async (req, res) => {
     sortBy = "creationDate",
     order = "DESC",
   } = req.query;
-
+ const { History, AuditTrail, Designation } = req.models;
   // Validate query parameters using Joi
   const querySchema = Joi.object({
     search: Joi.string().optional(),
@@ -224,6 +234,7 @@ exports.getDesignations = async (req, res) => {
   const { error } = querySchema.validate(req.query);
   if (error) {
     await logAuditTrail(
+      AuditTrail,
       PROGRAMS.DESIGNATION_MASTER, // Program ID for designation management
       "GET_DESIGNATIONS", // Mode
        req.role, // Admin ID from the authenticated request
@@ -267,6 +278,7 @@ exports.getDesignations = async (req, res) => {
     });
   } catch (error) {
     await logAuditTrail(
+      AuditTrail,
       PROGRAMS.DESIGNATION_MASTER, // Program ID for designation management
       "GET_DESIGNATIONS", // Mode
        req.role, // Admin ID from the authenticated request
