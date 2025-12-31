@@ -13,7 +13,7 @@ const SchedulingLink = sequelize.define(
     masterUserID: {
       type: DataTypes.INTEGER,
       allowNull: false,
-      references: { model: "masterusers", key: "masterUserID" },
+      references: { model: MasterUser, key: "masterUserID" },
       onDelete: "CASCADE",
     },
     uniqueToken: {
@@ -156,6 +156,8 @@ MasterUser.hasMany(SchedulingLink, {
   foreignKey: "masterUserID",
   as: "schedulingLinks",
 });
+
+SchedulingLink.sync({alter: false});
 
 module.exports = SchedulingLink;
 
