@@ -18,7 +18,10 @@ const formSubmitLimiter = rateLimit({
 // Get embed script (external JS file - Zoho/HubSpot style)
 router.get("/embed/:uniqueKey.js", webFormEmbedController.getEmbedScript);
 
-// Get form configuration
+// Render form as HTML (for iframe embedding)
+router.get("/:uniqueKey/render", webFormEmbedController.renderFormPage);
+
+// Get form configuration (JSON API)
 router.get("/:uniqueKey", webFormPublicController.getPublicForm);
 
 // Submit form

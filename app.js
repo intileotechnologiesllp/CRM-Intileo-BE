@@ -79,19 +79,19 @@ const http = require('http');
 // const { initRabbitMQ } = require("./services/rabbitmqService");
 const app = express();
 const server = http.createServer(app); // Create HTTP server for Socket.IO
-// 🔐 Allow embedding in iframe (for CRM webforms)
-app.use((req, res, next) => {
-  // Remove legacy iframe blocking
-  res.removeHeader('X-Frame-Options');
+// // 🔐 Allow embedding in iframe (for CRM webforms)
+// app.use((req, res, next) => {
+//   // Remove legacy iframe blocking
+//   res.removeHeader('X-Frame-Options');
 
-  // Allow iframe embedding from any domain (for embed forms)
-  res.setHeader(
-    'Content-Security-Policy',
-    'frame-ancestors *'
-  );
+//   // Allow iframe embedding from any domain (for embed forms)
+//   res.setHeader(
+//     'Content-Security-Policy',
+//     'frame-ancestors *'
+//   );
 
-  next();
-});
+//   next();
+// });
 require("./utils/cronJob.js");
 // REMOVED: Email queue workers are now handled by dedicated PM2 processes
 // require("./utils/emailQueueWorker");
@@ -107,11 +107,13 @@ const cors = require("cors");
 app.use(cors());
 // Middleware
 app.use(express.json());
-app.use((req, res, next) => {
-  res.setHeader(
-    "Content-Security-Policy",
-    "frame-ancestors *"
-  );
+
+// 🔐 ONLY allow iframe embedding for /embed-form routes (not all routes)
+app.use("/embed-form", (req, res, next) => {
+  // Remove X-Frame-Options to allow iframe embedding
+  res.removeHeader('X-Frame-Options');
+  // Allow iframe embedding from any domain for embed forms
+  res.setHeader('Content-Security-Policy', 'frame-ancestors *');
   next();
 });
 
@@ -201,6 +203,7 @@ app.use('/api/meetings', meetingRoutes); // Register meeting routes
 app.use('/api/meetings/scheduling-links', schedulingLinkRoutes); // Register scheduling link routes
 app.use('/api/webforms', webFormRoutes); // Register web form admin routes
 app.use('/api/public/webforms', webFormPublicRoutes); // Register web form public routes (no auth)
+app.use('/embed-form', webFormPublicRoutes); // Register embed form route (for iframe embedding)
 app.use('/api/merge', mergeRoutes); // Register merge routes
 
 // Public scheduling link routes (must be registered separately for public access)

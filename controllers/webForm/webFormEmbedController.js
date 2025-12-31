@@ -364,4 +364,311 @@ exports.getEmbedScript = async (req, res) => {
   }
 };
 
+/**
+ * Render form as standalone HTML page (for iframe embedding)
+ * @route GET /embed-form/:uniqueKey/render
+ */
+exports.renderFormPage = async (req, res) => {
+  try {
+    const { uniqueKey } = req.params;
+
+    // Get form configuration
+    const form = await WebForm.findOne({
+      where: { uniqueKey, status: "active" },
+      include: [
+        {
+          model: WebFormField,
+          as: "fields",
+          order: [["fieldOrder", "ASC"]],
+        },
+      ],
+    });
+
+    if (!form) {
+      return res.status(404).send(`
+        <!DOCTYPE html>
+        <html>
+        <head>
+          <meta charset="UTF-8">
+          <meta name="viewport" content="width=device-width, initial-scale=1.0">
+          <title>Form Not Found</title>
+          <style>
+            body { font-family: Arial, sans-serif; display: flex; align-items: center; justify-content: center; height: 100vh; margin: 0; background: #f5f5f5; }
+            .error { text-align: center; padding: 40px; background: white; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+            h1 { color: #e53e3e; }
+          </style>
+        </head>
+        <body>
+          <div class="error">
+            <h1>❌ Form Not Found</h1>
+            <p>This form does not exist or is no longer active.</p>
+          </div>
+        </body>
+        </html>
+      `);
+    }
+
+    // Parse field options
+    const formData = form.toJSON();
+    if (formData.fields) {
+      formData.fields = formData.fields.map((field) => {
+        if (field.options) {
+          try {
+            field.options = JSON.parse(field.options);
+          } catch (e) {
+            field.options = [];
+          }
+        }
+        return field;
+      });
+    }
+
+    const primaryColor = formData.primaryColor || '#4CAF50';
+    const buttonText = formData.buttonText || 'Submit';
+
+    // Build HTML form
+    let fieldsHtml = '';
+    formData.fields.forEach(field => {
+      const required = field.isRequired ? 'required' : '';
+      const requiredMark = field.isRequired ? '<span style="color: red;">*</span>' : '';
+      
+      fieldsHtml += `<div class="form-field">`;
+      fieldsHtml += `<label>${escapeHtml(field.fieldLabel)} ${requiredMark}</label>`;
+      
+      if (field.fieldType === 'textarea') {
+        fieldsHtml += `<textarea name="${field.fieldName}" placeholder="${escapeHtml(field.placeholder || '')}" ${required}></textarea>`;
+      } else if (field.fieldType === 'select') {
+        fieldsHtml += `<select name="${field.fieldName}" ${required}>`;
+        fieldsHtml += `<option value="">Select...</option>`;
+        if (field.options && Array.isArray(field.options)) {
+          field.options.forEach(opt => {
+            fieldsHtml += `<option value="${escapeHtml(opt)}">${escapeHtml(opt)}</option>`;
+          });
+        }
+        fieldsHtml += `</select>`;
+      } else {
+        fieldsHtml += `<input type="${field.fieldType}" name="${field.fieldName}" placeholder="${escapeHtml(field.placeholder || '')}" ${required}>`;
+      }
+      
+      fieldsHtml += `</div>`;
+    });
+
+    // Send complete HTML page
+    res.send(`
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>${escapeHtml(formData.formTitle || 'Web Form')}</title>
+        <style>
+          * { box-sizing: border-box; }
+          body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background: #f5f5f5;
+          }
+          .form-container {
+            max-width: 600px;
+            margin: 0 auto;
+            background: white;
+            padding: 30px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+          }
+          h1 {
+            color: #333;
+            margin: 0 0 10px 0;
+            font-size: 24px;
+          }
+          .description {
+            color: #666;
+            margin-bottom: 30px;
+            line-height: 1.5;
+          }
+          .form-field {
+            margin-bottom: 20px;
+          }
+          label {
+            display: block;
+            font-weight: 500;
+            margin-bottom: 8px;
+            color: #374151;
+          }
+          input, textarea, select {
+            width: 100%;
+            padding: 12px;
+            border: 1px solid #d1d5db;
+            border-radius: 6px;
+            font-size: 14px;
+            font-family: inherit;
+            transition: border-color 0.2s;
+          }
+          input:focus, textarea:focus, select:focus {
+            outline: none;
+            border-color: ${primaryColor};
+          }
+          textarea {
+            min-height: 100px;
+            resize: vertical;
+          }
+          button {
+            width: 100%;
+            padding: 14px;
+            background: ${primaryColor};
+            color: white;
+            border: none;
+            border-radius: 6px;
+            font-size: 16px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: opacity 0.2s;
+          }
+          button:hover {
+            opacity: 0.9;
+          }
+          button:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+          }
+          .success-message {
+            display: none;
+            padding: 20px;
+            background: #d4edda;
+            color: #155724;
+            border-radius: 6px;
+            margin-top: 20px;
+            text-align: center;
+          }
+          .error-message {
+            display: none;
+            padding: 20px;
+            background: #f8d7da;
+            color: #721c24;
+            border-radius: 6px;
+            margin-top: 20px;
+          }
+        </style>
+      </head>
+      <body>
+        <div class="form-container">
+          <h1>${escapeHtml(formData.formTitle || 'Contact Form')}</h1>
+          ${formData.formDescription ? `<p class="description">${escapeHtml(formData.formDescription)}</p>` : ''}
+          
+          <form id="webform" onsubmit="submitForm(event)">
+            ${fieldsHtml}
+            
+            <button type="submit" id="submitBtn">${escapeHtml(buttonText)}</button>
+          </form>
+
+          <div id="successMessage" class="success-message">
+            ${escapeHtml(formData.successMessage || 'Thank you! Your form has been submitted successfully.')}
+          </div>
+          
+          <div id="errorMessage" class="error-message"></div>
+        </div>
+
+        <script>
+          async function submitForm(e) {
+            e.preventDefault();
+            
+            const form = document.getElementById('webform');
+            const submitBtn = document.getElementById('submitBtn');
+            const successMsg = document.getElementById('successMessage');
+            const errorMsg = document.getElementById('errorMessage');
+            
+            // Disable button
+            submitBtn.disabled = true;
+            submitBtn.textContent = 'Submitting...';
+            
+            // Collect form data
+            const formData = {};
+            new FormData(form).forEach((value, key) => {
+              formData[key] = value;
+            });
+            
+            try {
+              const response = await fetch('${req.protocol}://${req.get('host')}/embed-form/${uniqueKey}/submit', {
+                method: 'POST',
+                headers: {
+                  'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                  formData,
+                  sourceUrl: window.location.href,
+                  referrerUrl: document.referrer
+                })
+              });
+              
+              const result = await response.json();
+              
+              if (result.success) {
+                form.style.display = 'none';
+                successMsg.style.display = 'block';
+                
+                // Redirect if URL is set
+                ${formData.redirectUrl ? `setTimeout(() => { window.location.href = '${formData.redirectUrl}'; }, 2000);` : ''}
+              } else {
+                errorMsg.textContent = result.message || 'An error occurred. Please try again.';
+                errorMsg.style.display = 'block';
+                submitBtn.disabled = false;
+                submitBtn.textContent = '${escapeHtml(buttonText)}';
+              }
+            } catch (error) {
+              errorMsg.textContent = 'Network error. Please check your connection and try again.';
+              errorMsg.style.display = 'block';
+              submitBtn.disabled = false;
+              submitBtn.textContent = '${escapeHtml(buttonText)}';
+            }
+          }
+          
+          // Helper function to escape HTML
+          function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+          }
+        </script>
+      </body>
+      </html>
+    `);
+  } catch (error) {
+    console.error("Error rendering form page:", error);
+    res.status(500).send(`
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <meta charset="UTF-8">
+        <title>Error</title>
+        <style>
+          body { font-family: Arial; display: flex; align-items: center; justify-content: center; height: 100vh; margin: 0; background: #f5f5f5; }
+          .error { text-align: center; padding: 40px; background: white; border-radius: 8px; }
+        </style>
+      </head>
+      <body>
+        <div class="error">
+          <h1>❌ Error Loading Form</h1>
+          <p>${error.message}</p>
+        </div>
+      </body>
+      </html>
+    `);
+  }
+};
+
+// Helper function to escape HTML
+function escapeHtml(text) {
+  if (!text) return '';
+  const map = {
+    '&': '&amp;',
+    '<': '&lt;',
+    '>': '&gt;',
+    '"': '&quot;',
+    "'": '&#039;'
+  };
+  return String(text).replace(/[&<>"']/g, m => map[m]);
+}
+
 module.exports = exports;
+
