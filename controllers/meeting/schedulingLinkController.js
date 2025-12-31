@@ -58,6 +58,7 @@ exports.createOrUpdateLink = async (req, res) => {
  */
 exports.getUserLinks = async (req, res) => {
   try {
+    console.log("Fetching scheduling links for user");
     const masterUserID = req.adminId || req.user?.id;
     if (!masterUserID) {
       return res.status(401).json({ message: "Unauthorized" });
@@ -92,10 +93,10 @@ exports.getUserLinks = async (req, res) => {
  */
 exports.getLinkById = async (req, res) => {
   try {
-    const masterUserID = req.adminId || req.user?.id;
-    if (!masterUserID) {
-      return res.status(401).json({ message: "Unauthorized" });
-    }
+    // const masterUserID = req.adminId || req.user?.id;
+    // if (!masterUserID) {
+    //   return res.status(401).json({ message: "Unauthorized" });
+    // }
 
     const { id } = req.params;
     const link = await SchedulingLink.findOne(
@@ -111,19 +112,20 @@ exports.getLinkById = async (req, res) => {
       }
     );
 
-    if (!link || link.masterUserID !== masterUserID) {
-      return res.status(404).json({ message: "Scheduling link not found" });
-    }
+    // if (!link || link.masterUserID !== masterUserID) {
+    //   return res.status(404).json({ message: "Scheduling link not found" });
+    // }
 
     const bookingUrl = `${
       process.env.FRONTEND_URL || "http://localhost:3000"
     }/book/${link.uniqueToken}`;
 
     res.json({
-      link: {
-        ...link.toJSON(),
-        bookingUrl,
-      },
+      // link: {
+      //   ...link.toJSON(),
+      //   bookingUrl,
+      // },
+      dates: JSON.parse(JSON.parse(link.workingHours))
     });
   } catch (error) {
     console.error("Error fetching scheduling link:", error);
@@ -431,3 +433,28 @@ exports.bookGoogleMeet = async (req, res) => {
     });
   }
 };
+
+exports.getTimeSlots = async (req, res) =>{
+  try{
+    const { id, date } = req.query;
+
+    const availableSlots = await SchedulingLink.findOne({ where: { uniqueToken: id } });  
+
+    // console
+    const workingHours = await JSON.parse(availableSlots.workingHours);
+    
+    const works = JSON.parse(workingHours);
+
+    const slots = await works[date];
+    res.status(200).json({
+      message: "Time slots retrieved successfully",
+      slots: slots,
+    });
+  }catch(error){
+    console.error("Error getting time slots:", error);
+    res.status(500).json({
+      message: "Failed to get time slots",
+      error: error.message,
+    });
+  }
+}
