@@ -246,6 +246,7 @@ exports.createLead = async (req, res) => {
     });
     if (existingContactOrgTitleLead) {
       return res.status(409).json({
+        statusCode: 409,
         message:
           "A lead with this exact combination of contact person, organization, and title already exists. Please use a different title for a new project with the same contact.",
         existingLeadId: existingContactOrgTitleLead.leadId,
@@ -269,6 +270,7 @@ exports.createLead = async (req, res) => {
         null
       );
       return res.status(403).json({
+        statusCode: 403,
         message: "Access denied. You do not have permission to create leads.",
       });
     }
@@ -314,6 +316,7 @@ exports.createLead = async (req, res) => {
             null
           );
           return res.status(403).json({
+            statusCode: 403,
             message:
               "Access denied. Your visibility group does not have permission to create leads.",
           });
@@ -342,7 +345,10 @@ exports.createLead = async (req, res) => {
     if (organization && organization.trim() !== "" && (!orgRecord || !orgRecord.leadOrganizationId)) {
       return res
         .status(500)
-        .json({ message: "Failed to create/find organization." });
+        .json({ 
+          statusCode: 500,
+          message: "Failed to create/find organization." 
+        });
     }
     
     // 2. Find or create Person (linked to organization if available)
@@ -644,6 +650,7 @@ exports.createLead = async (req, res) => {
     };
 
     const response = {
+      statusCode: 201,
       message: activityId 
         ? "Lead created and linked to activity successfully" 
         : "Lead created successfully",
@@ -670,7 +677,10 @@ exports.createLead = async (req, res) => {
       "Error creating lead: " + error.message, // Error description
       null
     );
-    res.status(500).json(error);
+    res.status(500).json({
+      statusCode: 500,
+      error: error.message
+    });
   }
 };
 
