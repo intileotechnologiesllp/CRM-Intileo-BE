@@ -79,6 +79,19 @@ const http = require('http');
 // const { initRabbitMQ } = require("./services/rabbitmqService");
 const app = express();
 const server = http.createServer(app); // Create HTTP server for Socket.IO
+// 🔐 Allow embedding in iframe (for CRM webforms)
+app.use((req, res, next) => {
+  // Remove legacy iframe blocking
+  res.removeHeader('X-Frame-Options');
+
+  // Allow iframe embedding from any domain (for embed forms)
+  res.setHeader(
+    'Content-Security-Policy',
+    'frame-ancestors *'
+  );
+
+  next();
+});
 require("./utils/cronJob.js");
 // REMOVED: Email queue workers are now handled by dedicated PM2 processes
 // require("./utils/emailQueueWorker");
