@@ -17,18 +17,21 @@ exports.connectDrive = async (req, res) => {
 exports.googleCallback = async (req, res) => {
   const userId = req.adminId; // assume JWT auth
   const { code } = req.query;
+  const { UserGoogleToken } = req.models;
 
-  const oauth2Client = await createOAuthClient();
+  const oauth2Client = await createOAuthClient(userId, UserGoogleToken);
   const { tokens } = await oauth2Client.getToken(code);
-  await saveTokens(userId, tokens);
+  await saveTokens(userId, tokens, UserGoogleToken);
 
   res.send("Google Drive Connected Successfully!");
 };
 
 exports.uploadFileToDrive = async (req, res) => {
+  const { UserGoogleToken } = req.models;
+
   try {
     const userId = req.adminId; // Authenticated CRM user
-    const oauth2Client = await createOAuthClient(userId);
+    const oauth2Client = await createOAuthClient(userId, UserGoogleToken);
     const drive = google.drive({ version: "v3", auth: oauth2Client });
 
     const fileMetadata = { name: req.file.originalname };
@@ -58,10 +61,11 @@ exports.uploadFileToDrive = async (req, res) => {
 };
 
 exports.listDriveFiles = async (req, res) => {
+  const { UserGoogleToken } = req.models;
   try {
     const userId = req.adminId; // Authenticated CRM user
     console.log("USER ID HERE", userId);
-    const oauth2Client = await createOAuthClient(userId);
+    const oauth2Client = await createOAuthClient(userId, UserGoogleToken);
 
     const drive = google.drive({ version: "v3", auth: oauth2Client });
 
@@ -94,9 +98,10 @@ exports.listDriveFiles = async (req, res) => {
 };
 
 exports.deletefile = async (req, res) => {
+  const { UserGoogleToken } = req.models;
   try {
     const userId = req.adminId; // Authenticated CRM user
-    const oauth2Client = await createOAuthClient(userId);
+    const oauth2Client = await createOAuthClient(userId, UserGoogleToken);
 
     const drive = google.drive({ version: "v3", auth: oauth2Client });
 
@@ -114,7 +119,7 @@ exports.deletefile = async (req, res) => {
   }
 };
 
-const createOAuthClient = async (userId) => {
+const createOAuthClient = async (userId, UserGoogleToken) => {
   const oauth2Client = new google.auth.OAuth2(
     CLIENT_ID,
     CLIENT_SECRET,
@@ -156,7 +161,7 @@ const getAuthUrl = () => {
   });
 };
 
-const saveTokens = async (userId, tokens) => {
+const saveTokens = async (userId, tokens, UserGoogleToken) => {
   await UserGoogleToken.upsert({
     userId,
     accessToken: tokens.access_token,

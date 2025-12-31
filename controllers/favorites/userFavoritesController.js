@@ -8,6 +8,8 @@ const PROGRAMS = require("../../utils/programConstants");
  * Add a user to favorites
  */
 exports.addUserToFavorites = async (req, res) => {
+  const { MasterUser, UserFavorites, AuditTrail, History } = req.models;
+
   try {
     const { favoriteUserId, nickname } = req.body;
     const userId = req.adminId;
@@ -61,6 +63,7 @@ exports.addUserToFavorites = async (req, res) => {
 
         // Log audit trail for reactivation
         await logAuditTrail(
+          AuditTrail,
           PROGRAMS.LEAD_MANAGEMENT,
           "REACTIVATE_USER_FAVORITE",
           userId,
@@ -92,6 +95,7 @@ exports.addUserToFavorites = async (req, res) => {
 
     // Log audit trail
     await logAuditTrail(
+      AuditTrail,
       PROGRAMS.LEAD_MANAGEMENT,
       "ADD_USER_TO_FAVORITES",
       userId,
@@ -123,6 +127,7 @@ exports.addUserToFavorites = async (req, res) => {
  * Remove a user from favorites
  */
 exports.removeUserFromFavorites = async (req, res) => {
+  const { MasterUser, UserFavorites, AuditTrail, History } = req.models;
   try {
     const { favoriteUserId } = req.params;
     const userId = req.adminId;
@@ -147,6 +152,7 @@ exports.removeUserFromFavorites = async (req, res) => {
 
     // Log audit trail
     await logAuditTrail(
+      AuditTrail,
       PROGRAMS.LEAD_MANAGEMENT,
       "REMOVE_USER_FROM_FAVORITES",
       userId,
@@ -176,6 +182,7 @@ exports.removeUserFromFavorites = async (req, res) => {
  * Get all favorite users for current user
  */
 exports.getFavoriteUsers = async (req, res) => {
+  const { MasterUser, UserFavorites, AuditTrail, History } = req.models;
   try {
     const userId = req.adminId;
 
@@ -233,6 +240,7 @@ exports.getFavoriteUsers = async (req, res) => {
  * Update favorite user nickname
  */
 exports.updateFavoriteNickname = async (req, res) => {
+  const { MasterUser, UserFavorites, AuditTrail, History } = req.models;
   try {
     const { favoriteId } = req.params;
     const { nickname } = req.body;
@@ -258,6 +266,7 @@ exports.updateFavoriteNickname = async (req, res) => {
 
     // Log audit trail
     await logAuditTrail(
+      AuditTrail,
       PROGRAMS.LEAD_MANAGEMENT,
       "UPDATE_FAVORITE_NICKNAME",
       userId,

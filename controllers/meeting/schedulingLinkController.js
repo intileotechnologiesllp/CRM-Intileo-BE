@@ -9,6 +9,7 @@ const googleCalendarService = require("../../services/googleCalendarService");
  * PUT /api/meetings/scheduling-links/:id
  */
 exports.createOrUpdateLink = async (req, res) => {
+  const { SchedulingLink,  MasterUser } = req.models;
   try {
     const masterUserID = req.adminId || req.user?.id;
     if (!masterUserID) {
@@ -46,6 +47,7 @@ exports.createOrUpdateLink = async (req, res) => {
  * GET /api/meetings/scheduling-links
  */
 exports.getUserLinks = async (req, res) => {
+  const { SchedulingLink,  MasterUser } = req.models;
   try {
     const masterUserID = req.adminId || req.user?.id;
     if (!masterUserID) {
@@ -78,6 +80,7 @@ exports.getUserLinks = async (req, res) => {
  * GET /api/meetings/scheduling-links/:id
  */
 exports.getLinkById = async (req, res) => {
+  const { SchedulingLink,  MasterUser } = req.models;
   try {
     const masterUserID = req.adminId || req.user?.id;
     if (!masterUserID) {
@@ -115,6 +118,7 @@ exports.getLinkById = async (req, res) => {
  * DELETE /api/meetings/scheduling-links/:id
  */
 exports.deleteLink = async (req, res) => {
+  const { SchedulingLink,  MasterUser } = req.models;
   try {
     const masterUserID = req.adminId || req.user?.id;
     if (!masterUserID) {
@@ -145,6 +149,7 @@ exports.deleteLink = async (req, res) => {
  * - timezone (optional): Timezone for date formatting (default: link timezone)
  */
 exports.getAvailableSlotsPublic = async (req, res) => {
+  const { SchedulingLink,  MasterUser } = req.models;
   try {
     const { token } = req.params;
     const { startDate, endDate, groupByDate, timezone } = req.query;
@@ -257,6 +262,7 @@ exports.getAvailableSlotsPublic = async (req, res) => {
  * GET /api/meetings/scheduling/:token
  */
 exports.getLinkDetailsPublic = async (req, res) => {
+  const { SchedulingLink,  MasterUser } = req.models;
   try {
     const { token } = req.params;
 
@@ -289,6 +295,7 @@ exports.getLinkDetailsPublic = async (req, res) => {
  * POST /api/meetings/scheduling/:token/book
  */
 exports.bookMeeting = async (req, res) => {
+  const { SchedulingLink,  MasterUser } = req.models;
   try {
     const { token } = req.params;
     const {

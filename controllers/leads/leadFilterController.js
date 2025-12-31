@@ -11,7 +11,10 @@ const { Person } = require("../../models");
 const Organization = require("../../models/leads/leadOrganizationModel");
 const Product = require("../../models/product/productModel");
 const DealProduct = require("../../models/product/dealProductModel");
+
+
 exports.saveLeadFilter = async (req, res) => {
+  const {LeadFilter, Lead, CustomField, LeadDetail, LeadPerson, LeadOrganization, Product, DealProduct, History, AuditTrail} = req.models;
   const {
     filterName,
     filterConfig,
@@ -67,7 +70,9 @@ exports.saveLeadFilter = async (req, res) => {
     res.status(500).json({ message: "Internal server error" });
   }
 };
+
 exports.getLeadFilters = async (req, res) => {
+  const {LeadFilter, Lead, CustomField, LeadDetail, LeadPerson, LeadOrganization, Product, DealProduct, History, AuditTrail} = req.models;
   const masterUserID = req.adminId; // or req.user.id
   const { entityType, filterEntityType } = req.query; // Added filterEntityType parameter
   try {
@@ -143,6 +148,7 @@ exports.getLeadFilters = async (req, res) => {
 };
 
 exports.useFilters = async (req, res) => {
+  const {LeadFilter, Lead, CustomField, LeadDetail, LeadPerson, LeadOrganization, Product, DealProduct, History, AuditTrail} = req.models;
   const { filterId } = req.params;
 
   try {
@@ -171,9 +177,9 @@ exports.useFilters = async (req, res) => {
       leadDetailsWhere[Op.and] = [];
       all.forEach((cond) => {
         if (leadDetailsFields.includes(cond.field)) {
-          leadDetailsWhere[Op.and].push(buildCondition(cond));
+          leadDetailsWhere[Op.and].push(buildCondition(cond, Lead, LeadDetail));
         } else {
-          where[Op.and].push(buildCondition(cond));
+          where[Op.and].push(buildCondition(cond, Lead, LeadDetail));
         }
       });
       if (where[Op.and].length === 0) delete where[Op.and];
@@ -185,9 +191,9 @@ exports.useFilters = async (req, res) => {
       leadDetailsWhere[Op.or] = [];
       any.forEach((cond) => {
         if (leadDetailsFields.includes(cond.field)) {
-          leadDetailsWhere[Op.or].push(buildCondition(cond));
+          leadDetailsWhere[Op.or].push(buildCondition(cond, Lead, LeadDetail));
         } else {
-          where[Op.or].push(buildCondition(cond));
+          where[Op.or].push(buildCondition(cond, Lead, LeadDetail));
         }
       });
       if (where[Op.or].length === 0) delete where[Op.or];
@@ -198,7 +204,7 @@ exports.useFilters = async (req, res) => {
     const include = [];
     if (Object.keys(leadDetailsWhere).length > 0) {
       include.push({
-        model: LeadDetails,
+        model: LeadDetail,
         as: "leadDetails", // Use the correct alias if you have one
         where: leadDetailsWhere,
         required: true,
@@ -217,6 +223,7 @@ exports.useFilters = async (req, res) => {
     res.status(500).json({ message: "Internal server error" });
   }
 };
+
 // Operator label to backend key mapping
 const operatorMap = {
   is: "eq",
@@ -229,8 +236,9 @@ const operatorMap = {
   "is later than": "gt",
   // Add more mappings if needed
 };
+
 // Helper to build a single condition
-function buildCondition(cond) {
+function buildCondition(cond, Lead, LeadDetail) {
   const ops = {
     eq: Op.eq,
     ne: Op.ne,
@@ -266,7 +274,7 @@ function buildCondition(cond) {
     .filter(([_, attr]) => attr.type && attr.type.key === "DATE")
     .map(([key]) => key);
 
-  const leadDetailsDateFields = Object.entries(LeadDetails.rawAttributes)
+  const leadDetailsDateFields = Object.entries(LeadDetail.rawAttributes)
     .filter(([_, attr]) => attr.type && attr.type.key === "DATE")
     .map(([key]) => key);
 
@@ -326,8 +334,10 @@ function buildCondition(cond) {
       [ops[operator] || Op.eq]: cond.value,
     },
   };
-}
+};
+
 exports.updateLeadFilter = async (req, res) => {
+  const {LeadFilter, Lead, CustomField, LeadDetail, LeadPerson, LeadOrganization, Product, DealProduct, History, AuditTrail} = req.models;
   const { filterId } = req.params;
   const { filterName, filterConfig, visibility, columns, filterEntityType } = req.body;
   const masterUserID = req.adminId; // or req.user.id
@@ -386,7 +396,9 @@ exports.updateLeadFilter = async (req, res) => {
     res.status(500).json({ message: "Internal server error" });
   }
 };
+
 exports.getLeadFields = async (req, res) => {
+  const {LeadFilter, Lead, CustomField, LeadDetail, LeadPerson, LeadOrganization, Product, DealProduct, History, AuditTrail} = req.models;
   try {
     const fields = [];
     
@@ -521,6 +533,7 @@ exports.getLeadFields = async (req, res) => {
 };
 
 exports.getAllLeadContactPersons = async (req, res) => {
+  const {LeadFilter, Lead, CustomField, LeadDetail, LeadPerson : Person, LeadOrganization : Organization, Product, DealProduct, History, AuditTrail} = req.models;
   try {
     const { page = 1, limit = 100, search = "" } = req.query;
     const offset = (parseInt(page) - 1) * parseInt(limit);
@@ -558,6 +571,7 @@ exports.getAllLeadContactPersons = async (req, res) => {
  * Similar to getLeadFields but for Product and DealProduct entities
  */
 exports.getProductFields = async (req, res) => {
+  const {LeadFilter, Lead, CustomField, LeadDetail, LeadPerson, LeadOrganization, Product, DealProduct, History, AuditTrail} = req.models;
   try {
     const fields = [];
     
@@ -763,6 +777,7 @@ exports.getProductFields = async (req, res) => {
  * Add filter to favorites (mark as favorite)
  */
 exports.addFilterToFavorites = async (req, res) => {
+  const {LeadFilter, Lead, CustomField, LeadDetail, LeadPerson, LeadOrganization, Product, DealProduct, History, AuditTrail} = req.models;
   try {
     const { filterId } = req.params;
     const { filterEntityType } = req.query; // Get expected entity type from query params
@@ -816,6 +831,7 @@ exports.addFilterToFavorites = async (req, res) => {
 
     // Log audit trail
     await logAuditTrail(
+      AuditTrail,
       PROGRAMS.LEAD_MANAGEMENT,
       "ADD_FILTER_TO_FAVORITES",
       masterUserID,
@@ -874,6 +890,7 @@ exports.addFilterToFavorites = async (req, res) => {
  * Remove filter from favorites (unmark as favorite)
  */
 exports.removeFilterFromFavorites = async (req, res) => {
+  const {LeadFilter, Lead, CustomField, LeadDetail, LeadPerson, LeadOrganization, Product, DealProduct, History, AuditTrail} = req.models;
   try {
     const { filterId } = req.params;
     const { filterEntityType } = req.query; // Get expected entity type from query params
@@ -926,6 +943,7 @@ exports.removeFilterFromFavorites = async (req, res) => {
 
     // Log audit trail
     await logAuditTrail(
+      AuditTrail,
       PROGRAMS.LEAD_MANAGEMENT,
       "REMOVE_FILTER_FROM_FAVORITES",
       masterUserID,
@@ -984,6 +1002,7 @@ exports.removeFilterFromFavorites = async (req, res) => {
  * Get all favorite filters
  */
 exports.getFavoriteFilters = async (req, res) => {
+  const {LeadFilter, Lead, CustomField, LeadDetail, LeadPerson, MasterUser, LeadOrganization, Product, DealProduct, History, AuditTrail} = req.models;
   try {
     const masterUserID = req.adminId;
     const { filterEntityType } = req.query;
@@ -1012,7 +1031,7 @@ exports.getFavoriteFilters = async (req, res) => {
     const filtersWithOwnerDetails = await Promise.all(
       favoriteFilters.map(async (filter) => {
         // Get owner information
-        const owner = await require('../../models/master/masterUserModel').findByPk(filter.masterUserID, {
+        const owner = await MasterUser.findByPk(filter.masterUserID, {
           attributes: ['masterUserID', 'name', 'email']
         });
 

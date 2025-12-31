@@ -1102,7 +1102,8 @@ const saveEmailsInParallel = async (emails, concurrency = 10, userID, provider, 
   const savedEmails = [];
   const errors = [];
   const startTime = Date.now();
-  
+  const { DefaultEmail, Email,} = req.models;
+
   console.log(`[Batch ${page}] ⚡ PARALLEL SAVING: ${emails.length} emails with concurrency ${concurrency} for USER ${userID}`);
   
   const savePromises = emails.map((email, index) => 
@@ -1166,7 +1167,7 @@ const saveEmailsInParallel = async (emails, concurrency = 10, userID, provider, 
 const fetchEmailsHighPerformance = async (connection, strategy, userID, provider, page = 1) => {
   const startTime = Date.now();
   let allEmails = [];
-  
+ 
   console.log(`[Batch ${page}] 🚀 HIGH-PERFORMANCE FETCH: Starting optimized fetch for USER ${userID} ${provider} (strategy: ${strategy})`);
   
   try {
@@ -1467,7 +1468,7 @@ exports.queueFetchAllEmails = async (req, res) => {
   const email = req.body?.email || req.email;
   const appPassword = req.body?.appPassword || req.appPassword;
   const provider = req.body?.provider;
-
+   const { DefaultEmail, Email, UserCredential} = req.models;
   try {
     if (!masterUserID || !email || !appPassword) {
       return res.status(400).json({ message: "All fields are required." });
@@ -3433,7 +3434,7 @@ exports.fetchRecentEmail = async (adminId, options = {}) => {
 // Fetch and store emails from the Drafts folder using batching
 exports.fetchDraftEmails = async (req, res) => {
   const { batchSize = 50, page = 1 } = req.query;
-
+  const { DefaultEmail, Email, UserCredential} = req.models;
   try {
     console.log("Connecting to IMAP server...");
     const connection = await Imap.connect(imapConfig);
@@ -3534,7 +3535,7 @@ exports.fetchDraftEmails = async (req, res) => {
 // Fetch and store emails from the Archive folder using batching
 exports.fetchArchiveEmails = async (req, res) => {
   const { batchSize = 50, page = 1, days = 7 } = req.query;
-
+  const { DefaultEmail, Email, UserCredential} = req.models;
   try {
     console.log("Connecting to IMAP server...");
     const connection = await Imap.connect(imapConfig);
@@ -3702,6 +3703,7 @@ async function getEmailsInternal(req, res, masterUserID) {
     visibility = "all", // New parameter: "all", "shared", "private"
   } = req.query;
 
+  const { DefaultEmail, Email, UserCredential, Attachment, Deal, LeadPerson, Label, LeadOrganization, Lead } = req.models;
   // 🔧 FIX: Validate masterUserID parameter
   if (!masterUserID || masterUserID === 'undefined') {
     console.error(`❌ [ERROR] Invalid masterUserID: ${masterUserID}`);
@@ -3882,7 +3884,7 @@ async function getEmailsInternal(req, res, masterUserID) {
       switch (contactFilter) {
         case "from_existing_contact":
           // Emails from senders who exist as contacts/persons
-          const existingContactEmails = await Person.findAll({
+          const existingContactEmails = await LeadPerson.findAll({
             attributes: ["email"],
             where: {
               email: { [Sequelize.Op.ne]: null },
@@ -3901,7 +3903,7 @@ async function getEmailsInternal(req, res, masterUserID) {
           break;
         case "not_from_existing_contact":
           // Emails from senders who don't exist as contacts
-          const existingContactEmailsNot = await Person.findAll({
+          const existingContactEmailsNot = await LeadPerson.findAll({
             attributes: ["email"],
             where: {
               email: { [Sequelize.Op.ne]: null },
@@ -3996,7 +3998,7 @@ async function getEmailsInternal(req, res, masterUserID) {
       switch (contactFilter) {
         case "from_existing_contact":
           // For baseFilters, we need to apply the same logic
-          const existingContactEmailsBase = await Person.findAll({
+          const existingContactEmailsBase = await LeadPerson.findAll({
             attributes: ["email"],
             where: {
               email: { [Sequelize.Op.ne]: null },
@@ -4017,7 +4019,7 @@ async function getEmailsInternal(req, res, masterUserID) {
           break;
         case "not_from_existing_contact":
           // For baseFilters, we need to apply the same logic
-          const existingContactEmailsNotBase = await Person.findAll({
+          const existingContactEmailsNotBase = await LeadPerson.findAll({
             attributes: ["email"],
             where: {
               email: { [Sequelize.Op.ne]: null },
@@ -4129,7 +4131,7 @@ async function getEmailsInternal(req, res, masterUserID) {
         ],
         include: [
           {
-            model: Person,
+            model: LeadPerson,
             as: "LeadPerson",
             required: false,
             attributes: [
@@ -4141,7 +4143,7 @@ async function getEmailsInternal(req, res, masterUserID) {
             ],
           },
           {
-            model: Organization,
+            model: LeadOrganization,
             as: "LeadOrganization",
             required: false,
             attributes: [
@@ -4167,7 +4169,7 @@ async function getEmailsInternal(req, res, masterUserID) {
         ],
         include: [
           {
-            model: Person,
+            model: LeadPerson,
             as: "Person",
             required: false,
             attributes: [
@@ -4179,7 +4181,7 @@ async function getEmailsInternal(req, res, masterUserID) {
             ],
           },
           {
-            model: Organization,
+            model: LeadOrganization,
             as: "Organization",
             required: false,
             attributes: [
@@ -4277,7 +4279,7 @@ async function getEmailsInternal(req, res, masterUserID) {
             ],
             include: [
               {
-                model: Person,
+                model: LeadPerson,
                 as: "Person",
                 required: false,
                 attributes: [
@@ -4289,7 +4291,7 @@ async function getEmailsInternal(req, res, masterUserID) {
                 ],
               },
               {
-                model: Organization,
+                model: LeadOrganization,
                 as: "Organization",
                 required: false,
                 attributes: [
@@ -4580,7 +4582,7 @@ async function getEmailsInternal(req, res, masterUserID) {
       // Use setTimeout to make it truly async (non-blocking)
       setTimeout(async () => {
         try {
-          await updateVisibleEmailFlagsMultiFolder(masterUserID, visibleEmailsWithFolders, userCredential);
+          await updateVisibleEmailFlagsMultiFolder(masterUserID, visibleEmailsWithFolders, userCredential, Email);
         } catch (flagError) {
           console.warn(`⚠️ [ASYNC-FLAG-SYNC] Failed for user ${masterUserID}:`, flagError.message);
         }
@@ -4629,7 +4631,7 @@ async function getEmailsInternal(req, res, masterUserID) {
 // Get available labels for email filtering
 exports.getEmailLabels = async (req, res) => {
   const masterUserID = req.adminId;
-
+  const { Email, Label, } = req.models;
   try {
     // Get all unique labels used in emails for this user
     const emailLabels = await Email.findAll({
@@ -4881,6 +4883,7 @@ exports.getEmailLabels = async (req, res) => {
 
 // Fetch and store emails from the Sent folder using batching
 exports.fetchSentEmails = async (adminId, batchSize = 50, page = 1) => {
+  const { Email } = req.models;
   try {
     const userCredential = await getUserCredentialCached(adminId, true); // Need password for IMAP
 
@@ -5042,6 +5045,7 @@ exports.fetchSentEmails = async (adminId, batchSize = 50, page = 1) => {
 
 // Helper function to fetch linked entities for an email
 const getLinkedEntities = async (email) => {
+  const { Deal, LeadPerson, LeadOrganization, Lead, MasterUser, Activity } = req.models;
   try {
     const linkedEntities = {
       leads: [],
@@ -5163,13 +5167,13 @@ const getLinkedEntities = async (email) => {
     }
 
     // Search for persons by email (can have multiple persons with same email)
-    const persons = await Person.findAll({
+    const persons = await LeadPerson.findAll({
       where: {
         email: { [Sequelize.Op.in]: uniqueEmails },
       },
       include: [
         {
-          model: Organization,
+          model: LeadOrganization,
           as: "LeadOrganization",
           required: false,
         },
@@ -5185,7 +5189,7 @@ const getLinkedEntities = async (email) => {
     let organizations = [];
 
     if (personOrgIds.length > 0) {
-      organizations = await Organization.findAll({
+      organizations = await LeadOrganization.findAll({
         where: {
           leadOrganizationId: { [Sequelize.Op.in]: personOrgIds },
         },
@@ -5389,6 +5393,7 @@ const getLinkedEntities = async (email) => {
 // Helper function to aggregate linked entities from all emails in a conversation
 // Enhanced to include detailed participant information for uniqueParticipants
 const getAggregatedLinkedEntities = async (emails) => {
+  const { Deal, LeadPerson, LeadOrganization, Lead, MasterUser, Activity } = req.models;
   try {
     const aggregatedEntities = {
       leads: [],
@@ -5481,13 +5486,13 @@ const getAggregatedLinkedEntities = async (emails) => {
       aggregatedEntities.conversationStats.uniqueParticipants;
 
     // Fetch ALL persons data for unique participants
-    const allParticipantPersons = await Person.findAll({
+    const allParticipantPersons = await LeadPerson.findAll({
       where: {
         email: { [Sequelize.Op.in]: participantEmails },
       },
       include: [
         {
-          model: Organization,
+          model: LeadOrganization,
           as: "LeadOrganization",
           required: false,
         },
@@ -5569,7 +5574,7 @@ const getAggregatedLinkedEntities = async (emails) => {
 
     // Add organizations from participants
     if (allPersonOrgIds.length > 0) {
-      const participantOrganizations = await Organization.findAll({
+      const participantOrganizations = await LeadOrganization.findAll({
         where: {
           leadOrganizationId: { [Sequelize.Op.in]: allPersonOrgIds },
         },
@@ -5874,6 +5879,7 @@ const getAggregatedLinkedEntities = async (emails) => {
 
 // Helper function to fetch body for a single email on-demand
 const fetchEmailBodyOnDemandForEmail = async (email, masterUserID) => {
+  const { Email } = req.models;
   try {
     // ✅ OPTIMIZATION: Check if body needs fetching - skip IMAP if completed
     if (email.body_fetch_status === 'completed') {
@@ -6016,6 +6022,7 @@ const fetchEmailBodyOnDemandForEmail = async (email, masterUserID) => {
 
 // Helper function to enrich email with label information
 const enrichEmailWithLabels = async (email) => {
+  const { Label } = req.models;
   try {
     // Get label details from single labelId field (integer)
     let label = null;
@@ -6047,7 +6054,8 @@ exports.getOneEmail = async (req, res) => {
   const { emailId } = req.params;
   const { preserveOriginal = 'false' } = req.query; // Option to preserve original content
   const masterUserID = req.adminId; // Assuming adminId is set in middleware
-  
+  const {  Email, Attachment, UserCredential, } = req.models;
+
   const shouldPreserveOriginal = preserveOriginal === 'true';
   console.log(`[getOneEmail] 🔧 PRESERVE ORIGINAL CONTENT: ${shouldPreserveOriginal}`);
 
@@ -6799,6 +6807,7 @@ exports.getOneEmail = async (req, res) => {
 
 // Helper function to upload sent email to provider's Sent folder via IMAP
 const uploadToSentFolder = async (mailOptions, userCredential, messageId) => {
+  
   try {
     console.log(`[uploadToSentFolder] 📤 Uploading copy to Sent folder for ${userCredential.email}`);
     
@@ -6962,7 +6971,7 @@ exports.composeEmail = [
       // isShared
     } = req.body;
     const masterUserID = req.adminId; // Assuming `adminId` is set in middleware
-
+    const { MasterUser, Email, Attachment, DefaultEmail, Template, UserCredential, } = models;
     try {
       // Check if a default email is set in the DefaultEmail table
       const defaultEmail = await DefaultEmail.findOne({
@@ -7580,7 +7589,7 @@ exports.composeEmail = [
 exports.createTemplate = async (req, res) => {
   const { name, subject, content, isShared } = req.body; // Changed `body` to `content`
   const masterUserID = req.adminId; // Assuming `adminId` is set in middleware
-
+  const {  Template  } = models;
   try {
     // Save the template in the database
     const templateData = {
@@ -7608,7 +7617,7 @@ exports.createTemplate = async (req, res) => {
 
 exports.getTemplates = async (req, res) => {
   const masterUserID = req.adminId; // Assuming `adminId` is set in middleware
-
+  const { Template } = models;
   try {
     // Fetch templates for the specific user
     const templates = await Template.findAll({
@@ -7630,7 +7639,7 @@ exports.getTemplates = async (req, res) => {
 exports.getTemplateById = async (req, res) => {
   const { templateID } = req.params;
   const masterUserID = req.adminId; // Assuming `adminId` is set in middleware
-
+  const {  Template } = models;
   try {
     // Fetch the template for the specific user and templateID
     const template = await Template.findOne({
@@ -7659,7 +7668,7 @@ exports.getTemplateById = async (req, res) => {
 exports.deleteTemplate = async (req, res) => {
   const { templateID } = req.params;
   const masterUserID = req.adminId; // Assuming `adminId` is set in middleware
-
+  const {  Template } = models;
   try {
     // Check if the template exists and belongs to the user
     const template = await Template.findOne({
@@ -7701,7 +7710,7 @@ exports.deleteTemplate = async (req, res) => {
 exports.deleteBulkTemplates = async (req, res) => {
   const { templateIDs } = req.body; // Array of template IDs to delete
   const masterUserID = req.adminId; // Assuming `adminId` is set in middleware
-
+  const {  Template } = models;
   try {
     // Validate input
     if (!templateIDs || !Array.isArray(templateIDs) || templateIDs.length === 0) {
@@ -7760,7 +7769,7 @@ exports.deleteBulkTemplates = async (req, res) => {
 
 exports.getUnreadCounts = async (req, res) => {
   const masterUserID = req.adminId; // Assuming adminId is set in middleware
-
+  const { UserCredential, Email } = models;
   try {
     // Check if user has credentials in UserCredential model
     const userCredential = await UserCredential.findOne({
@@ -7839,7 +7848,7 @@ exports.addUserCredential = async (req, res) => {
     smtpPort,
     smtpSecure,
   } = req.body;
-
+  const {  UserCredential } = models;
   try {
     // Validate syncStartDate (ensure it's a valid ISO date string)
     if (syncStartDate) {
@@ -7932,7 +7941,7 @@ exports.addUserCredential = async (req, res) => {
 
 exports.getUserCredential = async (req, res) => {
   const masterUserID = req.adminId; // Assuming `adminId` is passed in the request (e.g., from middleware)
-
+  const {  UserCredential } = models;
   try {
     // Fetch the user credentials
     const userCredential = await UserCredential.findOne({
@@ -7952,7 +7961,9 @@ exports.getUserCredential = async (req, res) => {
     res.status(500).json({ message: "Internal server error." });
   }
 };
+
 exports.deleteEmail = async (req, res) => {
+  const {  Email } = models;
   try {
     const masterUserID = req.adminId; // Assuming adminId is set in middleware
     const { emailId } = req.params; // Get the email ID from the request parameters
@@ -7977,6 +7988,7 @@ exports.deleteEmail = async (req, res) => {
 };
 
 exports.deletebulkEmails = async (req, res) => {
+  const { Email } = models;
   try {
     const masterUserID = req.adminId;
     const { emailIds } = req.body; // Expecting an array of email IDs
@@ -8008,7 +8020,7 @@ exports.saveDraft = [
   async (req, res) => {
     const { to, cc, bcc, subject, text, html, draftId } = req.body;
     const masterUserID = req.adminId; // Assuming adminId is set in middleware
-
+    const {  Email, Attachment } = models;
     try {
       let savedDraft;
       let isUpdate = false;
@@ -8103,7 +8115,7 @@ exports.scheduleEmail = [
   async (req, res) => {
     const { to, cc, bcc, subject, text, html, scheduledAt } = req.body;
     const masterUserID = req.adminId;
-
+    const {  Email, Attachment, DefaultEmail, MasterUser, UserCredential,  } = models;
     try {
       // Validate that at least one recipient is provided
       const hasRecipients = to || cc || bcc;
@@ -8193,7 +8205,7 @@ exports.deleteAllEmailsForUser = async (req, res) => {
   const BATCH_SIZE = 1000;
   let totalEmailsDeleted = 0;
   let totalAttachmentsDeleted = 0;
-
+  const { Email, Attachment } = models;
   // Use transaction to ensure data consistency
   const transaction = await Email.sequelize.transaction();
 
@@ -8309,7 +8321,7 @@ exports.deleteAllEmailsForUser = async (req, res) => {
 exports.bulkEditEmails = async (req, res) => {
   const { emailIds, updateData } = req.body;
   const masterUserID = req.adminId;
-
+  const { Email, Attachment } = models;
   // Validate input
   if (!emailIds || !Array.isArray(emailIds) || emailIds.length === 0) {
     return res.status(400).json({
@@ -8414,7 +8426,7 @@ exports.bulkEditEmails = async (req, res) => {
 exports.bulkDeleteEmails = async (req, res) => {
   const { emailIds } = req.body;
   const masterUserID = req.adminId;
-
+  const { Email, Attachment } = models;
   // Validate input
   if (!emailIds || !Array.isArray(emailIds) || emailIds.length === 0) {
     return res.status(400).json({
@@ -8521,7 +8533,7 @@ exports.bulkDeleteEmails = async (req, res) => {
 exports.bulkMarkEmails = async (req, res) => {
   const { emailIds, isRead } = req.body;
   const masterUserID = req.adminId;
-
+  const { Email, Attachment } = models;
   // Validate input
   if (!emailIds || !Array.isArray(emailIds) || emailIds.length === 0) {
     return res.status(400).json({
@@ -8640,7 +8652,7 @@ exports.bulkMarkEmails = async (req, res) => {
 exports.bulkMoveEmails = async (req, res) => {
   const { emailIds, targetFolder } = req.body;
   const masterUserID = req.adminId;
-
+  const { Email, Attachment } = models;
   // Validate input
   if (!emailIds || !Array.isArray(emailIds) || emailIds.length === 0) {
     return res.status(400).json({
@@ -8774,7 +8786,6 @@ exports.processEmailsLightweight = (emails, userID, provider, strategy = 'NORMAL
  */
 exports.checkGmailInboxCount = async (req, res) => {
   let connection;
-  
   try {
     const { email, appPassword } = req.query;
     
@@ -8876,7 +8887,7 @@ exports.updateEmailVisibility = async (req, res) => {
   const { emailId } = req.params;
   const { visibility } = req.body; // "shared" or "private"
   const masterUserID = req.adminId;
-
+  const { Email, UserCredential } = models;
   try {
     // Validate visibility value
     if (!visibility || !['shared', 'private'].includes(visibility)) {
@@ -8976,6 +8987,7 @@ exports.getFlagSyncStats = async (req, res) => {
 
 // 🚀 PRODUCTION ARCHITECTURE: Manual flag sync trigger for specific user
 exports.triggerFlagSync = async (req, res) => {
+  const { Email, UserCredential } = models;
   try {
     const { userID, priority = 9 } = req.body; // High priority for manual triggers
     const requestingAdminId = req.adminId;
@@ -9031,6 +9043,7 @@ exports.triggerFlagSync = async (req, res) => {
 
 // Search for existing leads and deals
 exports.searchLeadsAndDeals = async (req, res) => {
+   const { CustomField, CustomFieldValue, Lead, Deal, LeadPerson, LeadOrganization } = models;
   try {
     const { q, page = 1, limit = 10 } = req.query;
     const masterUserID = req.adminId;
@@ -9142,13 +9155,13 @@ exports.searchLeadsAndDeals = async (req, res) => {
       where: leadSearchConditions,
       include: [
         {
-          model: Person,
+          model: LeadPerson,
           as: "LeadPerson",
           attributes: ["personId", "contactPerson", "email", "phone", "jobTitle"],
           required: false
         },
         {
-          model: Organization,
+          model: LeadOrganization,
           as: "LeadOrganization", 
           attributes: ["leadOrganizationId", "organization", "address"],
           required: false
@@ -9165,13 +9178,13 @@ exports.searchLeadsAndDeals = async (req, res) => {
       where: dealSearchConditions,
       include: [
         {
-          model: Person,
+          model: LeadPerson,
           as: "Person",
           attributes: ["personId", "contactPerson", "email", "phone", "jobTitle"],
           required: false
         },
         {
-          model: Organization,
+          model: LeadOrganization,
           as: "Organization",
           attributes: ["leadOrganizationId", "organization", "address"],
           required: false
@@ -9197,13 +9210,13 @@ exports.searchLeadsAndDeals = async (req, res) => {
         },
         include: [
           {
-            model: Person,
+            model: LeadPerson,
             as: "Person",
             attributes: ["personId", "contactPerson", "email", "phone", "jobTitle"],
             required: false
           },
           {
-            model: Organization,
+            model: LeadOrganization,
             as: "Organization",
             attributes: ["leadOrganizationId", "organization", "address"],
             required: false
@@ -9337,6 +9350,7 @@ exports.searchLeadsAndDeals = async (req, res) => {
 
 // API to link email to specific lead or deal
 exports.linkEmailToEntity = async (req, res) => {
+  const { Lead, Deal, Email } = models;
   try {
     const { emailId, entityType, entityId } = req.body;
     const masterUserID = req.adminId;
@@ -9445,6 +9459,7 @@ exports.linkEmailToEntity = async (req, res) => {
 
 // API to unlink email from lead or deal
 exports.unlinkEmailFromEntity = async (req, res) => {
+  const {  Email } = models;
   try {
     const { emailId, entityType } = req.body;
     const masterUserID = req.adminId;
@@ -9538,7 +9553,7 @@ exports.unlinkEmailFromEntity = async (req, res) => {
 exports.linkEmailToLabel = async (req, res) => {
   const { emailId, labelId } = req.body;
   const masterUserID = req.adminId;
-
+  const {  Email, Label } = models;
   try {
     // Validate required fields
     if (!emailId || !labelId) {
@@ -9615,7 +9630,7 @@ exports.linkEmailToLabel = async (req, res) => {
 exports.unlinkEmailFromLabel = async (req, res) => {
   const { emailId, labelId } = req.body;
   const masterUserID = req.adminId;
-
+  const {  Email, Label } = models;
   try {
     // Validate required fields
     if (!emailId || !labelId) {
@@ -9692,7 +9707,7 @@ exports.unlinkEmailFromLabel = async (req, res) => {
 exports.getEmailLabels = async (req, res) => {
   const { emailId } = req.params;
   const masterUserID = req.adminId;
-
+  const {  Email, Label } = models;
   try {
     // Check if email exists and belongs to user
     const email = await Email.findOne({
@@ -9747,7 +9762,7 @@ exports.getEmailsByLabel = async (req, res) => {
   const { labelId } = req.params;
   const { page = 1, pageSize = 20 } = req.query;
   const masterUserID = req.adminId;
-
+  const {  Email, Label } = models;
   try {
     // Validate pagination
     const limit = Math.min(parseInt(pageSize) || 20, 50);
@@ -9814,7 +9829,7 @@ exports.getEmailsByLabel = async (req, res) => {
 exports.bulkLabelEmails = async (req, res) => {
   const { emailIds, labelId, operation } = req.body; // operation: 'add' or 'remove'
   const masterUserID = req.adminId;
-
+  const {  Email, Label } = models;
   try {
     // Validate required fields
     if (!emailIds || !Array.isArray(emailIds) || emailIds.length === 0) {
@@ -9932,7 +9947,7 @@ exports.bulkLabelEmails = async (req, res) => {
 exports.linkEmailToSaleInboxLabel = async (req, res) => {
   const { emailId, labelId } = req.body;
   const masterUserID = req.adminId;
-
+  const {  Email, Label } = models;
   try {
     // Validate required fields
     if (!emailId || !labelId) {
@@ -10009,7 +10024,7 @@ exports.linkEmailToSaleInboxLabel = async (req, res) => {
 exports.unlinkEmailFromSaleInboxLabel = async (req, res) => {
   const { emailId, labelId } = req.body;
   const masterUserID = req.adminId;
-
+  const {  Email, Label } = models;
   try {
     // Validate required fields
     if (!emailId || !labelId) {
@@ -10086,7 +10101,7 @@ exports.unlinkEmailFromSaleInboxLabel = async (req, res) => {
 exports.getEmailSaleInboxLabels = async (req, res) => {
   const { emailId } = req.params;
   const masterUserID = req.adminId;
-
+  const {  Email, Label } = models;
   try {
     // Check if email exists and belongs to user
     const email = await Email.findOne({
@@ -10141,7 +10156,7 @@ exports.getEmailsBySaleInboxLabel = async (req, res) => {
   const { labelId } = req.params;
   const { page = 1, pageSize = 20 } = req.query;
   const masterUserID = req.adminId;
-
+  const {  Email, Label } = models;
   try {
     // Validate pagination
     const limit = Math.min(parseInt(pageSize) || 20, 50);
@@ -10206,6 +10221,7 @@ exports.getEmailsBySaleInboxLabel = async (req, res) => {
 
 // Get all available sale-inbox labels
 exports.getSaleInboxLabels = async (req, res) => {
+  const { Label } = models;
   try {
     const labels = await Label.findAll({
       where: {
@@ -10241,7 +10257,7 @@ exports.getSaleInboxLabels = async (req, res) => {
 exports.bulkSaleInboxLabelOperation = async (req, res) => {
   const { emailIds, labelId, operation } = req.body; // operation: 'link' or 'unlink'
   const masterUserID = req.adminId;
-
+  const {  Email, Label } = models;
   try {
     // Validate required fields
     if (!emailIds || !Array.isArray(emailIds) || emailIds.length === 0) {
@@ -10369,6 +10385,7 @@ const imapIdleManager = require('../../services/imapIdleManager');
  * GET /api/email/get-emails-realtime
  */
 exports.getEmailsRealtime = async (req, res) => {
+  const {  Email, Label } = models;
   try {
     const userID = req.adminId; // Only use authenticated user ID from token
     
@@ -10472,7 +10489,7 @@ async function getEmailsRealtimeLightweight(req, res) {
     direction = "next",
     includeFullBody = "false",
   } = req.query;
-
+  const {  Email, UserCredential, Lead, Deal, LeadPerson, LeadOrganization } = models;
   // Enforce strict maximum page size for performance
   const MAX_SAFE_PAGE_SIZE = 25; // Smaller limit for large datasets
   pageSize = Math.min(Number(pageSize) || 20, MAX_SAFE_PAGE_SIZE);
@@ -10602,7 +10619,7 @@ async function getEmailsRealtimeLightweight(req, res) {
         ],
         include: [
           {
-            model: Person,
+            model: LeadPerson,
             as: "LeadPerson",
             required: false,
             attributes: [
@@ -10614,7 +10631,7 @@ async function getEmailsRealtimeLightweight(req, res) {
             ],
           },
           {
-            model: Organization,
+            model: LeadOrganization,
             as: "LeadOrganization",
             required: false,
             attributes: [
@@ -10640,7 +10657,7 @@ async function getEmailsRealtimeLightweight(req, res) {
         ],
         include: [
           {
-            model: Person,
+            model: LeadPerson,
             as: "Person",
             required: false,
             attributes: [
@@ -10652,7 +10669,7 @@ async function getEmailsRealtimeLightweight(req, res) {
             ],
           },
           {
-            model: Organization,
+            model: LeadOrganization,
             as: "Organization",
             required: false,
             attributes: [
@@ -11024,7 +11041,7 @@ async function getEmailsRealtimeLightweight(req, res) {
       // Use setTimeout to make it truly async (non-blocking)
       setTimeout(async () => {
         try {
-          await updateVisibleEmailFlagsMultiFolder(masterUserID, visibleEmailsWithFolders, userCredential);
+          await updateVisibleEmailFlagsMultiFolder(masterUserID, visibleEmailsWithFolders, userCredential, Email);
         } catch (flagError) {
           console.warn(`⚠️ [ASYNC-FLAG-SYNC] Failed for user ${masterUserID}:`, flagError.message);
         }
@@ -11379,7 +11396,7 @@ async function updateVisibleEmailFlags(userID, emailUIDs, userCredential) {
  * 2. For each folder: open it → fetch flags → update DB
  * 3. Merge all results
  */
-async function updateVisibleEmailFlagsMultiFolder(userID, emailsWithFolders, userCredential) {
+async function updateVisibleEmailFlagsMultiFolder(userID, emailsWithFolders, userCredential, Email) {
   const Imap = require('node-imap');
   let connection;
   
@@ -11641,7 +11658,7 @@ exports.markEmailReadRealtime = async (req, res) => {
   try {
     const { emailUID, isRead = true } = req.body;
     const userID = req.adminId || 32; // Fallback to user 32 for testing (has valid Gmail credentials)
-    
+    const {Email} = require.models;
     console.log(`📤 [MARK-READ-REALTIME] Marking UID ${emailUID} as ${isRead ? 'read' : 'unread'} for user ${userID}...`);
     
     if (!emailUID) {
@@ -11710,6 +11727,7 @@ exports.markEmailReadRealtime = async (req, res) => {
  * POST /api/email/bulk-mark-realtime
  */
 exports.bulkMarkEmailsRealtime = async (req, res) => {
+   const {Email} = require.models;
   try {
     const { emailUIDs, isRead = true } = req.body;
     const userID = req.adminId;
@@ -11800,6 +11818,7 @@ exports.bulkMarkEmailsRealtime = async (req, res) => {
  * POST /api/email/start-realtime-sync
  */
 exports.startRealtimeSync = async (req, res) => {
+   const {Email} = require.models;
   try {
     const userID = req.adminId || 32; // Fallback to user 32 for testing (has valid Gmail credentials)
     
@@ -11914,6 +11933,7 @@ exports.getAllRealtimeConnections = async (req, res) => {
  * GET /api/email/detailed-connection-status
  */
 exports.getDetailedConnectionStatus = async (req, res) => {
+   const {Email} = require.models;
   try {
     const status = await imapIdleManager.getDetailedConnectionStatus();
     

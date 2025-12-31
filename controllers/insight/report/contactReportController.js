@@ -11,6 +11,7 @@ const { Op, Sequelize } = require("sequelize");
 const LeadPerson = require("../../../models/leads/leadPersonModel");
 
 exports.createPersonReport = async (req, res) => {
+  const { Report, Dashboard, ReportFolder, MasterUser, Lead, Deal, LeadPerson, LeadOrganization, Activity, Email } = req.models;
   try {
     const {
       reportId,
@@ -131,7 +132,8 @@ exports.createPersonReport = async (req, res) => {
             segmentedBy,
             filters,
             page,
-            limit
+            limit,
+            MasterUser, Lead, Deal, LeadPerson, LeadOrganization, Activity, Email
           );
           reportData = result.data;
           paginationInfo = result.pagination;
@@ -219,7 +221,8 @@ exports.createPersonReport = async (req, res) => {
           existingSegmentedBy,
           existingfilters,
           page,
-          limit
+          limit,
+          MasterUser, Lead, Deal, LeadPerson, LeadOrganization, Activity, Email
         );
         reportData = result.data;
         paginationInfo = result.pagination;
@@ -295,7 +298,8 @@ async function generateExistingPersonPerformanceData(
   existingSegmentedBy,
   filters,
   page = 1,
-  limit = 8
+  limit = 8,
+  MasterUser, Lead, Deal, LeadPerson, LeadOrganization, Activity, Email
 ) {
   let includeModels = [];
   // Calculate offset for pagination
@@ -358,7 +362,8 @@ async function generateExistingPersonPerformanceData(
           cond.column,
           cond.operator,
           cond.value,
-          filterIncludeModels
+          filterIncludeModels,
+          MasterUser, Lead, Deal, LeadPerson, LeadOrganization, Activity, Email
         );
       });
 
@@ -433,7 +438,7 @@ async function generateExistingPersonPerformanceData(
   } else if (existingxaxis === "organization") {
     // Special handling for organization - join with Organization table
     includeModels.push({
-      model: Organization,
+      model: LeadOrganization,
       as: "LeadOrganization",
       attributes: [],
       required: false,
@@ -482,7 +487,7 @@ async function generateExistingPersonPerformanceData(
       attributes.push([Sequelize.col("assignedUser.team"), "segmentValue"]);
     } else if (existingSegmentedBy === "organization") {
       includeModels.push({
-        model: Organization,
+        model: LeadOrganization,
         as: "LeadOrganization",
         attributes: [],
         required: false,
@@ -772,7 +777,8 @@ async function generatePersonPerformanceData(
   segmentedBy,
   filters,
   page = 1,
-  limit = 8
+  limit = 8,
+  MasterUser, Lead, Deal, LeadPerson, LeadOrganization, Activity, Email
 ) {
   let includeModels = [];
 
@@ -841,7 +847,8 @@ async function generatePersonPerformanceData(
           cond.column,
           cond.operator,
           cond.value,
-          filterIncludeModels
+          filterIncludeModels,
+          MasterUser, Lead, Deal, LeadPerson, LeadOrganization, Activity, Email
         );
       });
 
@@ -914,7 +921,7 @@ async function generatePersonPerformanceData(
   } else if (xaxis === "organization") {
     // Special handling for organization - join with Organization table
     includeModels.push({
-      model: Organization,
+      model: LeadOrganization,
       as: "LeadOrganization",
       attributes: [],
       required: false,
@@ -952,7 +959,7 @@ async function generatePersonPerformanceData(
       groupBy.push(segmentDateExpression);
     } else if (segmentedBy === "organization") {
       includeModels.push({
-        model: Organization,
+        model: LeadOrganization,
         as: "LeadOrganization",
         attributes: [],
         required: false,
@@ -1011,7 +1018,7 @@ async function generatePersonPerformanceData(
   // Total count calculation
   let totalCountResult;
   if (shouldGroupByDuration) {
-    totalCountResult = await Person.findAll({
+    totalCountResult = await LeadPerson.findAll({
       where: baseWhere,
       attributes: [
         [
@@ -1038,7 +1045,7 @@ async function generatePersonPerformanceData(
       countColumn = Sequelize.col(`LeadPerson.${xaxis}`);
     }
 
-    totalCountResult = await Person.findAll({
+    totalCountResult = await LeadPerson.findAll({
       where: baseWhere,
       attributes: [
         [Sequelize.fn("COUNT", Sequelize.fn("DISTINCT", countColumn)), "total"],
@@ -1262,7 +1269,7 @@ function isDateField(xaxis) {
   return dateFields.includes(xaxis);
 }
 
-function getConditionObject(column, operator, value, includeModels = []) {
+function getConditionObject(column, operator, value, includeModels = [], MasterUser, Lead, Deal, LeadPerson, LeadOrganization, Activity, Email) {
   let conditionValue = value;
 
   // Check if column contains a dot (indicating a related table field)
@@ -1306,7 +1313,7 @@ function getConditionObject(column, operator, value, includeModels = []) {
     // For related tables, use the proper Sequelize syntax
     if (tableAlias !== "LeadPerson") {
       // Add the required include model
-      addIncludeModel(tableAlias, includeModels);
+      addIncludeModel(tableAlias, includeModels, LeadOrganization);
 
       // Return the condition with proper nested syntax
       if (operator === "between" || operator === "=" || operator === "is") {
@@ -1367,7 +1374,7 @@ function getConditionObject(column, operator, value, includeModels = []) {
 
       // For related tables
       if (hasRelation) {
-        addIncludeModel(tableAlias, includeModels);
+        addIncludeModel(tableAlias, includeModels, LeadOrganization);
         return {
           [`$${tableAlias}.${fieldName}$`]: {
             [Op.between]: [startOfDay, endOfDay],
@@ -1391,7 +1398,7 @@ function getConditionObject(column, operator, value, includeModels = []) {
 
       // For related tables
       if (hasRelation) {
-        addIncludeModel(tableAlias, includeModels);
+        addIncludeModel(tableAlias, includeModels, LeadOrganization);
         return {
           [`$${tableAlias}.${fieldName}$`]: {
             [Op.notBetween]: [startOfDay, endOfDay],
@@ -1417,7 +1424,7 @@ function getConditionObject(column, operator, value, includeModels = []) {
 
   // Handle related table joins
   if (hasRelation) {
-    addIncludeModel(tableAlias, includeModels);
+    addIncludeModel(tableAlias, includeModels, LeadOrganization);
 
     const op = getSequelizeOperator(operator);
 
@@ -1459,13 +1466,13 @@ function getConditionObject(column, operator, value, includeModels = []) {
 }
 
 // Helper function to add include models
-function addIncludeModel(tableAlias, includeModels) {
+function addIncludeModel(tableAlias, includeModels, LeadOrganization) {
   let modelConfig;
 
   switch (tableAlias) {
     case "LeadOrganization":
       modelConfig = {
-        model: Organization,
+        model: LeadOrganization,
         as: "LeadOrganization",
         required: false,
         attributes: [],
@@ -1634,7 +1641,8 @@ async function generateExistingPersonPerformanceDataForSave(
   existingyaxis,
   existingDurationUnit,
   existingSegmentedBy,
-  filters
+  filters,
+  MasterUser, Lead, Deal, LeadPerson, LeadOrganization, Activity, Email
 ) {
   let includeModels = [];
   const baseWhere = {};
@@ -1692,7 +1700,8 @@ async function generateExistingPersonPerformanceDataForSave(
           cond.column,
           cond.operator,
           cond.value,
-          filterIncludeModels
+          filterIncludeModels,
+          MasterUser, Lead, Deal, LeadPerson, LeadOrganization, Activity, Email
         );
       });
 
@@ -1765,7 +1774,7 @@ async function generateExistingPersonPerformanceDataForSave(
   } else if (existingxaxis === "organization") {
     // Special handling for organization - join with Organization table
     includeModels.push({
-      model: Organization,
+      model: LeadOrganization,
       as: "LeadOrganization",
       attributes: [],
       required: false,
@@ -1814,7 +1823,7 @@ async function generateExistingPersonPerformanceDataForSave(
       attributes.push([Sequelize.col("assignedUser.team"), "segmentValue"]);
     } else if (existingSegmentedBy === "organization") {
       includeModels.push({
-        model: Organization,
+        model: LeadOrganization,
         as: "LeadOrganization",
         attributes: [],
         required: false,
@@ -2041,7 +2050,8 @@ async function generatePersonPerformanceDataForSave(
   yaxis,
   durationUnit,
   segmentedBy,
-  filters
+  filters,
+  MasterUser, Lead, Deal, LeadPerson, LeadOrganization, Activity, Email
 ) {
   let includeModels = [];
   const baseWhere = {};
@@ -2104,7 +2114,8 @@ async function generatePersonPerformanceDataForSave(
           cond.column,
           cond.operator,
           cond.value,
-          filterIncludeModels
+          filterIncludeModels,
+          MasterUser, Lead, Deal, LeadPerson, LeadOrganization, Activity, Email
         );
       });
 
@@ -2174,7 +2185,7 @@ async function generatePersonPerformanceDataForSave(
   } else if (xaxis === "organization") {
     // Special handling for organization - join with Organization table
     includeModels.push({
-      model: Organization,
+      model: LeadOrganization,
       as: "LeadOrganization",
       attributes: [],
       required: false,
@@ -2212,7 +2223,7 @@ async function generatePersonPerformanceDataForSave(
       groupBy.push(segmentDateExpression);
     } else if (segmentedBy === "organization") {
       includeModels.push({
-        model: Organization,
+        model: LeadOrganization,
         as: "LeadOrganization",
         attributes: [],
         required: false,
@@ -2455,6 +2466,7 @@ async function generatePersonPerformanceDataForSave(
 }
 
 exports.savePersonReport = async (req, res) => {
+  const { Report, Dashboard, ReportFolder, MasterUser, Lead, Deal, LeadPerson, LeadOrganization, Activity, Email } = req.models;
   try {
     const {
       reportId,
@@ -2500,7 +2512,8 @@ exports.savePersonReport = async (req, res) => {
             yaxis,
             durationUnit,
             segmentedBy,
-            filters
+            filters,
+            MasterUser, Lead, Deal, LeadPerson, LeadOrganization, Activity, Email
           );
           reportData = result.data;
           totalValue = result.totalValue;
@@ -2566,7 +2579,8 @@ exports.savePersonReport = async (req, res) => {
             existingyaxis,
             existingDurationUnit,
             existingSegmentedBy,
-            existingfilters
+            existingfilters,
+            MasterUser, Lead, Deal, LeadPerson, LeadOrganization, Activity, Email
           );
           reportData = result.data;
           totalValue = result.totalValue;
@@ -2677,7 +2691,7 @@ exports.savePersonReport = async (req, res) => {
 
     for (const dashboardId of dashboardIdsArray) {
       // Verify dashboard ownership
-      const dashboard = await DASHBOARD.findOne({
+      const dashboard = await Dashboard.findOne({
         where: { dashboardId, ownerId },
       });
       if (!dashboard) {
@@ -2738,6 +2752,7 @@ exports.savePersonReport = async (req, res) => {
 };
 
 exports.getPersonReportSummary = async (req, res) => {
+  const { Report, Dashboard, ReportFolder, MasterUser, Lead, Deal, LeadPerson, LeadOrganization, Activity, Email } = req.models;
   try {
     const {
       reportId,
@@ -2795,7 +2810,8 @@ exports.getPersonReportSummary = async (req, res) => {
             cond.column,
             cond.operator,
             cond.value,
-            filterIncludeModels
+            filterIncludeModels,
+            MasterUser, Lead, Deal, LeadPerson, LeadOrganization, Activity, Email
           );
         });
 
@@ -2847,13 +2863,13 @@ exports.getPersonReportSummary = async (req, res) => {
     }
 
     // Get total count
-    const totalCount = await Person.count({
+    const totalCount = await LeadPerson.count({
       where: baseWhere,
       include: include.length > 0 ? include : undefined,
     });
 
     // Get paginated results
-    const persons = await Person.findAll({
+    const persons = await LeadPerson.findAll({
       where: baseWhere,
       include: include.length > 0 ? include : undefined,
       order: order,
@@ -2917,7 +2933,8 @@ exports.getPersonReportSummary = async (req, res) => {
         segmentedBy,
         filters,
         page,
-        limit
+        limit,
+        MasterUser, Lead, Deal, LeadPerson, LeadOrganization, Activity, Email
       );
       reportData = reportResult.data;
 
@@ -2991,7 +3008,8 @@ exports.getPersonReportSummary = async (req, res) => {
         existingSegmentedBy,
         existingfilters,
         page,
-        limit
+        limit,
+        MasterUser, Lead, Deal, LeadPerson, LeadOrganization, Activity, Email
       );
       reportData = reportResult.data;
 

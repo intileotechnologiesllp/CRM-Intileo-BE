@@ -1,7 +1,7 @@
 const { DataTypes } = require("sequelize");
 
 
-const createLeadPersonModel = (sequelizeInstance) => {
+const LeadPersoncreateLeadPersonModel = (sequelizeInstance) => {
 const LeadPerson = sequelizeInstance.define("LeadPerson", {
   personId: {
     type: DataTypes.INTEGER,

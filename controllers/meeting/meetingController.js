@@ -17,6 +17,7 @@ const { v4: uuidv4 } = require("uuid");
  * POST /api/meetings
  */
 exports.createMeeting = async (req, res) => {
+  const { Meeting, Activity, MasterUser, LeadPerson : Person, Deal, Lead, LeadOrganization : Organization, } = req.models;
   try {
     const {
       subject,
@@ -240,6 +241,7 @@ exports.createMeeting = async (req, res) => {
  * GET /api/meetings
  */
 exports.getMeetings = async (req, res) => {
+  const { Meeting, Activity, MasterUser, LeadPerson : Person, Deal, Lead, LeadOrganization : Organization, } = req.models;
   try {
     const masterUserID = req.adminId || req.user?.id;
     if (!masterUserID) {
@@ -334,6 +336,7 @@ exports.getMeetings = async (req, res) => {
  * GET /api/meetings/:id
  */
 exports.getMeetingById = async (req, res) => {
+  const { Meeting, Activity, MasterUser, LeadPerson : Person, Deal, Lead, LeadOrganization : Organization, } = req.models;
   try {
     const { id } = req.params;
     const masterUserID = req.adminId || req.user?.id;
@@ -383,6 +386,7 @@ exports.getMeetingById = async (req, res) => {
  * PUT /api/meetings/:id
  */
 exports.updateMeeting = async (req, res) => {
+  const { Meeting, Activity, MasterUser, LeadPerson : Person, Deal, Lead, LeadOrganization : Organization, } = req.models;
   try {
     const { id } = req.params;
     const masterUserID = req.adminId || req.user?.id;
@@ -582,6 +586,7 @@ exports.updateMeeting = async (req, res) => {
  * DELETE /api/meetings/:id
  */
 exports.cancelMeeting = async (req, res) => {
+  const { Meeting, Activity, MasterUser, LeadPerson : Person, Deal, Lead, LeadOrganization : Organization, } = req.models;
   try {
     const { id } = req.params;
     const { cancellationReason, sendCancellation = true } = req.body;
@@ -668,6 +673,7 @@ exports.cancelMeeting = async (req, res) => {
  * POST /api/meetings/check-conflicts
  */
 exports.checkConflicts = async (req, res) => {
+  const { Meeting, Activity, MasterUser, LeadPerson : Person, Deal, Lead, LeadOrganization : Organization, } = req.models;
   try {
     const { startDateTime, endDateTime, userId, attendeeIds, timezone } = req.body;
     const masterUserID = req.adminId || req.user?.id;
@@ -703,6 +709,7 @@ exports.checkConflicts = async (req, res) => {
  * GET /api/meetings/available-slots
  */
 exports.getAvailableSlots = async (req, res) => {
+  const { Meeting, Activity, MasterUser, LeadPerson : Person, Deal, Lead, LeadOrganization : Organization, } = req.models;
   try {
     const masterUserID = req.adminId || req.user?.id;
     if (!masterUserID) {
@@ -760,6 +767,7 @@ exports.getAvailableSlots = async (req, res) => {
  * GET /api/meetings/calendar-status
  */
 exports.getCalendarStatus = async (req, res) => {
+  const { Meeting, Activity, MasterUser, LeadPerson : Person, Deal, Lead, LeadOrganization : Organization, } = req.models;
   try {
     const masterUserID = req.adminId || req.user?.id;
     if (!masterUserID) {
@@ -788,6 +796,7 @@ exports.getCalendarStatus = async (req, res) => {
  * POST /api/meetings/:id/resend-invites
  */
 exports.resendInvites = async (req, res) => {
+  const { Meeting, Activity, MasterUser, LeadPerson : Person, Deal, Lead, LeadOrganization : Organization, } = req.models;
   try {
     const { id } = req.params;
     const masterUserID = req.adminId || req.user?.id;

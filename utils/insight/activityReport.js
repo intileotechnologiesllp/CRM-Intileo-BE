@@ -3443,7 +3443,8 @@ exports.generateActivityPerformanceDataForSave = async(
   durationUnit,
   segmentedBy,
   filters,
-  masterUserId
+  masterUserId,
+   Activity, LeadPerson, LeadOrganization, Deal, Lead, CustomField, MasterUser, Email
 ) => {
   let includeModels = [];
   const baseWhere = {};
@@ -3555,7 +3556,7 @@ exports.generateActivityPerformanceDataForSave = async(
     attributes.push([Sequelize.col("assignedUser.team"), "xValue"]);
   } else if (xaxis === "contactPerson") {
     includeModels.push({
-      model: Person,
+      model: LeadPerson,
       as: "ActivityPerson",
       attributes: [],
       required: false,
@@ -3565,7 +3566,7 @@ exports.generateActivityPerformanceDataForSave = async(
     attributes.push([Sequelize.col("ActivityPerson.contactPerson"), "xValue"]);
   } else if (xaxis === "organization") {
     includeModels.push({
-      model: Organization,
+      model: LeadOrganization,
       as: "ActivityOrganization",
       attributes: [],
       required: false,
@@ -3604,7 +3605,7 @@ exports.generateActivityPerformanceDataForSave = async(
       groupBy.push(segmentDateExpression);
     } else if (segmentedBy === "contactPerson") {
       includeModels.push({
-        model: Person,
+        model: LeadPerson,
         as: "ActivityPerson",
         attributes: [],
         required: false,
@@ -3616,7 +3617,7 @@ exports.generateActivityPerformanceDataForSave = async(
       ]);
     } else if (segmentedBy === "organization") {
       includeModels.push({
-        model: Organization,
+        model: LeadOrganization,
         as: "ActivityOrganization",
         attributes: [],
         required: false,
@@ -5571,7 +5572,8 @@ exports.generateEmailPerformanceDataForSave = async(
   yaxis,
   segmentedBy,
   filters,
-  masterUserId
+  masterUserId,
+   Activity, LeadPerson, LeadOrganization, Deal, Lead, CustomField, MasterUser, Email
 ) => {
   const baseWhere = {};
 

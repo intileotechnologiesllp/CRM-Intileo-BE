@@ -12,6 +12,7 @@ const { Pipeline } = require("../../../models");
 const { PipelineStage } = require("../../../models");
 
 exports.createDealPerformReport = async (req, res) => {
+  const { Report, MasterUser, Activity,  LeadPerson, Deal, Lead, LeadOrganization } = req.models;
   try {
     const {
       reportId,
@@ -298,7 +299,8 @@ exports.createDealPerformReport = async (req, res) => {
             segmentedBy,
             filters,
             page,
-            limit
+            limit,
+            MasterUser, Activity,  LeadPerson, Deal, Lead, LeadOrganization
           );
           reportData = result.data;
           paginationInfo = result.pagination;
@@ -383,7 +385,8 @@ exports.createDealPerformReport = async (req, res) => {
             existingSegmentedBy,
             existingfilters,
             page,
-            limit
+            limit,
+            MasterUser, Activity,  LeadPerson, Deal, Lead, LeadOrganization
           );
           reportData = result.data;
           paginationInfo = result.pagination;
@@ -463,7 +466,8 @@ async function generateExistingDealPerformanceData(
   existingSegmentedBy,
   filters,
   page = 1,
-  limit = 8
+  limit = 8,
+  MasterUser, Activity,  LeadPerson, Deal, Lead, LeadOrganization
 ) {
   let includeModels = [];
   // Calculate offset for pagination
@@ -531,7 +535,8 @@ async function generateExistingDealPerformanceData(
           cond.column,
           cond.operator,
           cond.value,
-          filterIncludeModels
+          filterIncludeModels,
+          Lead, Deal, LeadOrganization, LeadPerson
         );
       });
 
@@ -601,7 +606,7 @@ async function generateExistingDealPerformanceData(
   } else if (existingxaxis === "contactPerson") {
     // Special handling for contactPerson - join with Person table
     includeModels.push({
-      model: Person,
+      model: LeadPerson,
       as: "Person",
       attributes: [],
       required: false,
@@ -612,7 +617,7 @@ async function generateExistingDealPerformanceData(
   } else if (existingxaxis === "organization") {
     // Special handling for organization - join with Organization table
     includeModels.push({
-      model: Organization,
+      model: LeadOrganization,
       as: "Organization",
       attributes: [],
       required: false,
@@ -663,7 +668,7 @@ async function generateExistingDealPerformanceData(
     } else if (existingSegmentedBy === "contactPerson") {
       // Special handling for contactPerson - join with Person table
       includeModels.push({
-        model: Person,
+        model: LeadPerson,
         as: "Person",
         attributes: [],
         required: false,
@@ -674,7 +679,7 @@ async function generateExistingDealPerformanceData(
     } else if (existingSegmentedBy === "organization") {
       // Special handling for organization - join with Organization table
       includeModels.push({
-        model: Organization,
+        model: LeadOrganization,
         as: "Organization",
         attributes: [],
         required: false,
@@ -968,7 +973,8 @@ async function generateDealPerformanceData(
   segmentedBy,
   filters,
   page = 1,
-  limit = 8
+  limit = 8,
+  MasterUser, Activity,  LeadPerson, Deal, Lead, LeadOrganization
 ) {
   let includeModels = [];
 
@@ -1043,7 +1049,8 @@ async function generateDealPerformanceData(
           cond.column,
           cond.operator,
           cond.value,
-          filterIncludeModels
+          filterIncludeModels,
+          Lead, Deal, LeadOrganization, LeadPerson
         );
       });
 
@@ -1109,7 +1116,7 @@ async function generateDealPerformanceData(
   } else if (xaxis === "contactPerson") {
     // Special handling for contactPerson - join with Person table
     includeModels.push({
-      model: Person,
+      model: LeadPerson,
       as: "Person",
       attributes: [],
       required: false,
@@ -1120,7 +1127,7 @@ async function generateDealPerformanceData(
   } else if (xaxis === "organization") {
     // Special handling for organization - join with Organization table
     includeModels.push({
-      model: Organization,
+      model: LeadOrganization,
       as: "Organization",
       attributes: [],
       required: false,
@@ -1167,7 +1174,7 @@ async function generateDealPerformanceData(
     } else if (segmentedBy === "contactPerson") {
       // Special handling for contactPerson - join with Person table
       includeModels.push({
-        model: Person,
+        model: LeadPerson,
         as: "Person",
         attributes: [],
         required: false,
@@ -1177,7 +1184,7 @@ async function generateDealPerformanceData(
     } else if (segmentedBy === "organization") {
       // Special handling for organization - join with Organization table
       includeModels.push({
-        model: Organization,
+        model: LeadOrganization,
         as: "Organization",
         attributes: [],
         required: false,
@@ -1578,7 +1585,7 @@ function getOrderClause(yaxis, xaxis, duration) {
   }
 }
 
-function getConditionObject(column, operator, value, includeModels = []) {
+function getConditionObject(column, operator, value, includeModels = [], Lead, Deal, LeadOrganization, LeadPerson) {
   let conditionValue = value;
 
   // Check if column contains a dot (indicating a related table field)
@@ -1624,7 +1631,7 @@ function getConditionObject(column, operator, value, includeModels = []) {
     // For related tables, use the proper Sequelize syntax
     if (tableAlias !== "Deal") {
       // Add the required include model
-      addIncludeModel(tableAlias, includeModels);
+      addIncludeModel(tableAlias, includeModels, Lead, Deal, LeadOrganization, LeadPerson);
 
       // Return the condition with proper nested syntax
       if (operator === "between" || operator === "=" || operator === "is") {
@@ -1685,7 +1692,7 @@ function getConditionObject(column, operator, value, includeModels = []) {
 
       // For related tables
       if (hasRelation) {
-        addIncludeModel(tableAlias, includeModels);
+        addIncludeModel(tableAlias, includeModels, Lead, Deal, LeadOrganization, LeadPerson);
         return {
           [`$${tableAlias}.${fieldName}$`]: {
             [Op.between]: [startOfDay, endOfDay],
@@ -1709,7 +1716,7 @@ function getConditionObject(column, operator, value, includeModels = []) {
 
       // For related tables
       if (hasRelation) {
-        addIncludeModel(tableAlias, includeModels);
+        addIncludeModel(tableAlias, includeModels, Lead, Deal, LeadOrganization, LeadPerson);
         return {
           [`$${tableAlias}.${fieldName}$`]: {
             [Op.notBetween]: [startOfDay, endOfDay],
@@ -1735,7 +1742,7 @@ function getConditionObject(column, operator, value, includeModels = []) {
 
   // Handle related table joins
   if (hasRelation) {
-    addIncludeModel(tableAlias, includeModels);
+    addIncludeModel(tableAlias, includeModels, Lead, Deal, LeadOrganization, LeadPerson);
 
     const op = getSequelizeOperator(operator);
 
@@ -1777,13 +1784,13 @@ function getConditionObject(column, operator, value, includeModels = []) {
 }
 
 // Helper function to add include models
-function addIncludeModel(tableAlias, includeModels) {
+function addIncludeModel(tableAlias, includeModels, Lead, Deal, LeadOrganization, LeadPerson) {
   let modelConfig;
 
   switch (tableAlias) {
     case "Organization":
       modelConfig = {
-        model: Organization,
+        model: LeadOrganization,
         as: "Organization",
         required: false,
         attributes: [],
@@ -1791,7 +1798,7 @@ function addIncludeModel(tableAlias, includeModels) {
       break;
     case "Person":
       modelConfig = {
-        model: Person,
+        model: LeadPerson,
         as: "Person",
         required: false,
         attributes: [],
@@ -1884,7 +1891,8 @@ async function generateExistingDealPerformanceDataForSave(
   existingyaxis,
   existingDurationUnit,
   existingSegmentedBy,
-  filters
+  filters,
+  MasterUser, Activity,  LeadPerson, Deal, Lead, LeadOrganization
 ) {
   let includeModels = [];
 
@@ -1949,7 +1957,8 @@ async function generateExistingDealPerformanceDataForSave(
           cond.column,
           cond.operator,
           cond.value,
-          filterIncludeModels
+          filterIncludeModels,
+          Lead, Deal, LeadOrganization, LeadPerson
         );
       });
 
@@ -2019,7 +2028,7 @@ async function generateExistingDealPerformanceDataForSave(
   } else if (existingxaxis === "contactPerson") {
     // Special handling for contactPerson - join with Person table
     includeModels.push({
-      model: Person,
+      model: LeadPerson,
       as: "Person",
       attributes: [],
       required: false,
@@ -2030,7 +2039,7 @@ async function generateExistingDealPerformanceDataForSave(
   } else if (existingxaxis === "organization") {
     // Special handling for organization - join with Organization table
     includeModels.push({
-      model: Organization,
+      model: LeadOrganization,
       as: "Organization",
       attributes: [],
       required: false,
@@ -2081,7 +2090,7 @@ async function generateExistingDealPerformanceDataForSave(
     } else if (existingSegmentedBy === "contactPerson") {
       // Special handling for contactPerson - join with Person table
       includeModels.push({
-        model: Person,
+        model: LeadPerson,
         as: "Person",
         attributes: [],
         required: false,
@@ -2092,7 +2101,7 @@ async function generateExistingDealPerformanceDataForSave(
     } else if (existingSegmentedBy === "organization") {
       // Special handling for organization - join with Organization table
       includeModels.push({
-        model: Organization,
+        model: LeadOrganization,
         as: "Organization",
         attributes: [],
         required: false,
@@ -2394,7 +2403,8 @@ async function generateDealPerformanceDataForSave(
   yaxis,
   durationUnit,
   segmentedBy,
-  filters
+  filters,
+  MasterUser, Activity,  LeadPerson, Deal, Lead, LeadOrganization
 ) {
   let includeModels = [];
 
@@ -2465,7 +2475,8 @@ async function generateDealPerformanceDataForSave(
           cond.column,
           cond.operator,
           cond.value,
-          filterIncludeModels
+          filterIncludeModels,
+          Lead, Deal, LeadOrganization, LeadPerson
         );
       });
 
@@ -2531,7 +2542,7 @@ async function generateDealPerformanceDataForSave(
   } else if (xaxis === "contactPerson") {
     // Special handling for contactPerson - join with Person table
     includeModels.push({
-      model: Person,
+      model: LeadPerson,
       as: "Person",
       attributes: [],
       required: false,
@@ -2542,7 +2553,7 @@ async function generateDealPerformanceDataForSave(
   } else if (xaxis === "organization") {
     // Special handling for organization - join with Organization table
     includeModels.push({
-      model: Organization,
+      model: LeadOrganization,
       as: "Organization",
       attributes: [],
       required: false,
@@ -2589,7 +2600,7 @@ async function generateDealPerformanceDataForSave(
     } else if (segmentedBy === "contactPerson") {
       // Special handling for contactPerson - join with Person table
       includeModels.push({
-        model: Person,
+        model: LeadPerson,
         as: "Person",
         attributes: [],
         required: false,
@@ -2600,7 +2611,7 @@ async function generateDealPerformanceDataForSave(
     } else if (segmentedBy === "organization") {
       // Special handling for organization - join with Organization table
       includeModels.push({
-        model: Organization,
+        model: LeadOrganization,
         as: "Organization",
         attributes: [],
         required: false,
@@ -2896,6 +2907,7 @@ async function generateDealPerformanceDataForSave(
 }
 
 exports.saveDealPerformReport = async (req, res) => {
+  const { Report, MasterUser, Activity,  LeadPerson, Deal, Lead, LeadOrganization, Dashboard } = req.models;
   try {
     const {
       reportId,
@@ -2942,7 +2954,8 @@ exports.saveDealPerformReport = async (req, res) => {
             yaxis,
             durationUnit,
             segmentedBy,
-            filters
+            filters,
+            MasterUser, Activity,  LeadPerson, Deal, Lead, LeadOrganization
           );
           reportData = result.data;
           paginationInfo = result.pagination;
@@ -3009,7 +3022,8 @@ exports.saveDealPerformReport = async (req, res) => {
             existingyaxis,
             existingDurationUnit,
             existingSegmentedBy,
-            existingfilters
+            existingfilters,
+            MasterUser, Activity,  LeadPerson, Deal, Lead, LeadOrganization
           );
           reportData = result.data;
           paginationInfo = result.pagination;
@@ -3121,7 +3135,7 @@ exports.saveDealPerformReport = async (req, res) => {
 
     for (const dashboardId of dashboardIdsArray) {
       // Verify dashboard ownership
-      const dashboard = await DASHBOARD.findOne({
+      const dashboard = await Dashboard.findOne({
         where: { dashboardId, ownerId },
       });
       if (!dashboard) {
@@ -3564,6 +3578,7 @@ exports.getDealPerformReportSummary = async (req, res) => {
 };
 
 exports.createDealConversionReport = async (req, res) => {
+  const { Report, MasterUser, Activity,  LeadPerson, Deal, Lead, LeadOrganization, Dashboard } = req.models;
   try {
     const {
       reportId,
@@ -3834,7 +3849,8 @@ exports.createDealConversionReport = async (req, res) => {
             segmentedBy,
             filters,
             page,
-            limit
+            limit,
+            MasterUser, Activity,  LeadPerson, Deal, Lead, LeadOrganization
           );
           reportData = result.data;
           paginationInfo = result.pagination;
@@ -3920,7 +3936,8 @@ exports.createDealConversionReport = async (req, res) => {
             existingSegmentedBy,
             existingfilters,
             page,
-            limit
+            limit,
+            MasterUser, Activity, LeadPerson, Deal, Lead, LeadOrganization
           );
           reportData = result.data;
           paginationInfo = result.pagination;
@@ -4000,7 +4017,8 @@ async function generateDealConversionData(
   segmentedBy,
   filters,
   page = 1,
-  limit = 8
+  limit = 8,
+  MasterUser, Activity,  LeadPerson, Deal, Lead, LeadOrganization
 ) {
   let includeModels = [];
 
@@ -4083,7 +4101,8 @@ async function generateDealConversionData(
           cond.column,
           cond.operator,
           cond.value,
-          filterIncludeModels
+          filterIncludeModels,
+           Lead, Deal, LeadOrganization, LeadPerson
         );
       });
 
@@ -4463,7 +4482,8 @@ async function generateExistingDealConversionData(
   existingSegmentedBy,
   filters,
   page = 1,
-  limit = 8
+  limit = 8,
+  MasterUser, Activity,  LeadPerson, Deal, Lead, LeadOrganization
 ) {
   let includeModels = [];
   // Calculate offset for pagination
@@ -4536,7 +4556,8 @@ async function generateExistingDealConversionData(
           cond.column,
           cond.operator,
           cond.value,
-          filterIncludeModels
+          filterIncludeModels,
+          Lead, Deal, LeadOrganization, LeadPerson
         );
       });
 
@@ -4918,7 +4939,8 @@ async function generateDealConversionDataForSave(
   yaxis,
   durationUnit,
   segmentedBy,
-  filters
+  filters,
+  MasterUser, Activity,  LeadPerson, Deal, Lead, LeadOrganization
 ) {
   let includeModels = [];
 
@@ -4998,7 +5020,8 @@ async function generateDealConversionDataForSave(
           cond.column,
           cond.operator,
           cond.value,
-          filterIncludeModels
+          filterIncludeModels,
+          Lead, Deal, LeadOrganization, LeadPerson
         );
       });
 
@@ -5326,7 +5349,8 @@ async function generateExistingDealConversionDataForSave(
   existingyaxis,
   existingDurationUnit,
   existingSegmentedBy,
-  filters
+  filters,
+   MasterUser, Activity,  LeadPerson, Deal, Lead, LeadOrganization
 ) {
   let includeModels = [];
 
@@ -5400,7 +5424,8 @@ async function generateExistingDealConversionDataForSave(
           cond.column,
           cond.operator,
           cond.value,
-          filterIncludeModels
+          filterIncludeModels,
+          Lead, Deal, LeadOrganization, LeadPerson
         );
       });
 
@@ -5722,6 +5747,7 @@ async function generateExistingDealConversionDataForSave(
 }
 
 exports.saveDealConversionReport = async (req, res) => {
+  const { Report, MasterUser, Activity,  LeadPerson, Deal, Lead, LeadOrganization, Dashboard } = req.models;
   try {
     const {
       reportId,
@@ -5768,7 +5794,8 @@ exports.saveDealConversionReport = async (req, res) => {
             yaxis,
             durationUnit,
             segmentedBy,
-            filters
+            filters,
+            MasterUser, Activity,  LeadPerson, Deal, Lead, LeadOrganization
           );
           reportData = result.data;
           paginationInfo = result.pagination;
@@ -5835,7 +5862,8 @@ exports.saveDealConversionReport = async (req, res) => {
             existingyaxis,
             existingDurationUnit,
             existingSegmentedBy,
-            existingfilters
+            existingfilters,
+            MasterUser, Activity,  LeadPerson, Deal, Lead, LeadOrganization
           );
           reportData = result.data;
           paginationInfo = result.pagination;
@@ -5947,7 +5975,7 @@ exports.saveDealConversionReport = async (req, res) => {
 
     for (const dashboardId of dashboardIdsArray) {
       // Verify dashboard ownership
-      const dashboard = await DASHBOARD.findOne({
+      const dashboard = await Dashboard.findOne({
         where: { dashboardId, ownerId },
       });
       if (!dashboard) {
@@ -6008,6 +6036,7 @@ exports.saveDealConversionReport = async (req, res) => {
 };
 
 exports.getDealConversionReportSummary = async (req, res) => {
+  const { Report, MasterUser, Activity,  LeadPerson, Deal, Lead, LeadOrganization, Dashboard } = req.models;
   try {
     const {
       reportId,
@@ -6080,7 +6109,8 @@ exports.getDealConversionReportSummary = async (req, res) => {
             cond.column,
             cond.operator,
             cond.value,
-            filterIncludeModels
+            filterIncludeModels,
+            Lead, Deal, LeadOrganization, LeadPerson
           );
         });
 
@@ -6194,7 +6224,8 @@ exports.getDealConversionReportSummary = async (req, res) => {
         segmentedBy,
         filters,
         page,
-        limit
+        limit,
+        MasterUser, Activity,  LeadPerson, Deal, Lead, LeadOrganization
       );
       reportData = reportResult.data;
 
@@ -6261,7 +6292,8 @@ exports.getDealConversionReportSummary = async (req, res) => {
         existingSegmentedBy,
         existingfilters,
         page,
-        limit
+        limit,
+        MasterUser, Activity,  LeadPerson, Deal, Lead, LeadOrganization
       );
       reportData = reportResult.data;
 
@@ -6370,6 +6402,7 @@ exports.getDealConversionReportSummary = async (req, res) => {
 };
 
 exports.createDealProgressReport = async (req, res) => {
+  const { Report, MasterUser, Activity,  LeadPerson, Deal, Lead, LeadOrganization, Dashboard, Pipeline, PipelineStage } = req.models;
   try {
     const {
       reportId,
@@ -6580,7 +6613,8 @@ exports.createDealProgressReport = async (req, res) => {
           selectedPipeline = await getDefaultPipeline(
             ownerId,
             role,
-            pipelineId
+            pipelineId,
+            Pipeline
           );
 
           // If no pipeline found but pipelineId was provided, return error
@@ -6610,7 +6644,8 @@ exports.createDealProgressReport = async (req, res) => {
             filters,
             page,
             limit,
-            selectedPipeline.id
+            selectedPipeline.id,
+            MasterUser, Activity,  LeadPerson, Deal, Lead, LeadOrganization, PipelineStage
           );
           reportData = result.data;
           paginationInfo = result.pagination;
@@ -6697,7 +6732,7 @@ exports.createDealProgressReport = async (req, res) => {
         try {
           // Use existing pipeline or get default
           selectedPipeline =
-            existingPipeline || (await getDefaultPipeline(ownerId, role));
+            existingPipeline || (await getDefaultPipeline(ownerId, role, pipelineId, Pipeline));
 
           if (!selectedPipeline) {
             return res.status(404).json({
@@ -6717,7 +6752,8 @@ exports.createDealProgressReport = async (req, res) => {
             existingfilters,
             page,
             limit,
-            selectedPipeline.id
+            selectedPipeline.id,
+            MasterUser, Activity,  LeadPerson, Deal, Lead, LeadOrganization, PipelineStage
           );
           reportData = result.data;
           paginationInfo = result.pagination;
@@ -6792,13 +6828,8 @@ exports.createDealProgressReport = async (req, res) => {
 };
 
 // Helper function to get default pipeline
-async function getDefaultPipeline(ownerId, role, requestedPipelineId = null) {
+async function getDefaultPipeline(ownerId, role, requestedPipelineId = null, Pipeline) {
   try {
-    console.log("Getting pipeline for:", {
-      requestedPipelineId,
-      ownerId,
-      role,
-    });
 
     // If a specific pipeline ID is requested, try to use that
     if (requestedPipelineId) {
@@ -7070,7 +7101,8 @@ async function generateProgressExistingActivityPerformanceData(
   filters,
   page = 1,
   limit = 8,
-  pipelineId = null
+  pipelineId = null,
+  MasterUser, Activity,  LeadPerson, Deal, Lead, LeadOrganization, PipelineStage
 ) {
   let includeModels = [];
   // Calculate offset for pagination
@@ -7231,7 +7263,7 @@ async function generateProgressExistingActivityPerformanceData(
     groupBy.push("stageData.stageName");
   } else if (existingxaxis === "contactPerson") {
     includeModels.push({
-      model: Person,
+      model: LeadPerson,
       as: "Person",
       attributes: [],
       required: false,
@@ -7241,7 +7273,7 @@ async function generateProgressExistingActivityPerformanceData(
     attributes.push([Sequelize.col("Person.contactPerson"), "xValue"]);
   } else if (existingxaxis === "organization") {
     includeModels.push({
-      model: Organization,
+      model: LeadOrganization,
       as: "Organization",
       attributes: [],
       required: false,
@@ -7305,7 +7337,7 @@ async function generateProgressExistingActivityPerformanceData(
       groupBy.push("stageData.stageName");
     } else if (existingSegmentedBy === "contactPerson") {
       includeModels.push({
-        model: Person,
+        model: LeadPerson,
         as: "Person",
         attributes: [],
         required: false,
@@ -7315,7 +7347,7 @@ async function generateProgressExistingActivityPerformanceData(
       attributes.push([Sequelize.col("Person.contactPerson"), "xValue"]);
     } else if (existingSegmentedBy === "organization") {
       includeModels.push({
-        model: Organization,
+        model: LeadOrganization,
         as: "Organization",
         attributes: [],
         required: false,
@@ -7531,7 +7563,8 @@ async function generateProgressActivityPerformanceData(
   filters,
   page = 1,
   limit = 8,
-  pipelineId = null
+  pipelineId = null,
+  MasterUser, Activity,  LeadPerson, Deal, Lead, LeadOrganization, PipelineStage
 ) {
   let includeModels = [];
   const offset = (page - 1) * limit;
@@ -7682,7 +7715,7 @@ async function generateProgressActivityPerformanceData(
     groupBy.push("stageData.stageName");
   } else if (xaxis === "contactPerson") {
     includeModels.push({
-      model: Person,
+      model: LeadPerson,
       as: "Person",
       attributes: [],
       required: false,
@@ -7692,7 +7725,7 @@ async function generateProgressActivityPerformanceData(
     attributes.push([Sequelize.col("Person.contactPerson"), "xValue"]);
   } else if (xaxis === "organization") {
     includeModels.push({
-      model: Organization,
+      model: LeadOrganization,
       as: "Organization",
       attributes: [],
       required: false,
@@ -7734,7 +7767,7 @@ async function generateProgressActivityPerformanceData(
       groupBy.push(segmentDateExpression);
     } else if (segmentedBy === "contactPerson") {
       includeModels.push({
-        model: Person,
+        model: LeadPerson,
         as: "Person",
         attributes: [],
         required: false,
@@ -7743,7 +7776,7 @@ async function generateProgressActivityPerformanceData(
       attributes.push([Sequelize.col("Person.contactPerson"), "segmentValue"]);
     } else if (segmentedBy === "organization") {
       includeModels.push({
-        model: Organization,
+        model: LeadOrganization,
         as: "Organization",
         attributes: [],
         required: false,
@@ -8058,6 +8091,7 @@ async function generateProgressActivityPerformanceData(
 }
 
 exports.saveDealProgressReport = async (req, res) => {
+  const { Report, MasterUser, Activity,  LeadPerson, Deal, Lead, LeadOrganization, Dashboard, Pipeline, PipelineStage } = req.models;
   try {
     const {
       reportId,
@@ -8102,7 +8136,8 @@ exports.saveDealProgressReport = async (req, res) => {
             yaxis,
             durationUnit,
             segmentedBy,
-            filters
+            filters,
+            MasterUser, Activity,  LeadPerson, Deal, Lead, LeadOrganization, Pipeline, PipelineStage
           );
           reportData = result.data;
           totalValue = result.totalValue;
@@ -8168,7 +8203,8 @@ exports.saveDealProgressReport = async (req, res) => {
               existingyaxis,
               existingDurationUnit,
               existingSegmentedBy,
-              existingfilters
+              existingfilters,
+              MasterUser, Activity,  LeadPerson, Deal, Lead, LeadOrganization, Pipeline, PipelineStage
             );
           reportData = result.data;
           totalValue = result.totalValue;
@@ -8279,7 +8315,7 @@ exports.saveDealProgressReport = async (req, res) => {
 
     for (const dashboardId of dashboardIdsArray) {
       // Verify dashboard ownership
-      const dashboard = await DASHBOARD.findOne({
+      const dashboard = await Dashboard.findOne({
         where: { dashboardId, ownerId },
       });
       if (!dashboard) {
@@ -8349,7 +8385,8 @@ async function generateProgressActivityPerformanceDataForSave(
   filters,
   page = 1,
   limit = 8,
-  pipelineId = null
+  pipelineId = null,
+  MasterUser, Activity,  LeadPerson, Deal, Lead, LeadOrganization, Pipeline, PipelineStage
 ) {
   let includeModels = [];
   const baseWhere = {};
@@ -8496,7 +8533,7 @@ async function generateProgressActivityPerformanceDataForSave(
     groupBy.push("stageData.stageName");
   } else if (xaxis === "contactPerson") {
     includeModels.push({
-      model: Person,
+      model: LeadPerson,
       as: "Person",
       attributes: [],
       required: false,
@@ -8506,7 +8543,7 @@ async function generateProgressActivityPerformanceDataForSave(
     attributes.push([Sequelize.col("Person.contactPerson"), "xValue"]);
   } else if (xaxis === "organization") {
     includeModels.push({
-      model: Organization,
+      model: LeadOrganization,
       as: "Organization",
       attributes: [],
       required: false,
@@ -8547,7 +8584,7 @@ async function generateProgressActivityPerformanceDataForSave(
       groupBy.push(segmentDateExpression);
     } else if (segmentedBy === "contactPerson") {
       includeModels.push({
-        model: Person,
+        model: LeadPerson,
         as: "Person",
         attributes: [],
         required: false,
@@ -8556,7 +8593,7 @@ async function generateProgressActivityPerformanceDataForSave(
       attributes.push([Sequelize.col("Person.contactPerson"), "segmentValue"]);
     } else if (segmentedBy === "organization") {
       includeModels.push({
-        model: Organization,
+        model: LeadOrganization,
         as: "Organization",
         attributes: [],
         required: false,
@@ -8738,7 +8775,8 @@ async function generateProgressExistingActivityPerformanceDataForSave(
   filters,
   page = 1,
   limit = 8,
-  pipelineId = null
+  pipelineId = null,
+  MasterUser, Activity,  LeadPerson, Deal, Lead, LeadOrganization, Pipeline, PipelineStage
 ) {
   let includeModels = [];
   const baseWhere = {};
@@ -9061,6 +9099,7 @@ async function generateProgressExistingActivityPerformanceDataForSave(
 }
 
 exports.getDealProgressReportSummary = async (req, res) => {
+  const { Report, MasterUser, Activity,  LeadPerson, Deal, Lead, LeadOrganization, Dashboard, Pipeline, PipelineStage } = req.models;
   try {
     const {
       reportId,
@@ -9133,7 +9172,8 @@ exports.getDealProgressReportSummary = async (req, res) => {
             cond.column,
             cond.operator,
             cond.value,
-            filterIncludeModels
+            filterIncludeModels,
+            Lead, Deal, LeadOrganization, LeadPerson
           );
         });
 
@@ -9247,7 +9287,8 @@ exports.getDealProgressReportSummary = async (req, res) => {
         segmentedBy,
         filters,
         page,
-        limit
+        limit,
+        MasterUser, Activity,  LeadPerson, Deal, Lead, LeadOrganization, PipelineStage
       );
       reportData = reportResult.data;
 
@@ -9315,7 +9356,8 @@ exports.getDealProgressReportSummary = async (req, res) => {
           existingSegmentedBy,
           existingfilters,
           page,
-          limit
+          limit,
+          MasterUser, Activity,  LeadPerson, Deal, Lead, LeadOrganization, PipelineStage
         );
       reportData = reportResult.data;
 
@@ -9424,6 +9466,7 @@ exports.getDealProgressReportSummary = async (req, res) => {
 };
 
 exports.createDealDurationReport = async (req, res) => {
+  const { Report, MasterUser, Activity,  LeadPerson, Deal, Lead, LeadOrganization, Dashboard, Pipeline, PipelineStage } = req.models;
   try {
     const {
       reportId,
@@ -9640,7 +9683,8 @@ exports.createDealDurationReport = async (req, res) => {
             segmentedBy,
             filters,
             page,
-            limit
+            limit,
+            MasterUser, Activity,  LeadPerson, Deal, Lead, LeadOrganization, Pipeline, PipelineStage
           );
           reportData = result.data;
           paginationInfo = result.pagination;
@@ -9717,7 +9761,8 @@ exports.createDealDurationReport = async (req, res) => {
             existingSegmentedBy,
             existingfilters,
             page,
-            limit
+            limit,
+            MasterUser, Activity,  LeadPerson, Deal, Lead, LeadOrganization, Pipeline, PipelineStage
           );
           reportData = result.data;
           paginationInfo = result.pagination;
@@ -9779,7 +9824,8 @@ async function generateExistingDealDurationData(
   existingSegmentedBy,
   filters,
   page = 1,
-  limit = 8
+  limit = 8,
+   MasterUser, Activity, LeadPerson, Deal, Lead, LeadOrganization, Pipeline, PipelineStage
 ) {
   let includeModels = [];
   // Calculate offset for pagination
@@ -9846,7 +9892,8 @@ async function generateExistingDealDurationData(
           cond.column,
           cond.operator,
           cond.value,
-          filterIncludeModels
+          filterIncludeModels,
+          Lead, Deal, LeadOrganization, LeadPerson
         );
       });
 
@@ -9912,7 +9959,7 @@ async function generateExistingDealDurationData(
     attributes.push([Sequelize.col("assignedUser.creatorstatus"), "xValue"]);
   } else if (existingxaxis === "contactPerson") {
     includeModels.push({
-      model: Person,
+      model: LeadPerson,
       as: "Person",
       attributes: [],
       required: false,
@@ -9922,7 +9969,7 @@ async function generateExistingDealDurationData(
     attributes.push([Sequelize.col("Person.contactPerson"), "xValue"]);
   } else if (existingxaxis === "organization") {
     includeModels.push({
-      model: Organization,
+      model: LeadOrganization,
       as: "Organization",
       attributes: [],
       required: false,
@@ -9982,7 +10029,7 @@ async function generateExistingDealDurationData(
       attributes.push([Sequelize.col("assignedUser.team"), "segmentValue"]);
     } else if (existingSegmentedBy === "contactPerson") {
       includeModels.push({
-        model: Person,
+        model: LeadPerson,
         as: "Person",
         attributes: [],
         required: false,
@@ -9992,7 +10039,7 @@ async function generateExistingDealDurationData(
       attributes.push([Sequelize.col("Person.contactPerson"), "segmentValue"]);
     } else if (existingSegmentedBy === "organization") {
       includeModels.push({
-        model: Organization,
+        model: LeadOrganization,
         as: "Organization",
         attributes: [],
         required: false,
@@ -10348,7 +10395,8 @@ async function generateDealDurationData(
   segmentedBy,
   filters,
   page = 1,
-  limit = 8
+  limit = 8,
+  MasterUser, Activity, LeadPerson, Deal, Lead, LeadOrganization, Pipeline, PipelineStage
 ) {
   let includeModels = [];
 
@@ -10422,7 +10470,8 @@ async function generateDealDurationData(
           cond.column,
           cond.operator,
           cond.value,
-          filterIncludeModels
+          filterIncludeModels,
+          Lead, Deal, LeadOrganization, LeadPerson
         );
       });
 
@@ -10485,7 +10534,7 @@ async function generateDealDurationData(
     attributes.push([Sequelize.col("assignedUser.creatorstatus"), "xValue"]);
   } else if (xaxis === "contactPerson") {
     includeModels.push({
-      model: Person,
+      model: LeadPerson,
       as: "Person",
       attributes: [],
       required: false,
@@ -10495,7 +10544,7 @@ async function generateDealDurationData(
     attributes.push([Sequelize.col("Person.contactPerson"), "xValue"]);
   } else if (xaxis === "organization") {
     includeModels.push({
-      model: Organization,
+      model: LeadOrganization,
       as: "Organization",
       attributes: [],
       required: false,
@@ -10549,7 +10598,7 @@ async function generateDealDurationData(
       attributes.push([Sequelize.col("assignedUser.team"), "segmentValue"]);
     } else if (segmentedBy === "contactPerson") {
       includeModels.push({
-        model: Person,
+        model: LeadPerson,
         as: "Person",
         attributes: [],
         required: false,
@@ -10559,7 +10608,7 @@ async function generateDealDurationData(
       attributes.push([Sequelize.col("Person.contactPerson"), "segmentValue"]);
     } else if (segmentedBy === "organization") {
       includeModels.push({
-        model: Organization,
+        model: LeadOrganization,
         as: "Organization",
         attributes: [],
         required: false,
@@ -10938,7 +10987,8 @@ async function generateExistingDealDurationDataForSave(
   duration,
   existingDurationUnit,
   existingSegmentedBy,
-  filters
+  filters,
+  MasterUser, Activity, LeadPerson, Deal, Lead, LeadOrganization, Pipeline, PipelineStage
 ) {
   let includeModels = [];
 
@@ -11003,7 +11053,8 @@ async function generateExistingDealDurationDataForSave(
           cond.column,
           cond.operator,
           cond.value,
-          filterIncludeModels
+          filterIncludeModels,
+          Lead, Deal, LeadOrganization, LeadPerson
         );
       });
 
@@ -11069,7 +11120,7 @@ async function generateExistingDealDurationDataForSave(
     attributes.push([Sequelize.col("assignedUser.creatorstatus"), "xValue"]);
   } else if (existingxaxis === "contactPerson") {
     includeModels.push({
-      model: Person,
+      model: LeadPerson,
       as: "Person",
       attributes: [],
       required: false,
@@ -11079,7 +11130,7 @@ async function generateExistingDealDurationDataForSave(
     attributes.push([Sequelize.col("Person.contactPerson"), "xValue"]);
   } else if (existingxaxis === "organization") {
     includeModels.push({
-      model: Organization,
+      model: LeadOrganization,
       as: "Organization",
       attributes: [],
       required: false,
@@ -11139,7 +11190,7 @@ async function generateExistingDealDurationDataForSave(
       attributes.push([Sequelize.col("assignedUser.team"), "segmentValue"]);
     } else if (existingSegmentedBy === "contactPerson") {
       includeModels.push({
-        model: Person,
+        model: LeadPerson,
         as: "Person",
         attributes: [],
         required: false,
@@ -11149,7 +11200,7 @@ async function generateExistingDealDurationDataForSave(
       attributes.push([Sequelize.col("Person.contactPerson"), "segmentValue"]);
     } else if (existingSegmentedBy === "organization") {
       includeModels.push({
-        model: Organization,
+        model: LeadOrganization,
         as: "Organization",
         attributes: [],
         required: false,
@@ -11445,7 +11496,8 @@ async function generateDealDurationDataForSave(
   duration,
   durationUnit,
   segmentedBy,
-  filters
+  filters,
+  MasterUser, Activity, LeadPerson, Deal, Lead, LeadOrganization, Pipeline, PipelineStage
 ) {
   let includeModels = [];
 
@@ -11516,7 +11568,8 @@ async function generateDealDurationDataForSave(
           cond.column,
           cond.operator,
           cond.value,
-          filterIncludeModels
+          filterIncludeModels,
+          Lead, Deal, LeadOrganization, LeadPerson
         );
       });
 
@@ -11579,7 +11632,7 @@ async function generateDealDurationDataForSave(
     attributes.push([Sequelize.col("assignedUser.creatorstatus"), "xValue"]);
   } else if (xaxis === "contactPerson") {
     includeModels.push({
-      model: Person,
+      model: LeadPerson,
       as: "Person",
       attributes: [],
       required: false,
@@ -11589,7 +11642,7 @@ async function generateDealDurationDataForSave(
     attributes.push([Sequelize.col("Person.contactPerson"), "xValue"]);
   } else if (xaxis === "organization") {
     includeModels.push({
-      model: Organization,
+      model: LeadOrganization,
       as: "Organization",
       attributes: [],
       required: false,
@@ -11643,7 +11696,7 @@ async function generateDealDurationDataForSave(
       attributes.push([Sequelize.col("assignedUser.team"), "segmentValue"]);
     } else if (segmentedBy === "contactPerson") {
       includeModels.push({
-        model: Person,
+        model: LeadPerson,
         as: "Person",
         attributes: [],
         required: false,
@@ -11653,7 +11706,7 @@ async function generateDealDurationDataForSave(
       attributes.push([Sequelize.col("Person.contactPerson"), "segmentValue"]);
     } else if (segmentedBy === "organization") {
       includeModels.push({
-        model: Organization,
+        model: LeadOrganization,
         as: "Organization",
         attributes: [],
         required: false,
@@ -11927,6 +11980,7 @@ async function generateDealDurationDataForSave(
 }
 
 exports.saveDealDurationReport = async (req, res) => {
+  const { Report, MasterUser, Activity,  LeadPerson, Deal, Lead, LeadOrganization, Dashboard, Pipeline, PipelineStage } = req.models;
   try {
     const {
       reportId,
@@ -11974,7 +12028,8 @@ exports.saveDealDurationReport = async (req, res) => {
             duration,
             durationUnit,
             segmentedBy,
-            filters
+            filters,
+            MasterUser, Activity, LeadPerson, Deal, Lead, LeadOrganization, Pipeline, PipelineStage
           );
           reportData = result.data;
           paginationInfo = result.pagination;
@@ -12041,7 +12096,8 @@ exports.saveDealDurationReport = async (req, res) => {
             duration,
             existingDurationUnit,
             existingSegmentedBy,
-            existingfilters
+            existingfilters,
+            MasterUser, Activity, LeadPerson, Deal, Lead, LeadOrganization, Pipeline, PipelineStage
           );
           reportData = result.data;
           paginationInfo = result.pagination;
@@ -12153,7 +12209,7 @@ exports.saveDealDurationReport = async (req, res) => {
 
     for (const dashboardId of dashboardIdsArray) {
       // Verify dashboard ownership
-      const dashboard = await DASHBOARD.findOne({
+      const dashboard = await Dashboard.findOne({
         where: { dashboardId, ownerId },
       });
       if (!dashboard) {
@@ -12215,6 +12271,7 @@ exports.saveDealDurationReport = async (req, res) => {
 };
 
 exports.getDealDurationReportSummary = async (req, res) => {
+  const { Report, MasterUser, Activity,  LeadPerson, Deal, Lead, LeadOrganization, Dashboard, Pipeline, PipelineStage } = req.models;
   try {
     const {
       reportId,
@@ -12289,7 +12346,8 @@ exports.getDealDurationReportSummary = async (req, res) => {
             cond.column,
             cond.operator,
             cond.value,
-            filterIncludeModels
+            filterIncludeModels,
+            Lead, Deal, LeadOrganization, LeadPerson
           );
         });
 
@@ -12404,7 +12462,8 @@ exports.getDealDurationReportSummary = async (req, res) => {
         segmentedBy,
         filters,
         page,
-        limit
+        limit,
+        MasterUser, Activity, LeadPerson, Deal, Lead, LeadOrganization, Pipeline, PipelineStage
       );
       reportData = reportResult.data;
 
@@ -12472,7 +12531,8 @@ exports.getDealDurationReportSummary = async (req, res) => {
         existingSegmentedBy,
         existingfilters,
         page,
-        limit
+        limit,
+        MasterUser, Activity, LeadPerson, Deal, Lead, LeadOrganization, Pipeline, PipelineStage
       );
       reportData = reportResult.data;
 
@@ -12581,6 +12641,7 @@ exports.getDealDurationReportSummary = async (req, res) => {
 };
 
 exports.createFunnelDealConversionReport = async (req, res) => {
+  const { Report, MasterUser, Activity,  LeadPerson, Deal, Lead, LeadOrganization, Dashboard, Pipeline, PipelineStage } = req.models;
   try {
     const {
       reportId,
@@ -12770,7 +12831,8 @@ exports.createFunnelDealConversionReport = async (req, res) => {
             pipelineStages,
             filters,
             page,
-            limit
+            limit,
+            MasterUser, Activity,  LeadPerson, Deal, Lead, LeadOrganization, Pipeline, PipelineStage
           );
 
           reportData = result.data;
@@ -12944,7 +13006,8 @@ exports.createFunnelDealConversionReport = async (req, res) => {
             pipelineStages,
             existingFilters,
             page,
-            limit
+            limit,
+            MasterUser, Activity,  LeadPerson, Deal, Lead, LeadOrganization, Pipeline, PipelineStage
           );
 
           reportData = result.data;
@@ -13071,6 +13134,7 @@ exports.createFunnelDealConversionReport = async (req, res) => {
 
 // Update the helper functions to also return formatted data
 exports.getDefaultPipeline = async (req, res) => {
+  const { Pipeline, PipelineStage } = req.models;
   try {
     const ownerId = req.adminId;
     const role = req.role;
@@ -13148,6 +13212,7 @@ exports.getDefaultPipeline = async (req, res) => {
 
 // Get all pipelines for dropdown selection
 exports.getAllPipelines = async (req, res) => {
+  const { Pipeline, PipelineStage } = req.models;
   try {
     const ownerId = req.adminId;
     const role = req.role;
@@ -13237,7 +13302,8 @@ async function generateDealConversionFunnelData(
   pipelineStages,
   filters,
   page = 1,
-  limit = 8
+  limit = 8,
+  MasterUser, Activity,  LeadPerson, Deal, Lead, LeadOrganization, Pipeline, PipelineStage
 ) {
   // Create stage name to ID mapping
   const stageNameToId = {};
@@ -13468,7 +13534,8 @@ async function generateExistingDealConversionFunnelData(
   pipelineStages,
   filters,
   page = 1,
-  limit = 8
+  limit = 8,
+  MasterUser, Activity,  LeadPerson, Deal, Lead, LeadOrganization, Pipeline, PipelineStage
 ) {
   // Reuse the same logic as generateDealConversionFunnelData since the data generation is the same
   return await generateDealConversionFunnelData(
@@ -13480,7 +13547,8 @@ async function generateExistingDealConversionFunnelData(
     pipelineStages,
     filters,
     page,
-    limit
+    limit,
+    MasterUser, Activity,  LeadPerson, Deal, Lead, LeadOrganization, Pipeline, PipelineStage
   );
 }
 
@@ -13505,6 +13573,7 @@ function getConditionObjectFunnel(column, operator, value, includeModels) {
 }
 
 exports.saveFunnelDealConversionReport = async (req, res) => {
+  const { Report, MasterUser, Activity,  LeadPerson, Deal, Lead, LeadOrganization, Dashboard, Pipeline, PipelineStage } = req.models;
   try {
     const {
       reportId,
@@ -13578,7 +13647,8 @@ exports.saveFunnelDealConversionReport = async (req, res) => {
             yaxis,
             pipelineId,
             pipelineStages,
-            filters
+            filters,
+            MasterUser, Activity,  LeadPerson, Deal, Lead, LeadOrganization, Pipeline, PipelineStage
           );
 
           reportData = result.data;
@@ -13680,7 +13750,8 @@ exports.saveFunnelDealConversionReport = async (req, res) => {
             existingYaxis,
             existingPipelineId,
             pipelineStages,
-            existingFilters
+            existingFilters,
+            MasterUser, Activity,  LeadPerson, Deal, Lead, LeadOrganization, Pipeline, PipelineStage
           );
 
           reportData = result.data;
@@ -13801,7 +13872,7 @@ exports.saveFunnelDealConversionReport = async (req, res) => {
 
     // Verify dashboard ownership for all dashboards
     for (const dashboardId of dashboardIdsArray) {
-      const dashboard = await DASHBOARD.findOne({
+      const dashboard = await Dashboard.findOne({
         where: { dashboardId, ownerId },
       });
       if (!dashboard) {
@@ -13868,7 +13939,8 @@ async function generateDealConversionFunnelDataForSave(
   yaxis,
   pipelineId,
   pipelineStages,
-  filters
+  filters,
+  MasterUser, Activity,  LeadPerson, Deal, Lead, LeadOrganization, Pipeline, PipelineStage
 ) {
   // Create stage name to ID mapping
   const stageNameToId = {};
@@ -14080,8 +14152,7 @@ async function generateExistingDealConversionFunnelDataForSave(
   pipelineId,
   pipelineStages,
   filters,
-  page = 1,
-  limit = 8
+  MasterUser, Activity,  LeadPerson, Deal, Lead, LeadOrganization, Pipeline, PipelineStage
 ) {
   // Reuse the same logic as generateDealConversionFunnelData since the data generation is the same
   return await generateDealConversionFunnelDataForSave(
@@ -14093,11 +14164,13 @@ async function generateExistingDealConversionFunnelDataForSave(
     pipelineStages,
     filters,
     page,
-    limit
+    limit,
+     MasterUser, Activity,  LeadPerson, Deal, Lead, LeadOrganization, Pipeline, PipelineStage
   );
 }
 
 exports.summaryFunnelDealConversionReport = async (req, res) => {
+  const { Report, MasterUser, Activity,  LeadPerson, Deal, Lead, LeadOrganization, Dashboard, Pipeline, PipelineStage } = req.models;
   try {
     const {
       reportId,
@@ -14328,7 +14401,8 @@ exports.summaryFunnelDealConversionReport = async (req, res) => {
             pipelineStages,
             filters,
             page,
-            limit
+            limit,
+            MasterUser, Activity,  LeadPerson, Deal, Lead, LeadOrganization, Pipeline, PipelineStage
           );
 
           reportData = reportResult.data.stages || [];
@@ -14438,7 +14512,8 @@ exports.summaryFunnelDealConversionReport = async (req, res) => {
                   pipelineStages,
                   existingFilters,
                   page,
-                  limit
+                  limit,
+                  MasterUser, Activity,  LeadPerson, Deal, Lead, LeadOrganization, Pipeline, PipelineStage
                 );
 
               reportData = reportResult.data.stages || [];
@@ -14671,6 +14746,7 @@ exports.summaryFunnelDealConversionReport = async (req, res) => {
  * }
  */
 exports.createDealProgressReportDrillDown = async (req, res) => {
+  const { Report, MasterUser, Activity,  LeadPerson, Deal, Lead, LeadOrganization, Dashboard, Pipeline, PipelineStage } = req.models;
   try {
     const {
       filters,
@@ -14680,21 +14756,12 @@ exports.createDealProgressReportDrillDown = async (req, res) => {
       pipelineId, // Pipeline context
       pipelineStage, // Specific stage if drilling into a breakdown (optional)
       page = 1,
-      limit = 50,
+      limit = 500,
     } = req.body;
 
     const ownerId = req.adminId;
     const role = req.role;
 
-    console.log("🔍 [DealProgressDrillDown] Request params:", {
-      fieldName,
-      fieldValue,
-      id,
-      pipelineId,
-      pipelineStage,
-      page,
-      limit,
-    });
 
     // Validate required parameters
     if (!fieldName) {
@@ -14715,7 +14782,8 @@ exports.createDealProgressReportDrillDown = async (req, res) => {
       pipelineId,
       pipelineStage,
       page,
-      limit
+      limit,
+      MasterUser, Activity,  LeadPerson, Deal, Lead, LeadOrganization, Pipeline, PipelineStage
     );
 
     return res.status(200).json({
@@ -14747,12 +14815,11 @@ async function generateDealProgressDrillDownData(
   pipelineId,
   pipelineStage,
   page = 1,
-  limit = 50
+  limit = 500,
+  MasterUser, Activity,  LeadPerson, Deal, Lead, LeadOrganization, Pipeline, PipelineStage
 ) {
   // const offset = (page - 1) * limit;
   const baseWhere = {};
-
-  console.log("📊 [generateDealProgressDrillDown] Starting data generation");
 
   // Role-based filtering
   if (role !== "admin") {
@@ -14777,7 +14844,7 @@ async function generateDealProgressDrillDownData(
 
     if (validConditions.length > 0) {
       const conditions = validConditions.map((cond) => {
-        return getConditionObject(cond.column, cond.operator, cond.value, []);
+        return getConditionObject(cond.column, cond.operator, cond.value, [], Lead, Deal, LeadOrganization, LeadPerson);
       });
 
       let combinedCondition = conditions[0];
@@ -14794,13 +14861,6 @@ async function generateDealProgressDrillDownData(
       Object.assign(baseWhere, combinedCondition);
     }
   }
-
-  // Apply field-specific filtering based on clicked dimension
-  console.log("🎯 [generateDealProgressDrillDown] Applying field filter:", {
-    fieldName,
-    fieldValue,
-    id,
-  });
 
   let includeModels = [];
 
@@ -14849,7 +14909,7 @@ async function generateDealProgressDrillDownData(
       baseWhere.personId = id;
     }
     includeModels.push({
-      model: Person,
+      model: LeadPerson,
       as: "Person",
       attributes: ["personId", "contactPerson", "email", "phone"],
       required: false,
@@ -14860,7 +14920,7 @@ async function generateDealProgressDrillDownData(
       baseWhere.leadOrganizationId = id;
     }
     includeModels.push({
-      model: Organization,
+      model: LeadOrganization,
       as: "Organization",
       attributes: ["leadOrganizationId", "organization", "address"],
       required: false,
@@ -14888,10 +14948,6 @@ async function generateDealProgressDrillDownData(
 
   // If specific pipeline stage is provided for breakdown drilldown
   if (pipelineStage) {
-    console.log(
-      "🔍 [generateDealProgressDrillDown] Filtering by specific stage:",
-      pipelineStage
-    );
     includeModels = includeModels.map((inc) => {
       if (inc.as === "stageData") {
         return {
@@ -14924,11 +14980,6 @@ async function generateDealProgressDrillDownData(
     required: false,
   });
 
-  console.log(
-    "🔍 [generateDealProgressDrillDown] Final WHERE conditions:",
-    JSON.stringify(baseWhere, null, 2)
-  );
-
   // ==================================================================================
   // STEP 1: Fetch ALL deals for accurate stage breakdown COUNT calculation
   // ==================================================================================
@@ -14943,11 +14994,6 @@ async function generateDealProgressDrillDownData(
     ],
     // NO LIMIT/OFFSET here - we need ALL deals for accurate COUNT calculation
   });
-
-  console.log(
-    "� [generateDealProgressDrillDown] Total matching deals for breakdown:",
-    allDealsForBreakdown.length
-  );
 
   // ==================================================================================
   // STEP 2: Calculate pipeline stage breakdown with COUNT - LIKE createDealProgressReport
@@ -14981,11 +15027,6 @@ async function generateDealProgressDrillDownData(
     }
   });
 
-  console.log(
-    "📊 [generateDealProgressDrillDown] Stage breakdown calculated:",
-    stageBreakdown
-  );
-
   // ==================================================================================
   // STEP 3: Now paginate for display (if needed for specific stage drilldown)
   // ==================================================================================
@@ -14993,10 +15034,6 @@ async function generateDealProgressDrillDownData(
 
   // If drilling into specific pipeline stage, filter to that stage only
   if (pipelineStage) {
-    console.log(
-      "🔍 [generateDealProgressDrillDown] Filtering to specific stage:",
-      pipelineStage
-    );
     paginatedDeals = allDealsForBreakdown.filter(
       (deal) => deal.stageData?.stageName === pipelineStage
     );
@@ -15006,13 +15043,6 @@ async function generateDealProgressDrillDownData(
   const totalCount = paginatedDeals.length;
   const offset = (page - 1) * limit;
   const deals = paginatedDeals.slice(offset, offset + limit);
-
-  console.log(
-    "📦 [generateDealProgressDrillDown] Paginated deals:",
-    deals.length,
-    "of",
-    totalCount
-  );
 
   // Format deals for response
   const formattedDeals = deals.map((deal) => ({
@@ -15098,11 +15128,6 @@ async function generateDealProgressDrillDownData(
     pipelineStage: pipelineStage || null,
   };
 
-  console.log("✅ [generateDealProgressDrillDown] Summary:", summary);
-  console.log(
-    "✅ [generateDealProgressDrillDown] Breakdown:",
-    formattedBreakdown
-  );
 
   return {
     data: formattedDeals,

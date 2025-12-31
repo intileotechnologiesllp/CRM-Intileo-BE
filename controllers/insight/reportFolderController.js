@@ -3,6 +3,7 @@ const ReportFolder = require("../../models/insight/reportFolderModel")
 
 
 exports.createReportFolder = async (req, res) => {
+  const {ReportFolder} = req.models;
   try {
     const {
       name
@@ -49,6 +50,7 @@ exports.createReportFolder = async (req, res) => {
 
 
 exports.getReportFolders = async (req, res) => {
+  const {ReportFolder} = req.models;
   try {
     const ownerId = req.adminId;
 
@@ -83,6 +85,7 @@ exports.getReportFolders = async (req, res) => {
 
 
 exports.deleteReportFolder = async (req, res) => {
+  const {ReportFolder} = req.models;
   try {
     const { reportFolderId } = req.params;
     const ownerId = req.adminId;
@@ -146,6 +149,7 @@ exports.deleteReportFolder = async (req, res) => {
 
 
 exports.updateReportFolder = async (req, res) => {
+  const {ReportFolder} = req.models;
   try {
     const { reportFolderId } = req.params;
     const {name} = req.body

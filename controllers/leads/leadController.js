@@ -68,7 +68,7 @@ const upload = multer({
 });
 
 // Helper function to get user's visibility permissions for leads
-async function getUserLeadVisibilityPermissions(userId, userRole) {
+async function getUserLeadVisibilityPermissions(userId, userRole, GroupMembership, VisibilityGroup, ItemVisibilityRule) {
   if (userRole === "admin") {
     return {
       canCreate: true,
@@ -153,6 +153,7 @@ async function getUserLeadVisibilityPermissions(userId, userRole) {
 }
 //.....................changes......original....................
 exports.createLead = async (req, res) => {
+   const { Email, MasterUser, Activity,  LeadPerson, CustomField, CustomFieldValue, Lead, LeadOrganization, AuditTrail, GroupMembership, VisibilityGroup, ItemVisibilityRule, LeadDetail, History } = req.models;
   // If this lead is being created as a conversion from a deal, update all emails with this leadId to also set the dealId
   // (This is a defensive addition in case you ever support lead creation from a deal conversion)
   if (req.body.dealId) {
@@ -262,6 +263,7 @@ exports.createLead = async (req, res) => {
     // Check if user can create leads based on visibility rules
     if (!["admin", "general", "master"].includes(req.role)) {
       await logAuditTrail(
+        AuditTrail,
         PROGRAMS.LEAD_MANAGEMENT, // Program ID for authentication
         "LEAD_CREATION", // Mode
         null, // No user ID for failed sign-in
@@ -307,6 +309,7 @@ exports.createLead = async (req, res) => {
 
         if (leadVisibilityRule && !leadVisibilityRule.canCreate) {
           await logAuditTrail(
+            AuditTrail,
             PROGRAMS.LEAD_MANAGEMENT,
             "LEAD_CREATION",
             req.adminId,
@@ -324,9 +327,9 @@ exports.createLead = async (req, res) => {
     // 1. Find or create Organization (only if organization is provided)
     let orgRecord = null;
     if (organization && organization.trim() !== "") {
-      orgRecord = await Organization.findOne({ where: { organization } });
+      orgRecord = await LeadOrganization.findOne({ where: { organization } });
       if (!orgRecord) {
-        orgRecord = await Organization.create({
+        orgRecord = await LeadOrganization.create({
           organization,
           masterUserID: req.adminId,
         });
@@ -348,10 +351,10 @@ exports.createLead = async (req, res) => {
     // 2. Find or create Person (linked to organization if available)
     let personRecord = null;
     if (email && email.trim() !== "") {
-      personRecord = await Person.findOne({ where: { email } });
+      personRecord = await LeadPerson.findOne({ where: { email } });
     }
     if (!personRecord && (email && email.trim() !== "")) {
-      personRecord = await Person.create({
+      personRecord = await LeadPerson.create({
         contactPerson,
         email,
         phone,
@@ -516,7 +519,7 @@ exports.createLead = async (req, res) => {
       where: { masterUserID: req.adminId },
     });
     const responsiblePersonName = responsiblePerson ? responsiblePerson.name : null;
-    await LeadDetails.create({
+    await LeadDetail.create({
       leadId: lead.leadId,
       responsiblePerson: responsiblePersonName,
       sourceOrgin: sourceOrgin,
@@ -537,6 +540,7 @@ exports.createLead = async (req, res) => {
         } else {
           // Log the activity linking in history
           await historyLogger(
+            History,
             PROGRAMS.LEAD_MANAGEMENT,
             "ACTIVITY_LINKING",
             req.adminId,
@@ -628,6 +632,7 @@ exports.createLead = async (req, res) => {
     }
 
     await historyLogger(
+      History,
       PROGRAMS.LEAD_MANAGEMENT, // Program ID for currency management
       "LEAD_CREATION", // Mode
       lead.masterUserID, // Created by (Admin ID)
@@ -664,6 +669,7 @@ exports.createLead = async (req, res) => {
     console.error("Error creating lead:", error);
 
     await logAuditTrail(
+      AuditTrail,
       PROGRAMS.LEAD_MANAGEMENT, // Program ID for authentication
       "LEAD_CREATION", // Mode
       null, // No user ID for failed sign-in
@@ -675,12 +681,14 @@ exports.createLead = async (req, res) => {
 };
 
 exports.archiveLead = async (req, res) => {
+  const {  Lead, AuditTrail, History } = req.models;
   const { leadId } = req.params; // Use leadId instead of id
 
   try {
     const lead = await Lead.findByPk(leadId); // Find lead by leadId
     if (!lead) {
       await logAuditTrail(
+        AuditTrail,
         PROGRAMS.LEAD_MANAGEMENT, // Program ID for authentication
         "LEAD_ARCHIVE", // Mode
         req.role, // No user ID for failed sign-in
@@ -694,6 +702,7 @@ exports.archiveLead = async (req, res) => {
     lead.archiveTime = new Date(); // Set the archive time to now
     await lead.save();
     await historyLogger(
+      History,
       PROGRAMS.LEAD_MANAGEMENT, // Program ID for currency management
       "LEAD_ARCHIVE", // Mode
       lead.masterUserID, // Admin ID from the authenticated request
@@ -706,6 +715,7 @@ exports.archiveLead = async (req, res) => {
   } catch (error) {
     console.error("Error archiving lead:", error);
     await logAuditTrail(
+      AuditTrail,
       PROGRAMS.LEAD_MANAGEMENT, // Program ID for authentication
       "LEAD_ARCHIVE", // Mode
       null, // No user ID for failed sign-in
@@ -717,12 +727,14 @@ exports.archiveLead = async (req, res) => {
 };
 
 exports.unarchiveLead = async (req, res) => {
+  const {  Lead, AuditTrail, History } = req.models;
   const { leadId } = req.params; // Use leadId instead of id
 
   try {
     const lead = await Lead.findByPk(leadId); // Find lead by leadId
     if (!lead) {
       await logAuditTrail(
+        AuditTrail,
         PROGRAMS.LEAD_MANAGEMENT, // Program ID for authentication
         "LEAD_UNARCHIVE", // Mode
         req.role, // No user ID for failed sign-in
@@ -735,6 +747,7 @@ exports.unarchiveLead = async (req, res) => {
     lead.isArchived = false; // Set the lead as unarchived
     await lead.save();
     await historyLogger(
+      History,
       PROGRAMS.LEAD_MANAGEMENT, // Program ID for currency management
       "LEAD_UNARCHIVE", // Mode
       lead.masterUserID, // Admin ID from the authenticated request
@@ -747,6 +760,7 @@ exports.unarchiveLead = async (req, res) => {
   } catch (error) {
     console.error("Error unarchiving lead:", error);
     await logAuditTrail(
+      AuditTrail,
       PROGRAMS.LEAD_MANAGEMENT, // Program ID for authentication
       "LEAD_UNARCHIVE", // Mode
       null, // No user ID for failed sign-in
@@ -759,6 +773,7 @@ exports.unarchiveLead = async (req, res) => {
 
 
 exports.getLeads = async (req, res) => {
+  const { Email, MasterUser, Activity,  LeadPerson, CustomField, CustomFieldValue, Lead, LeadOrganization, AuditTrail, GroupMembership, VisibilityGroup, ItemVisibilityRule, LeadDetail, History, UserFavorite, LeadFilter, LeadColumnPreference, Label, GroupVisibility, Currency } = req.models;
   const {
     isArchived,
     search,
@@ -814,7 +829,7 @@ exports.getLeads = async (req, res) => {
       console.log("→ favoriteId parameter received:", favoriteId);
       
       // Look up the favorite record to get the favoriteUserId
-      const favoriteRecord = await UserFavorites.findOne({
+      const favoriteRecord = await UserFavorite.findOne({
         where: {
           favoriteId: favoriteId,
           userId: req.adminId, // Only allow users to use their own favorites
@@ -963,7 +978,7 @@ exports.getLeads = async (req, res) => {
         leadDetailsAttributes.push("currency");
       }
       include.push({
-        model: LeadDetails,
+        model: LeadDetail,
         as: "details",
         required: false,
         attributes: leadDetailsAttributes,
@@ -971,11 +986,11 @@ exports.getLeads = async (req, res) => {
     } else if (pref && pref.columns) {
       // If preferences exist but no LeadDetails columns are checked, include minimal LeadDetails with currency
       const minimalAttributes = ['leadDetailsId'];
-      if (Object.keys(LeadDetails.rawAttributes).includes("currency")) {
+      if (Object.keys(LeadDetail.rawAttributes).includes("currency")) {
         minimalAttributes.push("currency");
       }
       include.push({
-        model: LeadDetails,
+        model: LeadDetail,
         as: "details",
         required: false,
         attributes: minimalAttributes
@@ -983,7 +998,7 @@ exports.getLeads = async (req, res) => {
     } else {
       // If no preferences, include all LeadDetails
       include.push({
-        model: LeadDetails,
+        model: LeadDetail,
         as: "details",
         required: false,
       });
@@ -1562,14 +1577,14 @@ exports.getLeads = async (req, res) => {
 
       if (Object.keys(leadDetailsWhere).length > 0) {
         include.push({
-          model: LeadDetails,
+          model: LeadDetail,
           as: "details",
           where: leadDetailsWhere,
           required: true,
         });
       } else {
         include.push({
-          model: LeadDetails,
+          model: LeadDetail,
           as: "details",
           required: false,
         });
@@ -1585,14 +1600,14 @@ exports.getLeads = async (req, res) => {
         }
 
         include.push({
-          model: Person,
+          model: LeadPerson,
           as: "LeadPerson",
           required: true,
           where: personWhere,
         });
       } else {
         include.push({
-          model: Person,
+          model: LeadPerson,
           as: "LeadPerson",
           required: false,
         });
@@ -1614,14 +1629,14 @@ exports.getLeads = async (req, res) => {
         }
 
         include.push({
-          model: Organization,
+          model: LeadOrganization,
           as: "LeadOrganization",
           required: true,
           where: organizationWhere,
         });
       } else {
         include.push({
-          model: Organization,
+          model: LeadOrganization,
           as: "LeadOrganization",
           required: false,
         });
@@ -1871,7 +1886,8 @@ exports.getLeads = async (req, res) => {
 
         const customFieldFilters = await buildCustomFieldFilters(
           customFieldsConditions,
-          req.adminId
+          req.adminId,
+          CustomField
         );
 
         // console.log("Built custom field filters:", customFieldFilters);
@@ -1880,7 +1896,8 @@ exports.getLeads = async (req, res) => {
           // Apply custom field filtering by finding leads that match the custom field conditions
           const matchingLeadIds = await getLeadIdsByCustomFieldFilters(
             customFieldFilters,
-            req.adminId
+            req.adminId,
+            CustomFieldValue
           );
 
           // console.log(
@@ -2031,14 +2048,14 @@ exports.getLeads = async (req, res) => {
     // Always include Person and Organization
     if (!include.some((i) => i.as === "LeadPerson")) {
       include.push({
-        model: Person,
+        model: LeadPerson,
         as: "LeadPerson",
         required: false,
       });
     }
     if (!include.some((i) => i.as === "LeadOrganization")) {
       include.push({
-        model: Organization,
+        model: LeadOrganization,
         as: "LeadOrganization",
         required: false,
       });
@@ -2649,10 +2666,10 @@ exports.getLeads = async (req, res) => {
 
     // 1. Fetch all persons and organizations (already in your code)
     if (req.role === "admin") {
-      persons = await Person.findAll({ raw: true });
-      organizations = await Organization.findAll({ raw: true });
+      persons = await LeadPerson.findAll({ raw: true });
+      organizations = await LeadOrganization.findAll({ raw: true });
     } else {
-      organizations = await Organization.findAll({
+      organizations = await LeadOrganization.findAll({
         // where: { masterUserID: req.adminId },
         where: {
           [Op.or]: [{ masterUserID: req.adminId }, { ownerId: req.adminId }],
@@ -2661,7 +2678,7 @@ exports.getLeads = async (req, res) => {
       });
     }
     const orgIds = organizations.map((o) => o.leadOrganizationId);
-    persons = await Person.findAll({
+    persons = await LeadPerson.findAll({
       where: {
         [Op.or]: [
           { masterUserID: req.adminId },
@@ -2930,6 +2947,7 @@ exports.getLeads = async (req, res) => {
     });
   } catch (error) {
     await logAuditTrail(
+      AuditTrail,
       PROGRAMS.LEAD_MANAGEMENT, // Program ID for authentication
       "LEAD_FETCH", // Mode
       null, // No user ID for failed sign-in
@@ -3035,7 +3053,7 @@ function buildCondition(condition) {
 }
 
 // Helper functions for custom field filtering
-async function buildCustomFieldFilters(customFieldsConditions, masterUserID) {
+async function buildCustomFieldFilters(customFieldsConditions, masterUserID, CustomField) {
   const filters = [];
 
   // Handle 'all' conditions (AND logic)
@@ -3181,7 +3199,8 @@ async function buildCustomFieldFilters(customFieldsConditions, masterUserID) {
 
 async function getLeadIdsByCustomFieldFilters(
   customFieldFilters,
-  masterUserID
+  masterUserID,
+  CustomFieldValue
 ) {
   if (customFieldFilters.length === 0) return [];
 
@@ -3363,10 +3382,12 @@ function buildCustomFieldCondition(condition, fieldId) {
 
 // Get visibility options for lead creation/editing
 exports.getLeadVisibilityOptions = async (req, res) => {
+  const { GroupMembership, VisibilityGroup, ItemVisibilityRule } = req.models
   try {
     const permissions = await getUserLeadVisibilityPermissions(
       req.adminId,
-      req.role
+      req.role,
+      GroupMembership, VisibilityGroup, ItemVisibilityRule
     );
 
     const options = [
@@ -3425,6 +3446,7 @@ exports.getLeadVisibilityOptions = async (req, res) => {
 };
 
 exports.updateLead = async (req, res) => {
+  const { Lead, LeadDetails, LeadPerson, LeadOrganization, AuditTrail, MasterUser, LeadDetail, CustomField, CustomFieldValue, History } = req.models;
   const { leadId } = req.params;
   const updateObj = req.body;
 
@@ -3437,8 +3459,8 @@ exports.updateLead = async (req, res) => {
     // Get all columns for Lead, LeadDetails, Person, and Organization
     const leadFields = Object.keys(Lead.rawAttributes);
     const leadDetailsFields = Object.keys(LeadDetails.rawAttributes);
-    const personFields = Object.keys(Person.rawAttributes);
-    const organizationFields = Object.keys(Organization.rawAttributes);
+    const personFields = Object.keys(LeadPerson.rawAttributes);
+    const organizationFields = Object.keys(LeadOrganization.rawAttributes);
     console.log("\n====== MODEL FIELDS ======");
     console.log("Lead fields:", leadFields);
     console.log("LeadDetails fields:", leadDetailsFields);
@@ -3568,6 +3590,7 @@ exports.updateLead = async (req, res) => {
     console.log("Fetched lead:", lead ? lead.toJSON() : null);
     if (!lead) {
       await logAuditTrail(
+        AuditTrail,
         PROGRAMS.LEAD_MANAGEMENT, // Program ID for authentication
         "LEAD_UPDATE", // Mode
         req.role, // No user ID for failed sign-in
@@ -3636,7 +3659,7 @@ exports.updateLead = async (req, res) => {
       console.log("→ Organization data is present, proceeding with update/create");
       console.log("→ lead.leadOrganizationId:", lead.leadOrganizationId);
       
-      orgRecord = await Organization.findOne({
+      orgRecord = await LeadOrganization.findOne({
         where: { leadOrganizationId: lead.leadOrganizationId },
       });
       console.log("→ Fetched orgRecord:", orgRecord ? orgRecord.toJSON() : null);
@@ -3735,7 +3758,7 @@ exports.updateLead = async (req, res) => {
     // Update or create Person
     let personRecord;
     if (Object.keys(personData).length > 0) {
-      personRecord = await Person.findOne({
+      personRecord = await LeadPerson.findOne({
         where: { personId: lead.personId },
       });
       console.log(
@@ -3777,7 +3800,7 @@ exports.updateLead = async (req, res) => {
       } else {
         if (orgRecord)
           personData.leadOrganizationId = orgRecord.leadOrganizationId;
-        personRecord = await Person.create(personData);
+        personRecord = await LeadPerson.create(personData);
         console.log("Person created:", personRecord.toJSON());
         leadData.personId = personRecord.personId;
         
@@ -3917,14 +3940,14 @@ exports.updateLead = async (req, res) => {
       
       // Update LeadDetails if there are fields to sync and LeadDetails exists
       if (Object.keys(leadDetailsSync).length > 0) {
-        let leadDetailsForSync = await LeadDetails.findOne({ where: { leadId } });
+        let leadDetailsForSync = await LeadDetail.findOne({ where: { leadId } });
         if (leadDetailsForSync) {
           await leadDetailsForSync.update(leadDetailsSync);
           console.log(`Synced Lead to LeadDetails fields: ${syncedDetailFields.join(', ')}`, leadDetailsSync);
         } else if (leadDetailsSync.personName || leadDetailsSync.organizationName) {
           // Create LeadDetails if it doesn't exist and we have important fields to sync
           leadDetailsSync.leadId = leadId;
-          leadDetailsForSync = await LeadDetails.create(leadDetailsSync);
+          leadDetailsForSync = await LeadDetail.create(leadDetailsSync);
           console.log(`Created LeadDetails with synced Lead fields: ${syncedDetailFields.join(', ')}`, leadDetailsSync);
         }
       }
@@ -3958,7 +3981,7 @@ exports.updateLead = async (req, res) => {
     }
 
     // Update or create LeadDetails
-    let leadDetails = await LeadDetails.findOne({ where: { leadId } });
+    let leadDetails = await LeadDetail.findOne({ where: { leadId } });
     console.log(
       "Fetched leadDetails:",
       leadDetails ? leadDetails.toJSON() : null
@@ -4011,7 +4034,7 @@ exports.updateLead = async (req, res) => {
       }
     } else if (Object.keys(leadDetailsData).length > 0) {
       leadDetailsData.leadId = leadId;
-      leadDetails = await LeadDetails.create(leadDetailsData);
+      leadDetails = await LeadDetail.create(leadDetailsData);
       console.log("LeadDetails created:", leadDetails.toJSON());
       
       // Synchronize relevant LeadDetails fields to Lead table for newly created LeadDetails
@@ -4194,6 +4217,7 @@ exports.updateLead = async (req, res) => {
     //   );
     // }
     await historyLogger(
+      History,
       PROGRAMS.LEAD_MANAGEMENT, // Program ID for lead management
       "LEAD_UPDATE", // Mode
       lead.masterUserID, // Admin ID from the authenticated request
@@ -4233,13 +4257,16 @@ exports.updateLead = async (req, res) => {
     res.status(500).json({ message: "Internal server error" });
   }
 };
+
 exports.deleteLead = async (req, res) => {
+  const { Lead, AuditTrail, History } = req.models;
   const { leadId } = req.params; // Use leadId from the request parameters
 
   try {
     const lead = await Lead.findByPk(leadId); // Find the lead by leadId
     if (!lead) {
       await logAuditTrail(
+        AuditTrail,
         PROGRAMS.LEAD_MANAGEMENT, // Program ID for authentication
         "LEAD_DELETE", // Mode
         req.role, // No user ID for failed sign-in
@@ -4252,6 +4279,7 @@ exports.deleteLead = async (req, res) => {
     // Delete the lead
     await lead.destroy();
     await historyLogger(
+      History,
       PROGRAMS.LEAD_MANAGEMENT, // Program ID for currency management
       "LEAD_DELETE", // Mode
       lead.masterUserID, // Admin ID from the authenticated request
@@ -4264,6 +4292,7 @@ exports.deleteLead = async (req, res) => {
   } catch (error) {
     console.error("Error deleting lead:", error);
     await logAuditTrail(
+      AuditTrail,
       PROGRAMS.LEAD_MANAGEMENT, // Program ID for authentication
       "LEAD_DELETE", // Mode
       null, // No user ID for failed sign-in
@@ -4275,6 +4304,7 @@ exports.deleteLead = async (req, res) => {
 };
 
 exports.updateAllLabels = async (req, res) => {
+  const { Lead, AuditTrail } = req.models;
   try {
     const { valueLabels } = req.body; // Get valueLabels from the request body
 
@@ -4291,6 +4321,7 @@ exports.updateAllLabels = async (req, res) => {
 
     // Log the update in the audit trail
     await logAuditTrail(
+      AuditTrail,
       PROGRAMS.LEAD_MANAGEMENT, // Program ID for authentication
       "LEAD_UPDATE_ALL_LABELS", // Mode
       req.adminId, // Admin ID of the user making the update
@@ -4304,6 +4335,7 @@ exports.updateAllLabels = async (req, res) => {
   } catch (error) {
     console.error("Error updating all labels:", error);
     await logAuditTrail(
+      AuditTrail,
       PROGRAMS.LEAD_MANAGEMENT, // Program ID for authentication
       "LEAD_UPDATE_ALL_LABELS", // Mode
       null, // No user ID for failed operation
@@ -4316,6 +4348,7 @@ exports.updateAllLabels = async (req, res) => {
 
 //......................................................
 exports.updateLeadCustomFields = async (req, res) => {
+  const { Lead, History } = req.models;
   const { leadId } = req.params;
   const { customFields } = req.body;
 
@@ -4339,6 +4372,7 @@ exports.updateLeadCustomFields = async (req, res) => {
 
     // Log the change (optional)
     await historyLogger(
+      History,
       PROGRAMS.LEAD_MANAGEMENT,
       "LEAD_UPDATE_CUSTOM_FIELDS",
       lead.masterUserID,
@@ -4359,6 +4393,7 @@ exports.updateLeadCustomFields = async (req, res) => {
 };
 
 exports.getNonAdminMasterUserNames = async (req, res) => {
+  const { MasterUser,  AuditTrail } = req.models;
   try {
     const { search, userType } = req.query;
 
@@ -4432,6 +4467,7 @@ exports.getNonAdminMasterUserNames = async (req, res) => {
       });
     } else {
       await logAuditTrail(
+        AuditTrail,
         PROGRAMS.LEAD_MANAGEMENT,
         "MASTER_USER_FETCH",
         req.adminId,
@@ -4444,6 +4480,7 @@ exports.getNonAdminMasterUserNames = async (req, res) => {
     }
 
     await logAuditTrail(
+      AuditTrail,
       PROGRAMS.LEAD_MANAGEMENT,
       "MASTER_USER_FETCH",
       req.adminId,
@@ -4458,6 +4495,7 @@ exports.getNonAdminMasterUserNames = async (req, res) => {
     });
   } catch (error) {
     await logAuditTrail(
+      AuditTrail,
       PROGRAMS.LEAD_MANAGEMENT,
       "MASTER_USER_FETCH",
       req.adminId,
@@ -4468,7 +4506,9 @@ exports.getNonAdminMasterUserNames = async (req, res) => {
     res.status(500).json({ message: "Internal server error" });
   }
 };
+
 exports.getLeadsByMasterUser = async (req, res) => {
+  const { Lead, MasterUser, AuditTrail } = req.models;
   const { masterUserID, name } = req.body;
 
   try {
@@ -4481,6 +4521,7 @@ exports.getLeadsByMasterUser = async (req, res) => {
       const user = await MasterUser.findOne({ where: { name } });
       if (!user) {
         await logAuditTrail(
+          AuditTrail,
           PROGRAMS.LEAD_MANAGEMENT,
           "LEAD_FETCH_BY_MASTER_USER",
           req.adminId,
@@ -4492,6 +4533,7 @@ exports.getLeadsByMasterUser = async (req, res) => {
       whereClause.masterUserID = user.masterUserID;
     } else {
       await logAuditTrail(
+        AuditTrail,
         PROGRAMS.LEAD_MANAGEMENT,
         "LEAD_FETCH_BY_MASTER_USER",
         req.adminId,
@@ -4508,6 +4550,7 @@ exports.getLeadsByMasterUser = async (req, res) => {
     res.status(200).json({ leads });
   } catch (error) {
     await logAuditTrail(
+      AuditTrail,
       PROGRAMS.LEAD_MANAGEMENT,
       "LEAD_FETCH_BY_MASTER_USER",
       req.adminId,
@@ -4520,6 +4563,7 @@ exports.getLeadsByMasterUser = async (req, res) => {
 };
 
 exports.getAllLeadDetails = async (req, res) => {
+  const { Lead, Email, LeadPerson, LeadOrganization, UserCredential, AuditTrail, Attachment, Deal , LeadNote, MasterUser, LeadDetail, Activity, CustomField, CustomFieldValue, Currency, } = req.models;
   const masterUserID = req.adminId;
   const { leadId } = req.params;
 
@@ -4529,6 +4573,7 @@ exports.getAllLeadDetails = async (req, res) => {
 
   if (!leadId) {
     await logAuditTrail(
+      AuditTrail,
       PROGRAMS.LEAD_MANAGEMENT,
       "LEAD_DETAILS_FETCH",
       masterUserID,
@@ -4544,6 +4589,7 @@ exports.getAllLeadDetails = async (req, res) => {
     const lead = await Lead.findByPk(leadId);
     if (!lead) {
       await logAuditTrail(
+        AuditTrail,
         PROGRAMS.LEAD_MANAGEMENT,
         "LEAD_DETAILS_FETCH",
         masterUserID,
@@ -4560,6 +4606,7 @@ exports.getAllLeadDetails = async (req, res) => {
       // Log this as an informational audit entry so admins can trace missing emails
       try {
         await logAuditTrail(
+          AuditTrail,
           PROGRAMS.LEAD_MANAGEMENT,
           "LEAD_DETAILS_FETCH",
           masterUserID,
@@ -4614,13 +4661,13 @@ exports.getAllLeadDetails = async (req, res) => {
     let leadOrganization = null;
 
     if (lead.personId) {
-      person = await Person.findByPk(lead.personId, {
+      person = await LeadPerson.findByPk(lead.personId, {
         raw: true
       });
     }
 
     if (lead.leadOrganizationId) {
-      leadOrganization = await Organization.findByPk(lead.leadOrganizationId, {
+      leadOrganization = await LeadOrganization.findByPk(lead.leadOrganizationId, {
         raw: true
       });
     }
@@ -4794,7 +4841,7 @@ exports.getAllLeadDetails = async (req, res) => {
       // Bulk fetch all related entities for these email addresses
       const [connectedPersons, connectedOrganizations, connectedLeads, connectedDeals] = await Promise.all([
         // Find persons by email
-        Person.findAll({
+        LeadPerson.findAll({
           where: {
             email: { [Op.in]: uniqueEmailAddresses }
           },
@@ -4803,9 +4850,9 @@ exports.getAllLeadDetails = async (req, res) => {
         }),
         
         // Find organizations by email (if organizations have email field)
-        Organization.findAll({
+        LeadOrganization.findAll({
           where: {
-            ...(Organization.rawAttributes.email ? { email: { [Op.in]: uniqueEmailAddresses } } : {})
+            ...(LeadOrganization.rawAttributes.email ? { email: { [Op.in]: uniqueEmailAddresses } } : {})
           },
           attributes: ['leadOrganizationId', 'organization', 'address'],
           raw: true
@@ -4966,7 +5013,7 @@ exports.getAllLeadDetails = async (req, res) => {
     });
 
     // Get all unique creator IDs from notes
-    const creatorIds = [...new Set(notes.map((note) => note.createdBy))];
+    const creatorIds = [...new Set(notes.map((note) => note.createdBy))];             
 
     // Fetch all creators in one query
     const creators = await MasterUser.findAll({
@@ -4985,7 +5032,7 @@ exports.getAllLeadDetails = async (req, res) => {
       return noteObj;
     });
 
-    const leadDetails = await LeadDetails.findOne({ where: { leadId } });
+    const leadDetails = await LeadDetail.findOne({ where: { leadId } });
     
     // Fetch activities with assigned user names
     let activities = await Activity.findAll({
@@ -5213,6 +5260,7 @@ exports.getAllLeadDetails = async (req, res) => {
   } catch (error) {
     console.error("Error fetching conversation:", error);
     await logAuditTrail(
+      AuditTrail,
       PROGRAMS.LEAD_MANAGEMENT,
       "LEAD_DETAILS_FETCH",
       masterUserID,
@@ -5514,6 +5562,7 @@ exports.getAllLeadDetails = async (req, res) => {
 // New lightweight endpoint: Get ONLY paginated emails for a lead (for infinite scroll)
 // Returns unified array of emails, activities, and notes with single pagination
 exports.getLeadEmails = async (req, res) => {
+  const { Lead, Email, LeadPerson, LeadOrganization, UserCredential, AuditTrail, Attachment, Deal , LeadNote, MasterUser, LeadDetail, Activity, CustomField, CustomFieldValue, Currency, } = req.models;
   const masterUserID = req.adminId;
   const { leadId } = req.params;
 
@@ -5575,14 +5624,14 @@ exports.getLeadEmails = async (req, res) => {
     let leadOrganization = null;
 
     if (lead.personId) {
-      person = await Person.findByPk(lead.personId, {
+      person = await LeadPerson.findByPk(lead.personId, {
         attributes: ['personId', 'email'],
         raw: true
       });
     }
 
     if (lead.leadOrganizationId) {
-      leadOrganization = await Organization.findByPk(lead.leadOrganizationId, {
+      leadOrganization = await LeadOrganization.findByPk(lead.leadOrganizationId, {
         attributes: ['leadOrganizationId', 'organization'],
         raw: true
       });
@@ -5691,14 +5740,14 @@ exports.getLeadEmails = async (req, res) => {
       
       // Bulk fetch all related entities
       const [connectedPersons, connectedOrganizations, connectedLeads, connectedDeals] = await Promise.all([
-        Person.findAll({
+        LeadPerson.findAll({
           where: { email: { [Op.in]: uniqueEmailAddresses } },
           attributes: ['personId', 'contactPerson', 'email', 'phone', 'jobTitle', 'leadOrganizationId'],
           raw: true
         }),
-        Organization.findAll({
+        LeadOrganization.findAll({
           where: {
-            ...(Organization.rawAttributes.email ? { email: { [Op.in]: uniqueEmailAddresses } } : {})
+            ...(LeadOrganization.rawAttributes.email ? { email: { [Op.in]: uniqueEmailAddresses } } : {})
           },
           attributes: ['leadOrganizationId', 'organization', 'address'],
           raw: true
@@ -6037,6 +6086,7 @@ exports.getLeadEmails = async (req, res) => {
   } catch (error) {
     console.error("Error fetching lead emails:", error);
     await logAuditTrail(
+      AuditTrail,
       PROGRAMS.LEAD_MANAGEMENT,
       "LEAD_EMAILS_FETCH",
       masterUserID,
@@ -6048,6 +6098,7 @@ exports.getLeadEmails = async (req, res) => {
 };
 
 exports.addLeadNote = async (req, res) => {
+  const { Lead, Email, LeadPerson, LeadOrganization, UserCredential, AuditTrail, Attachment, Deal , LeadNote, MasterUser, LeadDetail, Activity, CustomField, CustomFieldValue, Currency, History } = req.models;
   const { content } = req.body;
   const { leadId } = req.params;
   const masterUserID = req.adminId;
@@ -6056,6 +6107,7 @@ exports.addLeadNote = async (req, res) => {
   // 100KB = 102400 bytes
   if (!content || Buffer.byteLength(content, "utf8") > 102400) {
     await logAuditTrail(
+      AuditTrail,
       PROGRAMS.LEAD_MANAGEMENT,
       "LEAD_NOTE_ADD",
       masterUserID,
@@ -6068,6 +6120,7 @@ exports.addLeadNote = async (req, res) => {
   }
   if (!leadId) {
     await logAuditTrail(
+      AuditTrail,
       PROGRAMS.LEAD_MANAGEMENT,
       "LEAD_NOTE_ADD",
       masterUserID,
@@ -6099,6 +6152,7 @@ exports.addLeadNote = async (req, res) => {
     };
     
     await historyLogger(
+      History,
       PROGRAMS.LEAD_MANAGEMENT,
       "LEAD_NOTE_ADD",
       masterUserID,
@@ -6126,6 +6180,7 @@ exports.addLeadNote = async (req, res) => {
 
 // Get unified timeline for Deal (emails, activities, notes) - same as getLeadEmails
 exports.getDealTimeline = async (req, res) => {
+  const { Lead, Email, LeadPerson, LeadOrganization, UserCredential, AuditTrail, Attachment, Deal , LeadNote, MasterUser, LeadDetail, Activity, CustomField, CustomFieldValue, Currency, History, DealNote } = req.models;
   const masterUserID = req.adminId;
   const { dealId } = req.params;
 
@@ -6182,14 +6237,14 @@ exports.getDealTimeline = async (req, res) => {
     let organization = null;
 
     if (deal.personId) {
-      person = await Person.findByPk(deal.personId, {
+      person = await LeadPerson.findByPk(deal.personId, {
         attributes: ['personId', 'email'],
         raw: true
       });
     }
 
     if (deal.leadOrganizationId) {
-      organization = await Organization.findByPk(deal.leadOrganizationId, {
+      organization = await LeadOrganization.findByPk(deal.leadOrganizationId, {
         attributes: ['leadOrganizationId', 'organization'],
         raw: true
       });
@@ -6378,6 +6433,7 @@ exports.getDealTimeline = async (req, res) => {
 
 // Get unified timeline for Person (emails, activities, notes)
 exports.getPersonTimeline = async (req, res) => {
+  const { Lead, Email, LeadPerson, LeadOrganization, UserCredential, AuditTrail, Attachment, Deal , LeadNote, MasterUser, LeadDetail, Activity, CustomField, CustomFieldValue, Currency, History, DealNote } = req.models;
   const masterUserID = req.adminId;
   const { personId } = req.params;
 
@@ -6394,7 +6450,7 @@ exports.getPersonTimeline = async (req, res) => {
   }
 
   try {
-    const person = await Person.findByPk(personId, {
+    const person = await LeadPerson.findByPk(personId, {
       attributes: ['personId', 'email', 'leadOrganizationId']
     });
     
@@ -6578,6 +6634,7 @@ exports.getPersonTimeline = async (req, res) => {
 
 // Get unified timeline for Organization (emails, activities)
 exports.getOrganizationTimeline = async (req, res) => {
+  const { Lead, Email, LeadPerson, LeadOrganization, UserCredential, AuditTrail, Attachment, Deal , LeadNote, MasterUser, LeadDetail, Activity, CustomField, CustomFieldValue, Currency, History, DealNote } = req.models;
   const masterUserID = req.adminId;
   const { organizationId } = req.params;
 
@@ -6594,7 +6651,7 @@ exports.getOrganizationTimeline = async (req, res) => {
   }
 
   try {
-    const organization = await Organization.findByPk(organizationId, {
+    const organization = await LeadOrganization.findByPk(organizationId, {
       attributes: ['leadOrganizationId', 'organization']
     });
     
@@ -6603,7 +6660,7 @@ exports.getOrganizationTimeline = async (req, res) => {
     }
 
     // Find all persons belonging to this organization
-    const persons = await Person.findAll({
+    const persons = await LeadPerson.findAll({
       where: { leadOrganizationId: organizationId },
       attributes: ['personId', 'email'],
       raw: true
@@ -6787,11 +6844,13 @@ exports.getOrganizationTimeline = async (req, res) => {
 };
 
 exports.deleteLeadNote = async (req, res) => {
+  const { Lead, Email, LeadPerson, LeadOrganization, UserCredential, AuditTrail, Attachment, Deal , LeadNote, MasterUser, LeadDetail, Activity, CustomField, CustomFieldValue, Currency, History, DealNote } = req.models;
   const { noteId } = req.params;
   const masterUserID = req.adminId;
 
   if (!noteId) {
     await logAuditTrail(
+      AuditTrail,
       PROGRAMS.LEAD_MANAGEMENT,
       "LEAD_NOTE_DELETE",
       masterUserID,
@@ -6805,6 +6864,7 @@ exports.deleteLeadNote = async (req, res) => {
     const note = await LeadNote.findByPk(noteId);
     if (!note) {
       await logAuditTrail(
+        AuditTrail,
         PROGRAMS.LEAD_MANAGEMENT,
         "LEAD_NOTE_DELETE",
         masterUserID,
@@ -6817,6 +6877,7 @@ exports.deleteLeadNote = async (req, res) => {
     // Check if the note belongs to the current user
     if (note.masterUserID !== masterUserID) {
       await logAuditTrail(
+        AuditTrail,
         PROGRAMS.LEAD_MANAGEMENT,
         "LEAD_NOTE_DELETE",
         masterUserID,
@@ -6830,6 +6891,7 @@ exports.deleteLeadNote = async (req, res) => {
 
     await note.destroy();
     await historyLogger(
+      History,
       PROGRAMS.LEAD_MANAGEMENT,
       "LEAD_NOTE_DELETE",
       masterUserID,
@@ -6842,6 +6904,7 @@ exports.deleteLeadNote = async (req, res) => {
   } catch (error) {
     console.error("Error deleting note:", error);
     await logAuditTrail(
+      AuditTrail,
       PROGRAMS.LEAD_MANAGEMENT,
       "LEAD_NOTE_DELETE",
       masterUserID,
@@ -6851,7 +6914,9 @@ exports.deleteLeadNote = async (req, res) => {
     res.status(500).json({ message: "Internal server error" });
   }
 };
+
 exports.updateLeadNote = async (req, res) => {
+  const { Lead, Email, LeadPerson, LeadOrganization, UserCredential, AuditTrail, Attachment, Deal , LeadNote, MasterUser, LeadDetail, Activity, CustomField, CustomFieldValue, Currency, History, DealNote } = req.models;
   const { noteId } = req.params;
   const { content } = req.body;
   const masterUserID = req.adminId;
@@ -6859,6 +6924,7 @@ exports.updateLeadNote = async (req, res) => {
   // Validate input
   if (!noteId) {
     await logAuditTrail(
+      AuditTrail,
       PROGRAMS.LEAD_MANAGEMENT,
       "LEAD_NOTE_UPDATE",
       masterUserID,
@@ -6869,6 +6935,7 @@ exports.updateLeadNote = async (req, res) => {
   }
   if (!content || Buffer.byteLength(content, "utf8") > 102400) {
     await logAuditTrail(
+      AuditTrail,
       PROGRAMS.LEAD_MANAGEMENT,
       "LEAD_NOTE_UPDATE",
       masterUserID,
@@ -6884,6 +6951,7 @@ exports.updateLeadNote = async (req, res) => {
     const note = await LeadNote.findByPk(noteId);
     if (!note) {
       await logAuditTrail(
+        AuditTrail,
         PROGRAMS.LEAD_MANAGEMENT,
         "LEAD_NOTE_UPDATE",
         masterUserID,
@@ -6896,6 +6964,7 @@ exports.updateLeadNote = async (req, res) => {
     // Check if the note belongs to the current user
     if (note.masterUserID !== masterUserID) {
       await logAuditTrail(
+        AuditTrail,
         PROGRAMS.LEAD_MANAGEMENT,
         "LEAD_NOTE_UPDATE",
         masterUserID,
@@ -6910,6 +6979,7 @@ exports.updateLeadNote = async (req, res) => {
     note.content = content;
     await note.save();
     await historyLogger(
+      History,
       PROGRAMS.LEAD_MANAGEMENT,
       "LEAD_NOTE_UPDATE",
       masterUserID,
@@ -6922,6 +6992,7 @@ exports.updateLeadNote = async (req, res) => {
   } catch (error) {
     console.error("Error updating note:", error);
     await logAuditTrail(
+      AuditTrail,
       PROGRAMS.LEAD_MANAGEMENT,
       "LEAD_NOTE_UPDATE",
       masterUserID,
@@ -6933,6 +7004,7 @@ exports.updateLeadNote = async (req, res) => {
 };
 
 exports.getPersons = async (req, res) => {
+  const { Lead, Email, LeadPerson, LeadOrganization, UserCredential, AuditTrail, Attachment, Deal , LeadNote, MasterUser, LeadDetail, Activity, CustomField, CustomFieldValue, Currency, History, DealNote, LeadFilter } = req.models;
   const {
     search,
     page = 1,
@@ -6961,8 +7033,8 @@ exports.getPersons = async (req, res) => {
           ? JSON.parse(filter.filterConfig)
           : filter.filterConfig;
 
-      const personFields = Object.keys(Person.rawAttributes);
-      const organizationFields = Object.keys(Organization.rawAttributes);
+      const personFields = Object.keys(LeadPerson.rawAttributes);
+      const organizationFields = Object.keys(LeadOrganization.rawAttributes);
 
       // AND conditions
       if (filterConfig.all && filterConfig.all.length > 0) {
@@ -7030,7 +7102,7 @@ exports.getPersons = async (req, res) => {
     if (req.role === "admin") {
       // 1. Fetch all organizations (with pagination and filters)
       const orgOffset = (page - 1) * limit;
-      organizationsRaw = await Organization.findAndCountAll({
+      organizationsRaw = await LeadOrganization.findAndCountAll({
         where: organizationWhere,
         limit: parseInt(limit),
         offset: parseInt(orgOffset),
@@ -7040,7 +7112,7 @@ exports.getPersons = async (req, res) => {
 
       // 2. Fetch all persons for these organizations
       const orgIds = organizationsRaw.rows.map((o) => o.leadOrganizationId);
-      persons = await Person.findAll({
+      persons = await LeadPerson.findAll({
         where: {
           ...personWhere,
           leadOrganizationId: { [Op.in]: orgIds },
@@ -7050,7 +7122,7 @@ exports.getPersons = async (req, res) => {
     } else {
       // 1. Fetch all persons (filtered)
 
-      persons = await Person.findAll({
+      persons = await LeadPerson.findAll({
         where: personWhere,
         raw: true,
       });
@@ -7062,7 +7134,7 @@ exports.getPersons = async (req, res) => {
 
       // 3. Fetch only organizations for those orgIds (with pagination)
       const orgOffset = (page - 1) * limit;
-      organizationsRaw = await Organization.findAndCountAll({
+      organizationsRaw = await LeadOrganization.findAndCountAll({
         where: {
           ...organizationWhere,
           leadOrganizationId: { [Op.in]: orgIds },
@@ -7168,6 +7240,7 @@ exports.getPersons = async (req, res) => {
 
 // Bulk edit leads functionality
 exports.bulkEditLeads = async (req, res) => {
+  const { Lead, LeadDetail, LeadPerson, LeadOrganization, MasterUser, AuditTrail, History, CustomField, CustomFieldValue } = req.models;
   const { leadIds, updateData } = req.body;
 
   // Validate input
@@ -7189,6 +7262,7 @@ exports.bulkEditLeads = async (req, res) => {
     // Check access permissions
     if (!["admin", "general", "master"].includes(req.role)) {
       await logAuditTrail(
+        AuditTrail,
         PROGRAMS.LEAD_MANAGEMENT,
         "BULK_LEAD_UPDATE",
         null,
@@ -7257,17 +7331,17 @@ exports.bulkEditLeads = async (req, res) => {
       where: whereClause,
       include: [
         {
-          model: LeadDetails,
+          model: LeadDetail,
           as: "details",
           required: false,
         },
         {
-          model: Person,
+          model: LeadPerson,
           as: "LeadPerson",
           required: false,
         },
         {
-          model: Organization,
+          model: LeadOrganization,
           as: "LeadOrganization",
           required: false,
         },
@@ -7310,7 +7384,7 @@ exports.bulkEditLeads = async (req, res) => {
 
         // Update LeadDetails table
         if (Object.keys(leadDetailsData).length > 0) {
-          let leadDetails = await LeadDetails.findOne({
+          let leadDetails = await LeadDetail.findOne({
             where: { leadId: lead.leadId },
           });
 
@@ -7330,7 +7404,7 @@ exports.bulkEditLeads = async (req, res) => {
 
         // Update Person table
         if (Object.keys(personData).length > 0 && lead.personId) {
-          const person = await Person.findByPk(lead.personId);
+          const person = await LeadPerson.findByPk(lead.personId);
           if (person) {
             await person.update(personData);
             console.log(`Updated person ${lead.personId}:`, personData);
@@ -7342,7 +7416,7 @@ exports.bulkEditLeads = async (req, res) => {
           Object.keys(organizationData).length > 0 &&
           lead.leadOrganizationId
         ) {
-          const organization = await Organization.findByPk(
+          const organization = await LeadOrganization.findByPk(
             lead.leadOrganizationId
           );
           if (organization) {
@@ -7452,6 +7526,7 @@ exports.bulkEditLeads = async (req, res) => {
 
         // Log audit trail for successful update
         await historyLogger(
+          History,
           PROGRAMS.LEAD_MANAGEMENT,
           "BULK_LEAD_UPDATE",
           req.adminId,
@@ -7514,6 +7589,7 @@ exports.bulkEditLeads = async (req, res) => {
     console.error("Error in bulk edit leads:", error);
 
     await logAuditTrail(
+      AuditTrail,
       PROGRAMS.LEAD_MANAGEMENT,
       "BULK_LEAD_UPDATE",
       null,
@@ -7530,6 +7606,7 @@ exports.bulkEditLeads = async (req, res) => {
 
 // Bulk delete leads functionality
 exports.bulkDeleteLeads = async (req, res) => {
+  const { Lead, LeadDetail, Email, LeadPerson, LeadOrganization, MasterUser, AuditTrail, History, CustomField, CustomFieldValue, LeadNote } = req.models;
   const { leadIds } = req.body;
 
   // Validate input
@@ -7545,6 +7622,7 @@ exports.bulkDeleteLeads = async (req, res) => {
     // Check access permissions
     if (!["admin", "general", "master"].includes(req.role)) {
       await logAuditTrail(
+        AuditTrail,
         PROGRAMS.LEAD_MANAGEMENT,
         "BULK_LEAD_DELETE",
         null,
@@ -7614,7 +7692,7 @@ exports.bulkDeleteLeads = async (req, res) => {
         });
 
         // Delete lead details
-        await LeadDetails.destroy({
+        await LeadDetail.destroy({
           where: { leadId: lead.leadId },
         });
 
@@ -7631,6 +7709,7 @@ exports.bulkDeleteLeads = async (req, res) => {
 
         // Log audit trail for successful deletion
         await historyLogger(
+          History,
           PROGRAMS.LEAD_MANAGEMENT,
           "BULK_LEAD_DELETE",
           req.adminId,
@@ -7650,6 +7729,7 @@ exports.bulkDeleteLeads = async (req, res) => {
         console.error(`Error deleting lead ${lead.leadId}:`, leadError);
 
         await logAuditTrail(
+          AuditTrail,
           PROGRAMS.LEAD_MANAGEMENT,
           "BULK_LEAD_DELETE",
           req.adminId,
@@ -7692,6 +7772,7 @@ exports.bulkDeleteLeads = async (req, res) => {
     console.error("Error in bulk delete leads:", error);
 
     await logAuditTrail(
+      AuditTrail,
       PROGRAMS.LEAD_MANAGEMENT,
       "BULK_LEAD_DELETE",
       null,
@@ -7708,6 +7789,7 @@ exports.bulkDeleteLeads = async (req, res) => {
 
 // Bulk archive leads functionality
 exports.bulkArchiveLeads = async (req, res) => {
+   const { Lead,  AuditTrail, History } = req.models;
   const { leadIds } = req.body;
 
   // Validate input
@@ -7723,6 +7805,7 @@ exports.bulkArchiveLeads = async (req, res) => {
     // Check access permissions
     if (!["admin", "general", "master"].includes(req.role)) {
       await logAuditTrail(
+        AuditTrail,
         PROGRAMS.LEAD_MANAGEMENT,
         "BULK_LEAD_ARCHIVE",
         null,
@@ -7793,6 +7876,7 @@ exports.bulkArchiveLeads = async (req, res) => {
 
         // Log audit trail for successful archiving
         await historyLogger(
+          History,
           PROGRAMS.LEAD_MANAGEMENT,
           "BULK_LEAD_ARCHIVE",
           req.adminId,
@@ -7812,6 +7896,7 @@ exports.bulkArchiveLeads = async (req, res) => {
         console.error(`Error archiving lead ${lead.leadId}:`, leadError);
 
         await logAuditTrail(
+          AuditTrail,
           PROGRAMS.LEAD_MANAGEMENT,
           "BULK_LEAD_ARCHIVE",
           req.adminId,
@@ -7854,6 +7939,7 @@ exports.bulkArchiveLeads = async (req, res) => {
     console.error("Error in bulk archive leads:", error);
 
     await logAuditTrail(
+      AuditTrail,
       PROGRAMS.LEAD_MANAGEMENT,
       "BULK_LEAD_ARCHIVE",
       null,
@@ -7870,6 +7956,7 @@ exports.bulkArchiveLeads = async (req, res) => {
 
 // Bulk unarchive leads functionality
 exports.bulkUnarchiveLeads = async (req, res) => {
+  const { Lead, LeadDetail, LeadPerson, LeadOrganization, MasterUser, AuditTrail, History, CustomField, CustomFieldValue, LeadNote } = req.models;
   const { leadIds } = req.body;
 
   // Validate input
@@ -7885,6 +7972,7 @@ exports.bulkUnarchiveLeads = async (req, res) => {
     // Check access permissions
     if (!["admin", "general", "master"].includes(req.role)) {
       await logAuditTrail(
+        AuditTrail,
         PROGRAMS.LEAD_MANAGEMENT,
         "BULK_LEAD_UNARCHIVE",
         null,
@@ -7955,6 +8043,7 @@ exports.bulkUnarchiveLeads = async (req, res) => {
 
         // Log audit trail for successful unarchiving
         await historyLogger(
+          History,
           PROGRAMS.LEAD_MANAGEMENT,
           "BULK_LEAD_UNARCHIVE",
           req.adminId,
@@ -7974,6 +8063,7 @@ exports.bulkUnarchiveLeads = async (req, res) => {
         console.error(`Error unarchiving lead ${lead.leadId}:`, leadError);
 
         await logAuditTrail(
+          AuditTrail,
           PROGRAMS.LEAD_MANAGEMENT,
           "BULK_LEAD_UNARCHIVE",
           req.adminId,
@@ -8017,6 +8107,7 @@ exports.bulkUnarchiveLeads = async (req, res) => {
     console.error("Error in bulk unarchive leads:", error);
 
     await logAuditTrail(
+      AuditTrail,
       PROGRAMS.LEAD_MANAGEMENT,
       "BULK_LEAD_UNARCHIVE",
       null,
@@ -8033,6 +8124,7 @@ exports.bulkUnarchiveLeads = async (req, res) => {
 
 // Convert multiple leads to deals
 exports.convertBulkLeadsToDeals = async (req, res) => {
+  const { GroupMembership, Lead, LeadDetail, LeadPerson, LeadOrganization, MasterUser, AuditTrail, History, CustomField, CustomFieldValue, LeadNote, DealDetail, Activity, DealNote, Email, VisibilityGroup, ItemVisibilityRule, Deal } = req.models;
   const { leadIds, dealData = {} } = req.body;
 
   // Validation
@@ -8053,6 +8145,7 @@ exports.convertBulkLeadsToDeals = async (req, res) => {
     // Check if user has permission to convert leads
     if (!["admin", "general", "master"].includes(req.role)) {
       await logAuditTrail(
+        AuditTrail,
         PROGRAMS.LEAD_MANAGEMENT,
         "BULK_LEAD_CONVERSION",
         req.adminId,
@@ -8065,7 +8158,7 @@ exports.convertBulkLeadsToDeals = async (req, res) => {
     }
 
     // Get user's visibility permissions for validation
-    const userPermissions = await getUserLeadVisibilityPermissions(req.adminId, req.role);
+    const userPermissions = await getUserLeadVisibilityPermissions(req.adminId, req.role, GroupMembership, VisibilityGroup, ItemVisibilityRule);
 
     // Fetch all leads to be converted with related data
     let whereClause = {
@@ -8103,17 +8196,17 @@ exports.convertBulkLeadsToDeals = async (req, res) => {
       where: whereClause,
       include: [
         {
-          model: LeadDetails,
+          model: LeadDetail,
           as: "details",
           required: false,
         },
         {
-          model: Person,
+          model: LeadPerson,
           as: "LeadPerson",
           required: false,
         },
         {
-          model: Organization,
+          model: LeadOrganization,
           as: "LeadOrganization",
           required: false,
         },
@@ -8212,7 +8305,7 @@ exports.convertBulkLeadsToDeals = async (req, res) => {
 
           // Create deal details if lead has details
           if (lead.details) {
-            await DealDetails.create({
+            await DealDetail.create({
               dealId: newDeal.dealId,
               responsiblePerson: lead.details.responsiblePerson || ownerName,
               sourceOrgin: lead.details.sourceOrgin || lead.sourceOrgin,
@@ -8343,6 +8436,7 @@ exports.convertBulkLeadsToDeals = async (req, res) => {
 
           // Log the successful conversion
           await historyLogger(
+            History,
             PROGRAMS.LEAD_MANAGEMENT,
             "LEAD_TO_DEAL_CONVERSION",
             req.adminId,
@@ -8374,6 +8468,7 @@ exports.convertBulkLeadsToDeals = async (req, res) => {
 
         // Log the bulk conversion audit trail
         await logAuditTrail(
+          AuditTrail,
           PROGRAMS.LEAD_MANAGEMENT,
           "BULK_LEAD_TO_DEAL_CONVERSION",
           req.adminId,
@@ -8416,6 +8511,7 @@ exports.convertBulkLeadsToDeals = async (req, res) => {
     console.error("Error during bulk lead to deal conversion:", error);
 
     await logAuditTrail(
+      AuditTrail,
       PROGRAMS.LEAD_MANAGEMENT,
       "BULK_LEAD_TO_DEAL_CONVERSION",
       req.adminId,
@@ -8438,6 +8534,7 @@ exports.convertBulkLeadsToDeals = async (req, res) => {
  * Get all available labels for all entity types or specific entity type
  */
 exports.getLeadLabels = async (req, res) => {
+  const { Label } = req.models;
   try {
     const { entityType } = req.query; // Optional query parameter to filter by entity type
     
@@ -8502,6 +8599,7 @@ exports.getLeadLabels = async (req, res) => {
  * Create a new label for leads
  */
 exports.createLeadLabel = async (req, res) => {
+  const { Label, MasterUser, AuditTrail } = req.models;
   try {
     const { labelName, labelColor, description, entityType } = req.body;
 
@@ -8555,6 +8653,7 @@ exports.createLeadLabel = async (req, res) => {
 
     // Log audit trail
     await logAuditTrail(
+      AuditTrail,
       PROGRAMS.LEAD_MANAGEMENT,
       "CREATE_LABEL",
       req.adminId,
@@ -8600,6 +8699,7 @@ exports.createLeadLabel = async (req, res) => {
  * Update/Edit a particular label
  */
 exports.updateLeadLabel = async (req, res) => {
+  const { Label, MasterUser, AuditTrail, Lead } = req.models;
   try {
     const { labelId } = req.params;
     const { labelName, labelColor, description } = req.body;
@@ -8776,6 +8876,7 @@ exports.updateLeadLabel = async (req, res) => {
 
     // Log audit trail
     await logAuditTrail(
+      AuditTrail,
       PROGRAMS.LEAD_MANAGEMENT,
       "UPDATE_LABEL",
       req.adminId,
@@ -8828,6 +8929,7 @@ exports.updateLeadLabel = async (req, res) => {
  * Update labels for a specific lead
  */
 exports.updateLeadLabels = async (req, res) => {
+  const { Lead, Label, AuditTrail } = req.models;
   try {
     const { leadId } = req.params;
     const { valueLabels } = req.body;
@@ -8894,6 +8996,7 @@ exports.updateLeadLabels = async (req, res) => {
 
     // Log audit trail
     await logAuditTrail(
+      AuditTrail,
       PROGRAMS.LEAD_MANAGEMENT,
       "UPDATE_LEAD_LABELS",
       req.adminId,
@@ -8924,6 +9027,7 @@ exports.updateLeadLabels = async (req, res) => {
  * Get leads filtered by specific labels
  */
 exports.getLeadsByLabels = async (req, res) => {
+  const { Lead, Label } = req.models;
   try {
     const { 
       labels, // Comma-separated string or array
@@ -9049,6 +9153,7 @@ exports.getLeadsByLabels = async (req, res) => {
  * Delete a label (soft delete - set isActive to false) for any entity type
  */
 exports.deleteLeadLabel = async (req, res) => {
+  const { Label, MasterUser, AuditTrail, Lead } = req.models;
   try {
     const { labelId } = req.params;
 
@@ -9138,6 +9243,7 @@ exports.deleteLeadLabel = async (req, res) => {
 
     // Log audit trail
     await logAuditTrail(
+      AuditTrail,
       PROGRAMS.LEAD_MANAGEMENT,
       "DELETE_LABEL",
       req.adminId,
@@ -9172,6 +9278,7 @@ exports.deleteLeadLabel = async (req, res) => {
  * Get all available labels with usage statistics
  */
 exports.getLeadLabelsWithStats = async (req, res) => {
+  const { Label, Lead } = req.models;
   try {
     // Get all active labels for leads
     const labels = await Label.findAll({
@@ -9232,6 +9339,7 @@ exports.getLeadLabelsWithStats = async (req, res) => {
 
 // Excel Import API for Leads
 exports.importLeadsFromExcel = async (req, res) => {
+  const { AuditTrail, LeadPerson, Lead, LeadDetail } = req.models;
   try {
     // Use multer middleware to handle file upload
     upload.single('excelFile')(req, res, async (err) => {
@@ -9254,6 +9362,7 @@ exports.importLeadsFromExcel = async (req, res) => {
         // Check user permissions
         if (!["admin", "general", "master"].includes(req.role)) {
           await logAuditTrail(
+            AuditTrail,
             PROGRAMS.LEAD_MANAGEMENT,
             "LEAD_EXCEL_IMPORT_DENIED",
             req.adminId,
@@ -9306,7 +9415,10 @@ exports.importLeadsFromExcel = async (req, res) => {
           defaultOwner,
           batchSize,
           masterUserID: req.adminId,
-          role: req.role
+          role: req.role,
+          LeadPerson,
+          Lead,
+          LeadDetail,
         });
 
         // Clean up uploaded file
@@ -9316,6 +9428,7 @@ exports.importLeadsFromExcel = async (req, res) => {
 
         // Log successful import
         await logAuditTrail(
+          AuditTrail,
           PROGRAMS.LEAD_MANAGEMENT,
           "LEAD_EXCEL_IMPORT_COMPLETED",
           req.adminId,
@@ -9352,6 +9465,7 @@ exports.importLeadsFromExcel = async (req, res) => {
         }
 
         await logAuditTrail(
+          AuditTrail,
           PROGRAMS.LEAD_MANAGEMENT,
           "LEAD_EXCEL_IMPORT_ERROR",
           req.adminId,
@@ -9424,7 +9538,10 @@ async function processLeadImport(data, options) {
     defaultOwner,
     batchSize,
     masterUserID,
-    role
+    role,
+    LeadPerson,
+    Lead,
+    LeadDetail,
   } = options;
 
   let successful = 0;
@@ -9495,7 +9612,7 @@ async function processLeadImport(data, options) {
           }
 
           // Check for duplicates (similar to createDeal logic)
-          const duplicateCheck = await checkLeadDuplicate(leadData, masterUserID);
+          const duplicateCheck = await checkLeadDuplicate(leadData, masterUserID, Lead);
 
           if (duplicateCheck.isDuplicate) {
             if (duplicateHandling === 'skip') {
@@ -9548,7 +9665,7 @@ async function processLeadImport(data, options) {
 
           // Create lead details if needed (similar to createDeal details creation)
           if (leadData.notes || leadData.sourceChannel) {
-            await LeadDetails.create({
+            await LeadDetail.create({
               leadId: newLead.leadId,
               description: leadData.notes,
               sourceChannel: leadData.sourceChannel,
@@ -9560,7 +9677,7 @@ async function processLeadImport(data, options) {
           // Create associated person if email is provided
           if (leadData.email && leadData.contactPerson) {
             try {
-              const existingPerson = await Person.findOne({
+              const existingPerson = await LeadPerson.findOne({
                 where: { email: leadData.email },
                 transaction
               });
@@ -9651,7 +9768,7 @@ function parseRowToLeadData(row, expectedColumns) {
 }
 
 // Helper function to check for lead duplicates
-async function checkLeadDuplicate(leadData, masterUserID) {
+async function checkLeadDuplicate(leadData, masterUserID, Lead) {
   try {
     const whereConditions = [];
 

@@ -1,5 +1,6 @@
 // Update check status for organization columns and custom fields
 exports.updateOrganizationColumnChecks = async (req, res) => {
+  const {OrganizationColumnPreference, CustomField,  } = req.models;
   // Expecting: { columns: [ { key: "columnName", check: true/false }, ... ] }
   const { columns } = req.body;
 
@@ -8,8 +9,6 @@ exports.updateOrganizationColumnChecks = async (req, res) => {
   }
 
   try {
-    const OrganizationColumnPreference = require("../../models/leads/organizationColumnModel");
-    const CustomField = require("../../models/customFieldModel");
     const { Op } = require("sequelize");
 
     // Find the global OrganizationColumnPreference record
@@ -158,6 +157,7 @@ exports.updateOrganizationColumnChecks = async (req, res) => {
 
 // Update check status for person columns and custom fields, also updates organization columns
 exports.updatePersonColumnChecks = async (req, res) => {
+  const {OrganizationColumnPreference, CustomField, PersonColumnPreference } = req.models;
   // Expecting: { 
   //   columns: [ { key: "columnName", check: true/false, entityType?: "person"|"organization" }, ... ],
   //   entityType?: "person"|"organization" // Global entityType for all columns if not specified per column
@@ -169,9 +169,7 @@ exports.updatePersonColumnChecks = async (req, res) => {
   }
 
   try {
-    const PersonColumnPreference = require("../../models/leads/personColumnModel");
-    const OrganizationColumnPreference = require("../../models/leads/organizationColumnModel");
-    const CustomField = require("../../models/customFieldModel");
+  
     const { Op } = require("sequelize");
 
     // Separate columns by entityType
@@ -507,9 +505,9 @@ exports.updatePersonColumnChecks = async (req, res) => {
 
 
 exports.getOrganizationColumnPreference = async (req, res) => {
+  const {OrganizationColumnPreference, CustomField, PersonColumnPreference } = req.models;
   try {
-    const OrganizationColumnPreference = require("../../models/leads/organizationColumnModel");
-    const CustomField = require("../../models/customFieldModel");
+  
     const { Op } = require("sequelize");
     const pref = await OrganizationColumnPreference.findOne({ where: {} });
 
@@ -642,9 +640,8 @@ exports.getOrganizationColumnPreference = async (req, res) => {
 
 // Get person column preferences with custom fields
 exports.getPersonColumnPreference = async (req, res) => {
+   const {OrganizationColumnPreference, CustomField, PersonColumnPreference } = req.models;
   try {
-    const PersonColumnPreference = require("../../models/leads/personColumnModel");
-    const CustomField = require("../../models/customFieldModel");
     const { Op } = require("sequelize");
     const pref = await PersonColumnPreference.findOne({ where: {} });
 
@@ -777,10 +774,9 @@ exports.getPersonColumnPreference = async (req, res) => {
 
 // Get both organization and person column preferences in separate arrays
 exports.getBothColumnPreferences = async (req, res) => {
+   const {OrganizationColumnPreference, CustomField, PersonColumnPreference } = req.models;
   try {
-    const OrganizationColumnPreference = require("../../models/leads/organizationColumnModel");
-    const PersonColumnPreference = require("../../models/leads/personColumnModel");
-    const CustomField = require("../../models/customFieldModel");
+  
     const { Op } = require("sequelize");
 
     // Fetch organization preferences
@@ -1021,9 +1017,10 @@ exports.getBothColumnPreferences = async (req, res) => {
 
 // Save all organization fields with check status to OrganizationColumnPreference
 exports.saveAllOrganizationFieldsWithCheck = async (req, res) => {
+   const {OrganizationColumnPreference, CustomField, LeadOrganization } = req.models;
   let Organization;
   try {
-    Organization = require("../../models/leads/leadOrganizationModel");
+    Organization = LeadOrganization
   } catch (e) {
     Organization = null;
   }
@@ -1049,7 +1046,6 @@ exports.saveAllOrganizationFieldsWithCheck = async (req, res) => {
   });
 
   try {
-    const OrganizationColumnPreference = require("../../models/leads/organizationColumnModel");
     let pref = await OrganizationColumnPreference.findOne();
     if (!pref) {
       // Create the record if it doesn't exist
@@ -1070,9 +1066,10 @@ exports.saveAllOrganizationFieldsWithCheck = async (req, res) => {
 
 // Save all person fields with check status to PersonColumnPreference
 exports.saveAllPersonFieldsWithCheck = async (req, res) => {
+  const {PersonColumnPreference, CustomField, LeadPerson } = req.models;
   let Person;
   try {
-    Person = require("../../models/leads/leadPersonModel");
+    Person = LeadPerson;
   } catch (e) {
     Person = null;
   }
@@ -1098,7 +1095,6 @@ exports.saveAllPersonFieldsWithCheck = async (req, res) => {
   });
 
   try {
-    const PersonColumnPreference = require("../../models/leads/personColumnModel");
     let pref = await PersonColumnPreference.findOne();
     if (!pref) {
       // Create the record if it doesn't exist
@@ -1118,12 +1114,10 @@ exports.saveAllPersonFieldsWithCheck = async (req, res) => {
 };
 // Bulk update organizations with custom fields (accepts { leadOrganizationId: [], updateData: {} })
 exports.bulkUpdateOrganizations = async (req, res) => {
+  const {PersonColumnPreference, CustomField, CustomFieldValue, LeadOrganization } = req.models;
   const { leadOrganizationId, updateData } = req.body; // { leadOrganizationId: [1,2,3], updateData: { field1: value1, ... } }
   const adminId = req.adminId;
   const entityType = "organization";
-  const CustomField = require("../../models/customFieldModel");
-  const CustomFieldValue = require("../../models/customFieldValueModel");
-  const Organization = require("../../models/leads/leadOrganizationModel");
   const sequelize = require("../../config/db");
 
   if (
@@ -1141,7 +1135,7 @@ exports.bulkUpdateOrganizations = async (req, res) => {
 
   const results = [];
   // Get all organization model fields
-  const orgFields = Object.keys(Organization.rawAttributes);
+  const orgFields = Object.keys(LeadOrganization.rawAttributes);
   for (const orgId of leadOrganizationId) {
     const fields = { ...updateData };
     const transaction = await sequelize.transaction();
@@ -1149,12 +1143,12 @@ exports.bulkUpdateOrganizations = async (req, res) => {
       // Admins can update any organization, others only their own
       let organization;
       if (req.role === "admin") {
-        organization = await Organization.findOne({
+        organization = await LeadOrganization.findOne({
           where: { leadOrganizationId: orgId },
           transaction,
         });
       } else {
-        organization = await Organization.findOne({
+        organization = await LeadOrganization.findOne({
           where: { leadOrganizationId: orgId, masterUserID: adminId },
           transaction,
         });
@@ -1319,14 +1313,13 @@ exports.bulkUpdateOrganizations = async (req, res) => {
     failureCount: results.filter((r) => !r.success).length,
   });
 };
+
 // Bulk update persons with custom fields (accepts { personId: [], updateData: {} })
 exports.bulkUpdatePersons = async (req, res) => {
+  const {PersonColumnPreference, CustomField, CustomFieldValue, LeadPerson } = req.models;
   const { personId, updateData } = req.body; // { personId: [1,2,3], updateData: { field1: value1, ... } }
   const adminId = req.adminId;
   const entityType = "person";
-  const CustomField = require("../../models/customFieldModel");
-  const CustomFieldValue = require("../../models/customFieldValueModel");
-  const Person = require("../../models/leads/leadPersonModel");
   const sequelize = require("../../config/db");
 
   if (
@@ -1343,7 +1336,7 @@ exports.bulkUpdatePersons = async (req, res) => {
 
   const results = [];
   // Get all person model fields
-  const personFields = Object.keys(Person.rawAttributes);
+  const personFields = Object.keys(LeadPerson.rawAttributes);
   for (const pId of personId) {
     const fields = { ...updateData };
     const transaction = await sequelize.transaction();
@@ -1351,12 +1344,12 @@ exports.bulkUpdatePersons = async (req, res) => {
       // Admins can update any person, others only their own
       let person;
       if (req.role === "admin") {
-        person = await Person.findOne({
+        person = await LeadPerson.findOne({
           where: { personId: pId },
           transaction,
         });
       } else {
-        person = await Person.findOne({
+        person = await LeadPerson.findOne({
           where: { personId: pId, masterUserID: adminId },
           transaction,
         });
@@ -1519,15 +1512,9 @@ exports.bulkUpdatePersons = async (req, res) => {
 };
 
 exports.getOrganizationsAndPersons = async (req, res) => {
+  const {PersonColumnPreference, CustomField, CustomFieldValue, LeadDetail, LeadPerson, LeadOrganization, MasterUser, OrganizationColumnPreference, Deal, Lead, LeadFilter, Activity, Product, DealProduct, } = req.models;
   try {
     // Import required models at the beginning of the function
-    const { Lead, LeadDetails, Person, Organization } = require("../../models");
-    const Deal = require("../../models/deals/dealsModels");
-    const MasterUser = require("../../models/master/masterUserModel");
-    const CustomField = require("../../models/customFieldModel");
-    const CustomFieldValue = require("../../models/customFieldValueModel");
-    const OrganizationColumnPreference = require("../../models/leads/organizationColumnModel");
-    const PersonColumnPreference = require("../../models/leads/personColumnModel");
 
     // Pagination and search for organizations
     const orgPage = parseInt(req.query.orgPage) || 1;
@@ -1584,7 +1571,6 @@ exports.getOrganizationsAndPersons = async (req, res) => {
     const includeOverdueCount = req.query.includeOverdueCount === 'true' || req.query.includeOverdueCount === true || includeTimeline;
 
     // Dynamic filter config (from body or query)
-    const LeadFilter = require("../../models/leads/leadFiltersModel");
     let filterConfig = null;
     let filterIdRaw = null;
     if (req.body && req.body.filterId !== undefined) {
@@ -1667,7 +1653,7 @@ exports.getOrganizationsAndPersons = async (req, res) => {
     console.log("[DEBUG] - Person fields:", Object.keys(Person.rawAttributes));
     console.log(
       "[DEBUG] - Organization fields:",
-      Object.keys(Organization.rawAttributes)
+      Object.keys(LeadOrganization.rawAttributes)
     );
     const ops = {
       eq: Op.eq,
@@ -1812,7 +1798,6 @@ exports.getOrganizationsAndPersons = async (req, res) => {
 
     let activityFields = [];
     try {
-      const Activity = require("../../models/activity/activityModel");
       activityFields = Object.keys(Activity.rawAttributes);
     } catch (e) {
       console.log("[DEBUG] Activity model not available:", e.message);
@@ -1821,8 +1806,6 @@ exports.getOrganizationsAndPersons = async (req, res) => {
     let productFields = [];
     let dealProductFields = [];
     try {
-      const Product = require("../../models/product/productModel");
-      const DealProduct = require("../../models/product/dealProductModel");
       productFields = Object.keys(Product.rawAttributes);
       dealProductFields = Object.keys(DealProduct.rawAttributes);
     } catch (e) {
@@ -2156,7 +2139,7 @@ exports.getOrganizationsAndPersons = async (req, res) => {
 
       // If we have organization names from leads, also find organizations by name
       if (leadOrgNames.length > 0) {
-        const orgsByName = await Organization.findAll({
+        const orgsByName = await LeadOrganization.findAll({
           where: {
             organization: { [Op.in]: leadOrgNames },
           },
@@ -2200,7 +2183,6 @@ exports.getOrganizationsAndPersons = async (req, res) => {
       });
 
       try {
-        const Activity = require("../../models/activity/activityModel");
         let activityFilterResults = [];
 
         if (req.role === "admin") {
@@ -2247,7 +2229,7 @@ exports.getOrganizationsAndPersons = async (req, res) => {
 
         // If we have organization names from activities, also find organizations by name
         if (activityOrgNames.length > 0) {
-          const orgsByName = await Organization.findAll({
+          const orgsByName = await LeadOrganization.findAll({
             where: {
               organization: { [Op.in]: activityOrgNames },
             },
@@ -2295,13 +2277,13 @@ exports.getOrganizationsAndPersons = async (req, res) => {
 
       let personFilterResults = [];
       if (req.role === "admin") {
-        personFilterResults = await Person.findAll({
+        personFilterResults = await LeadPerson.findAll({
           where: personWhere,
           attributes: ["leadOrganizationId", "organization"],
           raw: true,
         });
       }else {
-        personFilterResults = await Person.findAll({
+        personFilterResults = await LeadPerson.findAll({
           where: {
             ...personWhere,
             [Op.or]: [{ masterUserID: req.adminId }],
@@ -2414,7 +2396,7 @@ exports.getOrganizationsAndPersons = async (req, res) => {
 
       // If we have organization names from deals, also find organizations by name
       if (dealOrgNames.length > 0) {
-        const orgsByName = await Organization.findAll({
+        const orgsByName = await LeadOrganization.findAll({
           where: {
             organization: { [Op.in]: dealOrgNames },
           },
@@ -2461,14 +2443,14 @@ exports.getOrganizationsAndPersons = async (req, res) => {
 
       let orgFilterResults = [];
       if (req.role === "admin") {
-        orgFilterResults = await Organization.findAll({
+        orgFilterResults = await LeadOrganization.findAll({
           where: organizationWhere,
           attributes: ["leadOrganizationId"],
           raw: true,
         });
       }
       else {
-        orgFilterResults = await Organization.findAll({
+        orgFilterResults = await LeadOrganization.findAll({
           where: {
             ...organizationWhere,
             [Op.or]: [{ masterUserID: req.adminId }, { ownerId: req.adminId }],
@@ -2698,7 +2680,7 @@ exports.getOrganizationsAndPersons = async (req, res) => {
     console.log("[DEBUG] Final orgWhere:", JSON.stringify(orgWhere, null, 2));
 
     // Prepare sorting options
-    const validSortFields = Object.keys(Organization.rawAttributes);
+    const validSortFields = Object.keys(LeadOrganization.rawAttributes);
     const validSortOrders = ["ASC", "DESC"];
     
     // Validate sortBy parameter
@@ -2714,20 +2696,20 @@ exports.getOrganizationsAndPersons = async (req, res) => {
     // Fetch organizations using EXACT same logic as getLeads API
     let organizations = [];
     if (req.role === "admin"&&!req.query.masterUserID) {
-      organizations = await Organization.findAll({
+      organizations = await LeadOrganization.findAll({
         where: orgWhere,
         order: [[finalSortBy, finalSortOrder]],
         raw: true,
       });
     }else if (req.query.masterUserID) {
       orgWhere.masterUserID = req.query.masterUserID;
-      organizations = await Organization.findAll({
+      organizations = await LeadOrganization.findAll({
         where:orgWhere,
         order: [[finalSortBy, finalSortOrder]],
         raw: true,
       });
     }else {
-      organizations = await Organization.findAll({
+      organizations = await LeadOrganization.findAll({
         where: {
           ...orgWhere,
           [Op.or]: [{ masterUserID: req.adminId }, { ownerId: req.adminId }],
@@ -2761,7 +2743,7 @@ exports.getOrganizationsAndPersons = async (req, res) => {
     // Fetch persons using pagination logic similar to getPersonsAndOrganizations API
     let personQueryResult = { count: 0, rows: [] };
     if (req.role === "admin" && !req.query.masterUserID) {
-      personQueryResult = await Person.findAndCountAll({
+      personQueryResult = await LeadPerson.findAndCountAll({
         where: finalPersonWhere,
         order: [[sortBy, sortOrder]], 
         limit: personLimit,
@@ -2771,7 +2753,7 @@ exports.getOrganizationsAndPersons = async (req, res) => {
     } else if (req.query.masterUserID) {
       // If masterUserID is provided, filter by that as well
       finalPersonWhere.masterUserID = req.query.masterUserID;
-      personQueryResult = await Person.findAndCountAll({
+      personQueryResult = await LeadPerson.findAndCountAll({
         where: finalPersonWhere,
         order: [[sortBy, sortOrder]], 
         limit: personLimit,
@@ -2795,7 +2777,7 @@ exports.getOrganizationsAndPersons = async (req, res) => {
         finalPersonWhere = roleBasedPersonFilter;
       }
 
-      personQueryResult = await Person.findAndCountAll({
+      personQueryResult = await LeadPerson.findAndCountAll({
         where: finalPersonWhere,
         order: [[sortBy, sortOrder]], 
         limit: personLimit,
@@ -3023,7 +3005,7 @@ exports.getOrganizationsAndPersons = async (req, res) => {
           req.adminId,
           req.role,
           timelineGranularity,
-          includeOverdueCount
+          includeOverdueCount, Activity, Email, Deal, ActivityType
         );
 
         console.log('[DEBUG] Timeline enrichment completed for', enrichedPersons.length, 'persons');
@@ -3145,6 +3127,7 @@ const sequelize = require("../../config/db");
  * }
  */
 exports.createPerson = async (req, res) => {
+  const {Email, LeadNote, DealNote, MasterUser, Attachment, OrganizationNote, PersonNote, Deal, LeadOrganization, LeadPerson, Lead, Activity, CustomField, CustomFieldValue, UserCredential} = req.models;
   try {
     const masterUserID = req.adminId;
     if (!req.body || !req.body.contactPerson) {
@@ -3228,7 +3211,7 @@ exports.createPerson = async (req, res) => {
     let org = null;
     if (organization) {
       // Only create/find organization if provided
-      [org] = await Organization.findOrCreate({
+      [org] = await LeadOrganization.findOrCreate({
         where: { organization },
         defaults: { organization, masterUserID, ownerId: masterUserID },
       });
@@ -3246,7 +3229,7 @@ exports.createPerson = async (req, res) => {
     }
 
     // Create the person with primary email and phone + arrays in table fields
-    const person = await Person.create({
+    const person = await LeadPerson.create({
       contactPerson,
       email: primaryEmail, // Store primary email in the main field
       phone: primaryPhone, // Store primary phone in the main field
@@ -3289,7 +3272,7 @@ exports.createPerson = async (req, res) => {
     if (activityId) {
       try {
         console.log(`Linking activity ${activityId} to person ${person.personId}`);
-        const activityUpdateResult = await Activities.update(
+        const activityUpdateResult = await Activity.update(
           { personId: person.personId },
           { where: { activityId: activityId } }
         );
@@ -3360,12 +3343,13 @@ exports.createPerson = async (req, res) => {
  * Get a person by ID with all emails and phones
  */
 exports.getPerson = async (req, res) => {
+  const {Email, LeadNote, DealNote, MasterUser, Attachment, OrganizationNote, PersonNote, Deal, LeadOrganization, LeadPerson, Lead, Activity, CustomField, CustomFieldValue, UserCredential} = req.models;
   try {
     const { personId } = req.params;
     const masterUserID = req.adminId;
 
     // Find the person
-    const person = await Person.findOne({
+    const person = await LeadPerson.findOne({
       where: { 
         personId,
         // Role-based access control
@@ -3408,6 +3392,7 @@ exports.getPerson = async (req, res) => {
 };
 
 exports.createOrganization = async (req, res) => {
+  const {Email, LeadNote, DealNote, MasterUser, Attachment, OrganizationNote, PersonNote, Deal, LeadOrganization, LeadPerson, Lead, Activity, CustomField, CustomFieldValue, UserCredential} = req.models;
   try {
     const masterUserID = req.adminId; // Get the master user ID from the request
     const ownerId = req.body.ownerId || masterUserID; // Default to masterUserID if not provided
@@ -3427,7 +3412,7 @@ exports.createOrganization = async (req, res) => {
     } = req.body;
 
     // Check if organization already exists
-    const existingOrg = await Organization.findOne({ where: { organization } });
+    const existingOrg = await LeadOrganization.findOne({ where: { organization } });
     if (existingOrg) {
       return res.status(409).json({
         message: "Organization already exists.",
@@ -3436,7 +3421,7 @@ exports.createOrganization = async (req, res) => {
     }
 
     // Get all organization model fields
-    const orgFields = Object.keys(Organization.rawAttributes);
+    const orgFields = Object.keys(LeadOrganization.rawAttributes);
 
     // Split custom fields from standard fields
     const customFields = {};
@@ -3447,7 +3432,7 @@ exports.createOrganization = async (req, res) => {
     }
 
     // Create the organization
-    const org = await Organization.create({
+    const org = await LeadOrganization.create({
       organization,
       organizationLabels,
       address,
@@ -3457,8 +3442,6 @@ exports.createOrganization = async (req, res) => {
     });
 
     // Save custom fields if any
-    const CustomField = require("../../models/customFieldModel");
-    const CustomFieldValue = require("../../models/customFieldValueModel");
     const Sequelize = require("sequelize");
     for (const [fieldKey, value] of Object.entries(customFields)) {
       if (value === undefined || value === null || value === "") continue;
@@ -3485,7 +3468,7 @@ exports.createOrganization = async (req, res) => {
     if (activityId) {
       try {
         console.log(`Linking activity ${activityId} to organization ${org.leadOrganizationId}`);
-        const activityUpdateResult = await Activities.update(
+        const activityUpdateResult = await Activity.update(
           { leadOrganizationId: org.leadOrganizationId },
           { where: { activityId: activityId } }
         );
@@ -3521,7 +3504,9 @@ exports.createOrganization = async (req, res) => {
     res.status(500).json({ message: "Internal server error" });
   }
 };
+
 exports.getContactTimeline = async (req, res) => {
+  const {Email, LeadNote, DealNote, MasterUser, Attachment, OrganizationNote, PersonNote, Deal, LeadOrganization, LeadPerson, Lead, Activity, CustomField, CustomFieldValue, UserCredential} = req.models;
   try {
     // Pagination
     const page = parseInt(req.query.page) || 1;
@@ -3549,14 +3534,14 @@ exports.getContactTimeline = async (req, res) => {
     fromDate.setMonth(fromDate.getMonth() - monthsBack);
 
     // Main query
-    const { count, rows: persons } = await Person.findAndCountAll({
+    const { count, rows: persons } = await LeadPerson.findAndCountAll({
       where: {
         ...searchFilter,
         createdAt: { [Op.gte]: fromDate },
       },
       include: [
         {
-          model: Organization,
+          model: LeadOrganization,
           as: "LeadOrganization",
           attributes: ["leadOrganizationId", "organization"],
         },
@@ -3593,7 +3578,9 @@ exports.getContactTimeline = async (req, res) => {
     res.status(500).json({ message: "Internal server error" });
   }
 };
+
 exports.getPersonTimeline = async (req, res) => {
+  const {Email, LeadNote, DealNote, MasterUser, Attachment, OrganizationNote, PersonNote, Deal, LeadOrganization, LeadPerson, Lead, Activity, CustomField, CustomFieldValue, UserCredential} = req.models;
   const { personId } = req.params;
 
   // Email optimization parameters
@@ -3603,10 +3590,10 @@ exports.getPersonTimeline = async (req, res) => {
   const safeEmailLimit = Math.min(parseInt(emailLimit), MAX_EMAIL_LIMIT);
 
   try {
-    const person = await Person.findByPk(personId, {
+    const person = await LeadPerson.findByPk(personId, {
       include: [
         {
-          model: Organization,
+          model: LeadOrganization,
           as: "LeadOrganization",
           attributes: ["leadOrganizationId", "organization"],
         },
@@ -3858,21 +3845,21 @@ exports.getPersonTimeline = async (req, res) => {
 
     // Fetch related activities from multiple sources
     // Fetch Lead activities
-    const leadActivities = leadIds.length > 0 ? await Activities.findAll({
+    const leadActivities = leadIds.length > 0 ? await Activity.findAll({
       where: { leadId: leadIds },
       limit: 20,
       order: [["createdAt", "DESC"]],
     }) : [];
 
     // Fetch Deal activities
-    const dealActivities = dealIds.length > 0 ? await Activities.findAll({
+    const dealActivities = dealIds.length > 0 ? await Activity.findAll({
       where: { dealId: dealIds },
       limit: 20,
       order: [["createdAt", "DESC"]],
     }) : [];
 
     // Fetch Person activities
-    const personActivities = await Activities.findAll({
+    const personActivities = await Activity.findAll({
       where: { personId: personId },
       limit: 20,
       order: [["createdAt", "DESC"]],
@@ -3966,6 +3953,7 @@ exports.getPersonTimeline = async (req, res) => {
 };
 
 exports.getOrganizationTimeline = async (req, res) => {
+  const {Email, LeadNote, DealNote, MasterUser, Attachment, OrganizationNote, PersonNote, Deal, LeadOrganization, LeadPerson, Lead, Activity, CustomField, CustomFieldValue, UserCredential} = req.models;
   const { organizationId } = req.params;
 
   // Email optimization parameters
@@ -3976,13 +3964,13 @@ exports.getOrganizationTimeline = async (req, res) => {
 
   try {
     // Fetch the organization
-    const organization = await Organization.findByPk(organizationId);
+    const organization = await LeadOrganization.findByPk(organizationId);
     if (!organization) {
       return res.status(404).json({ message: "Organization not found" });
     }
 
     // Fetch all persons in this organization
-    const persons = await Person.findAll({
+    const persons = await LeadPerson.findAll({
       where: { leadOrganizationId: organizationId },
     });
     // Add array of { personId, contactPerson } to organization object
@@ -4276,28 +4264,28 @@ exports.getOrganizationTimeline = async (req, res) => {
 
     // Fetch related activities from multiple sources
     // Fetch Lead activities
-    const leadActivities = leadIds.length > 0 ? await Activities.findAll({
+    const leadActivities = leadIds.length > 0 ? await Activity.findAll({
       where: { leadId: leadIds },
       limit: 20,
       order: [["createdAt", "DESC"]],
     }) : [];
 
     // Fetch Deal activities
-    const dealActivities = dealIds.length > 0 ? await Activities.findAll({
+    const dealActivities = dealIds.length > 0 ? await Activity.findAll({
       where: { dealId: dealIds },
       limit: 20,
       order: [["createdAt", "DESC"]],
     }) : [];
 
     // Fetch Person activities for all persons in the organization
-    const personActivities = personIds.length > 0 ? await Activities.findAll({
+    const personActivities = personIds.length > 0 ? await Activity.findAll({
       where: { personId: personIds },
       limit: 20,
       order: [["createdAt", "DESC"]],
     }) : [];
 
     // Fetch Organization activities
-    const organizationActivities = await Activities.findAll({
+    const organizationActivities = await Activity.findAll({
       where: { leadOrganizationId: organizationId },
       limit: 20,
       order: [["createdAt", "DESC"]],
@@ -4391,10 +4379,10 @@ exports.getOrganizationTimeline = async (req, res) => {
     res.status(500).json({ message: "Internal server error" });
   }
 };
+
 exports.getPersonFields = async (req, res) => {
+  const {Email, LeadNote, DealNote, MasterUser, Attachment, OrganizationNote, PersonNote, Deal, LeadOrganization, LeadPerson, Lead, Activity, CustomField, CustomFieldValue, UserCredential} = req.models;
   try {
-    const Person = require("../../models/leads/leadPersonModel");
-    const CustomField = require("../../models/customFieldModel");
     const { Op } = require("sequelize");
 
     // Helper function to convert field type to readable format
@@ -4428,11 +4416,11 @@ exports.getPersonFields = async (req, res) => {
     };
 
     // Get all Person model fields
-    const personFields = Object.keys(Person.rawAttributes);
+    const personFields = Object.keys(LeadPerson.rawAttributes);
     
     // Convert Person model fields to the required format
     const fields = personFields.map(fieldName => {
-      const fieldInfo = Person.rawAttributes[fieldName];
+      const fieldInfo = LeadPerson.rawAttributes[fieldName];
       return {
         value: fieldName,
         label: generateLabel(fieldName),
@@ -4503,9 +4491,8 @@ exports.getPersonFields = async (req, res) => {
 };
 
 exports.getOrganizationFields = async (req, res) => {
+  const {Email, LeadNote, DealNote, MasterUser, Attachment, OrganizationNote, PersonNote, Deal, LeadOrganization, LeadPerson, Lead, Activity, CustomField, CustomFieldValue, UserCredential} = req.models;
   try {
-    const Organization = require("../../models/leads/leadOrganizationModel");
-    const CustomField = require("../../models/customFieldModel");
     const { Op } = require("sequelize");
 
     // Helper function to convert field type to readable format
@@ -4539,11 +4526,11 @@ exports.getOrganizationFields = async (req, res) => {
     };
 
     // Get all Organization model fields
-    const organizationFields = Object.keys(Organization.rawAttributes);
+    const organizationFields = Object.keys(LeadOrganization.rawAttributes);
     
     // Convert Organization model fields to the required format
     const fields = organizationFields.map(fieldName => {
-      const fieldInfo = Organization.rawAttributes[fieldName];
+      const fieldInfo = LeadOrganization.rawAttributes[fieldName];
       return {
         value: fieldName,
         label: generateLabel(fieldName),
@@ -4612,13 +4599,15 @@ exports.getOrganizationFields = async (req, res) => {
     res.status(500).json({ message: "Internal server error" });
   }
 };
+
 exports.updateOrganization = async (req, res) => {
+  const {Email, LeadNote, DealNote, MasterUser, Attachment, OrganizationNote, PersonNote, Deal, LeadOrganization, LeadPerson, Lead, Activity, CustomField, CustomFieldValue, UserCredential} = req.models;
   try {
     const { leadOrganizationId } = req.params; // Use leadOrganizationId from params
     const updateFields = req.body;
 
     // Find the organization by leadOrganizationId
-    const org = await Organization.findByPk(leadOrganizationId);
+    const org = await LeadOrganization.findByPk(leadOrganizationId);
     if (!org) {
       return res.status(404).json({ message: "Organization not found" });
     }
@@ -4643,13 +4632,14 @@ exports.updateOrganization = async (req, res) => {
  * - Any other standard person fields
  */
 exports.updatePerson = async (req, res) => {
+  const {Email, LeadNote, DealNote, MasterUser, Attachment, OrganizationNote, PersonNote, Deal, LeadOrganization, LeadPerson, Lead, Activity, CustomField, CustomFieldValue, UserCredential} = req.models;
   try {
     const { personId } = req.params;
     const { emails, phones, email, phone, ...updateFields } = req.body;
     const masterUserID = req.adminId;
 
     // Find the person
-    const person = await Person.findByPk(personId);
+    const person = await LeadPerson.findByPk(personId);
     if (!person) {
       return res.status(404).json({ message: "Person not found" });
     }
@@ -4703,7 +4693,7 @@ exports.updatePerson = async (req, res) => {
     // If emails are being updated, validate primary email uniqueness
     if (emailList.length > 0) {
       const primaryEmail = emailList[0].email;
-      const existingEmailPerson = await Person.findOne({ 
+      const existingEmailPerson = await LeadPerson.findOne({ 
         where: { 
           email: primaryEmail,
           personId: { [Sequelize.Op.ne]: personId } // Exclude current person
@@ -4731,7 +4721,7 @@ exports.updatePerson = async (req, res) => {
 
     // If ownerId is being updated, also update it in the related organization
     if (updateFields.ownerId && person.leadOrganizationId) {
-      const org = await Organization.findByPk(person.leadOrganizationId);
+      const org = await LeadOrganization.findByPk(person.leadOrganizationId);
       if (org) {
         await org.update({ ownerId: updateFields.ownerId });
       }
@@ -4741,8 +4731,6 @@ exports.updatePerson = async (req, res) => {
     await person.update(updateFields);
 
     // Update or create custom field values for multiple emails and phones
-    const CustomField = require("../../models/customFieldModel");
-    const CustomFieldValue = require("../../models/customFieldValueModel");
 
     if (emailList.length > 0) {
       // Remove existing emails custom field
@@ -4791,7 +4779,7 @@ exports.updatePerson = async (req, res) => {
     // Fetch ownerName via organization.ownerId and MasterUser
     let ownerName = null;
     if (person.leadOrganizationId) {
-      const org = await Organization.findByPk(person.leadOrganizationId);
+      const org = await LeadOrganization.findByPk(person.leadOrganizationId);
       if (org && org.ownerId) {
         const owner = await MasterUser.findByPk(org.ownerId);
         if (owner) {
@@ -4823,9 +4811,9 @@ exports.updatePerson = async (req, res) => {
  * @param {number} personId - The person ID
  * @returns {Object} Person object with emails and phones arrays
  */
-const getPersonWithContactInfo = async (personId) => {
+const getPersonWithContactInfo = async (personId, CustomFieldValue, LeadPerson) => {
   try {
-    const person = await Person.findByPk(personId);
+    const person = await LeadPerson.findByPk(personId);
     if (!person) return null;
 
     // Get custom field values for emails and phones
@@ -4881,10 +4869,11 @@ const getPersonWithContactInfo = async (personId) => {
  * Get a single person by ID with multiple emails and phones
  */
 exports.getPerson = async (req, res) => {
+  const {Email, LeadNote, DealNote, MasterUser, Attachment, OrganizationNote, PersonNote, Deal, LeadOrganization, LeadPerson, Lead, Activity, CustomField, CustomFieldValue, UserCredential} = req.models;
   try {
     const { personId } = req.params;
     
-    const person = await getPersonWithContactInfo(personId);
+    const person = await getPersonWithContactInfo(personId, CustomFieldValue, LeadPerson);
     if (!person) {
       return res.status(404).json({ message: "Person not found" });
     }
@@ -4898,10 +4887,12 @@ exports.getPerson = async (req, res) => {
     res.status(500).json({ message: "Internal server error" });
   }
 };
+
 exports.linkPersonToOrganization = async (req, res) => {
+  const {LeadPerson, LeadOrganization} = req.models;
   const { personId, leadOrganizationId } = req.body;
   try {
-    const person = await Person.findByPk(personId);
+    const person = await LeadPerson.findByPk(personId);
     if (!person) return res.status(404).json({ message: "Person not found" });
 
     if (
@@ -4915,7 +4906,7 @@ exports.linkPersonToOrganization = async (req, res) => {
     }
 
     // Fetch the organization name
-    const organization = await Organization.findByPk(leadOrganizationId);
+    const organization = await LeadOrganization.findByPk(leadOrganizationId);
     if (!organization) {
       return res.status(404).json({ message: "Organization not found" });
     }
@@ -4932,7 +4923,9 @@ exports.linkPersonToOrganization = async (req, res) => {
     res.status(500).json({ message: "Internal server error" });
   }
 };
+
 exports.addPersonNote = async (req, res) => {
+  const {LeadPerson, MasterUser, PersonNote } = req.models;
   const { personId } = req.params; // Get personId from params
   if (!personId) {
     return res.status(400).json({ message: "Person ID is required." });
@@ -4943,7 +4936,7 @@ exports.addPersonNote = async (req, res) => {
   }
   try {
     // Verify person exists
-    const person = await Person.findByPk(personId);
+    const person = await LeadPerson.findByPk(personId);
     if (!person) {
       return res.status(404).json({ message: "Person not found." });
     }
@@ -4977,6 +4970,7 @@ exports.addPersonNote = async (req, res) => {
 };
 
 exports.addOrganizationNote = async (req, res) => {
+  const {LeadOrganization, MasterUser, OrganizationNote } = req.models;
   const { leadOrganizationId } = req.params; // Get leadOrganizationId from params
   if (!leadOrganizationId) {
     return res.status(400).json({ message: "Organization ID is required." });
@@ -4987,7 +4981,7 @@ exports.addOrganizationNote = async (req, res) => {
   }
   try {
     // Verify organization exists
-    const organization = await Organization.findByPk(leadOrganizationId);
+    const organization = await LeadOrganization.findByPk(leadOrganizationId);
     if (!organization) {
       return res.status(404).json({ message: "Organization not found." });
     }
@@ -5022,13 +5016,14 @@ exports.addOrganizationNote = async (req, res) => {
 
 // Get all notes for a person
 exports.getPersonNotes = async (req, res) => {
+  const {LeadPerson, MasterUser, PersonNote } = req.models;
   const { personId } = req.params;
   const { page = 1, limit = 20 } = req.query;
   const offset = (parseInt(page) - 1) * parseInt(limit);
 
   try {
     // Verify person exists
-    const person = await Person.findByPk(personId);
+    const person = await LeadPerson.findByPk(personId);
     if (!person) {
       return res.status(404).json({ message: "Person not found." });
     }
@@ -5065,13 +5060,14 @@ exports.getPersonNotes = async (req, res) => {
 
 // Get all notes for an organization
 exports.getOrganizationNotes = async (req, res) => {
+  const {LeadOrganization, MasterUser, OrganizationNote } = req.models;
   const { leadOrganizationId } = req.params;
   const { page = 1, limit = 20 } = req.query;
   const offset = (parseInt(page) - 1) * parseInt(limit);
 
   try {
     // Verify organization exists
-    const organization = await Organization.findByPk(leadOrganizationId);
+    const organization = await LeadOrganization.findByPk(leadOrganizationId);
     if (!organization) {
       return res.status(404).json({ message: "Organization not found." });
     }
@@ -5108,6 +5104,7 @@ exports.getOrganizationNotes = async (req, res) => {
 
 // Update a person note
 exports.updatePersonNote = async (req, res) => {
+  const {LeadPerson, MasterUser, PersonNote } = req.models;
   const { personId, noteId } = req.params;
   const { content } = req.body;
 
@@ -5158,6 +5155,7 @@ exports.updatePersonNote = async (req, res) => {
 
 // Update an organization note
 exports.updateOrganizationNote = async (req, res) => {
+  const {LeadOrganization, MasterUser, OrganizationNote } = req.models;
   const { leadOrganizationId, noteId } = req.params;
   const { content } = req.body;
 
@@ -5208,6 +5206,7 @@ exports.updateOrganizationNote = async (req, res) => {
 
 // Delete a person note
 exports.deletePersonNote = async (req, res) => {
+  const {LeadPerson, MasterUser, PersonNote } = req.models;
   const { personId, noteId } = req.params;
 
   try {
@@ -5241,6 +5240,7 @@ exports.deletePersonNote = async (req, res) => {
 
 // Delete an organization note
 exports.deleteOrganizationNote = async (req, res) => {
+  const {LeadOrganization, MasterUser, OrganizationNote } = req.models;
   const { leadOrganizationId, noteId } = req.params;
 
   try {
@@ -5297,6 +5297,7 @@ exports.deleteOrganizationNote = async (req, res) => {
 // };
 
 exports.getAllContactPersons = async (req, res) => {
+  const { LeadPerson, LeadOrganization } = req.models;
   try {
     const { search = "", page = 1, limit = 20 } = req.query;
     const offset = (parseInt(page) - 1) * parseInt(limit);
@@ -5304,12 +5305,12 @@ exports.getAllContactPersons = async (req, res) => {
     const where = search ? { contactPerson: { [Op.like]: `%${search}%` } } : {};
 
     // Include organization using association
-    const { count, rows: persons } = await Person.findAndCountAll({
+    const { count, rows: persons } = await LeadPerson.findAndCountAll({
       where,
       attributes: ["personId", "contactPerson", "email", "leadOrganizationId"],
       include: [
         {
-          model: Organization,
+          model: LeadOrganization,
           as: "LeadOrganization", // Make sure this matches your association
           attributes: ["leadOrganizationId", "organization"],
         },
@@ -5348,6 +5349,7 @@ exports.getAllContactPersons = async (req, res) => {
 };
 
 exports.getPersonsByOrganization = async (req, res) => {
+  const { LeadPerson: Person, LeadOrganization: Organization, MasterUser } = req.models;
   const { leadOrganizationId } = req.params;
   try {
     // Find the organization
@@ -5396,7 +5398,7 @@ exports.getPersonsByOrganization = async (req, res) => {
 };
 
 // Helper function to enrich persons with timeline activities (Pipedrive-style)
-const enrichPersonsWithTimeline = async (persons, activityFilters, startDate, endDate, userIdRequesting, userRole, granularity = 'quarterly', includeOverdueCount = true) => {
+const enrichPersonsWithTimeline = async (persons, activityFilters, startDate, endDate, userIdRequesting, userRole, granularity = 'quarterly', includeOverdueCount = true, Activity, Email, Deal, ActivityType) => {
   try {
     console.log('[DEBUG] enrichPersonsWithTimeline called with:', {
       personsCount: persons.length,
@@ -5413,10 +5415,6 @@ const enrichPersonsWithTimeline = async (persons, activityFilters, startDate, en
     const Sequelize = require("sequelize");
     
     // Import models dynamically to avoid circular dependencies
-    const Activity = require("../../models/activity/activityModel");
-    const Email = require("../../models/email/emailModel");
-    const Deal = require("../../models/deals/dealsModels");
-    const ActivityType = require("../../models/activity/activityTypeModel");
     
     const personIds = persons.map(p => p.personId).filter(Boolean);
     const orgIds = persons.map(p => p.leadOrganizationId).filter(Boolean);
@@ -5845,15 +5843,9 @@ const getQuarter = (date, granularity = 'quarterly') => {
 };
 
 exports.getPersonsByIds = async (req, res) => {
+  const {Lead, LeadPerson : Person, LeadOrganization : Organization, Deal, MasterUser, PersonColumnPreference, OrganizationColumnPreference, CustomField, CustomFieldValue} = req.models;
   try {
     // Import required models
-    const { Lead, Person, Organization } = require("../../models");
-    const Deal = require("../../models/deals/dealsModels");
-    const MasterUser = require("../../models/master/masterUserModel");
-    const PersonColumnPreference = require("../../models/leads/personColumnModel");
-    const OrganizationColumnPreference = require("../../models/leads/organizationColumnModel");
-    const CustomField = require("../../models/customFieldModel");
-    const CustomFieldValue = require("../../models/customFieldValueModel");
     const { Op } = require("sequelize");
     const Sequelize = require("sequelize");
 
@@ -6134,14 +6126,9 @@ exports.getPersonsByIds = async (req, res) => {
 };
 
 exports.getOrganizationsByIds = async (req, res) => {
+  const {Lead, LeadPerson : Person, LeadOrganization : Organization, Deal, MasterUser, PersonColumnPreference, OrganizationColumnPreference, CustomField, CustomFieldValue} = req.models;
   try {
     // Import required models
-    const { Lead, Person, Organization } = require("../../models");
-    const Deal = require("../../models/deals/dealsModels");
-    const MasterUser = require("../../models/master/masterUserModel");
-    const OrganizationColumnPreference = require("../../models/leads/organizationColumnModel");
-    const CustomField = require("../../models/customFieldModel");
-    const CustomFieldValue = require("../../models/customFieldValueModel");
     const { Op } = require("sequelize");
     const Sequelize = require("sequelize");
 
@@ -6397,13 +6384,9 @@ exports.getOrganizationsByIds = async (req, res) => {
 };
 
 exports.getPersonsAndOrganizations = async (req, res) => {
+  const {Activity, Email, Deal, ActivityType, Lead, MasterUser, PersonColumnPreference, OrganizationColumnPreference, LeadPerson : Person, LeadOrganization : Organization, Product, DealProduct, LeadFilter, GroupVisibility, CustomFieldValue, CustomField} = req.models;
   try {
     // Import required models at the beginning of the function
-    const { Lead, LeadDetails, Person, Organization } = require("../../models");
-    const Deal = require("../../models/deals/dealsModels");
-    const MasterUser = require("../../models/master/masterUserModel");
-    const PersonColumnPreference = require("../../models/leads/personColumnModel");
-    const OrganizationColumnPreference = require("../../models/leads/organizationColumnModel");
     // const CustomField = require("../../models/customFieldModel");
     // const CustomFieldValue = require("../../models/customFieldValueModel");
     const { Op } = require("sequelize");
@@ -6494,7 +6477,7 @@ exports.getPersonsAndOrganizations = async (req, res) => {
     console.log('[DEBUG] Specific person IDs requested:', specificPersonIds);
 
     // Dynamic filter config (from body or query) -- now supports filterId as number or object
-    const LeadFilter = require("../../models/leads/leadFiltersModel");
+  
     let filterConfig = null;
     let filterIdRaw = null;
     if (req.body && req.body.filterId !== undefined) {
@@ -6728,7 +6711,6 @@ exports.getPersonsAndOrganizations = async (req, res) => {
 
     let activityFields = [];
     try {
-      const Activity = require("../../models/activity/activityModel");
       activityFields = Object.keys(Activity.rawAttributes);
     } catch (e) {
       console.log("[DEBUG] Activity model not available:", e.message);
@@ -6737,8 +6719,6 @@ exports.getPersonsAndOrganizations = async (req, res) => {
     let productFields = [];
     let dealProductFields = [];
     try {
-      const Product = require("../../models/product/productModel");
-      const DealProduct = require("../../models/product/dealProductModel");
       productFields = Object.keys(Product.rawAttributes);
       dealProductFields = Object.keys(DealProduct.rawAttributes);
     } catch (e) {
@@ -7203,7 +7183,6 @@ exports.getPersonsAndOrganizations = async (req, res) => {
       });
 
       try {
-        const Activity = require("../../models/activity/activityModel");
         let activityFilterResults = [];
 
         if (req.role === "admin") {
@@ -7476,8 +7455,6 @@ exports.getPersonsAndOrganizations = async (req, res) => {
       console.log("[DEBUG] dealProductWhere:", JSON.stringify(dealProductWhere, null, 2));
 
       try {
-        const Product = require("../../models/product/productModel");
-        const DealProduct = require("../../models/product/dealProductModel");
         
         // Build the include chain: Deal -> DealProduct -> Product
         const dealInclude = [];
@@ -7861,8 +7838,6 @@ exports.getPersonsAndOrganizations = async (req, res) => {
     });
 
     // Fetch custom field values for all persons - same as getLeads API
-    const CustomField = require("../../models/customFieldModel");
-    const CustomFieldValue = require("../../models/customFieldValueModel");
     const personIdsForCustomFields = persons.map((p) => p.personId);
     let customFieldValues = [];
     if (personIdsForCustomFields.length > 0) {
@@ -8007,7 +7982,7 @@ exports.getPersonsAndOrganizations = async (req, res) => {
         req.adminId,
         req.role,
         timelineGranularity,
-        includeOverdueCount
+        includeOverdueCount, Activity, Email, Deal, ActivityType
       );
       console.log('[DEBUG] Timeline enrichment completed, returned persons:', personsWithTimeline.length);
     } else {
@@ -8037,7 +8012,7 @@ exports.getPersonsAndOrganizations = async (req, res) => {
      const findGroup = await GroupVisibility.findOne({
           where:{
             groupId: 1 //groupId
-          }
+          }          
         })
     
         let filterPerson = [];
@@ -8205,6 +8180,7 @@ exports.getPersonsAndOrganizations = async (req, res) => {
 
 
 exports.deleteOrganization = async (req, res) => {
+  const {Activity, Email, Deal, ActivityType, Lead, MasterUser, PersonColumnPreference, OrganizationColumnPreference, LeadPerson : Person, LeadOrganization : Organization, Product, DealProduct, LeadFilter, GroupVisibility, CustomFieldValue, CustomField} = req.models;
   const transaction = await sequelize.transaction(); // Start a transaction
 
   try {
@@ -8259,7 +8235,7 @@ exports.deleteOrganization = async (req, res) => {
     );
 
     // 4. Remove leadOrganizationId from Activity records
-    await Activities.update(
+    await Activity.update(
       { leadOrganizationId: null, organization: null },
       {
         where: { leadOrganizationId: leadOrganizationId },
@@ -8296,6 +8272,7 @@ exports.deleteOrganization = async (req, res) => {
 };
 
 exports.deletePerson = async (req, res) => {
+  const {Activity, Email, Deal, ActivityType, Lead, MasterUser, PersonColumnPreference, OrganizationColumnPreference, LeadPerson : Person, LeadOrganization : Organization, Product, DealProduct, LeadFilter, GroupVisibility, CustomFieldValue, CustomField} = req.models;
   const transaction = await sequelize.transaction(); // Start a transaction
 
   try {
@@ -8341,7 +8318,7 @@ exports.deletePerson = async (req, res) => {
     );
 
     // 4. Remove personId from Activity records
-    await Activities.update(
+    await Activity.update(
       { personId: null, contactPerson: null },
       {
         where: { personId: personId },
@@ -8379,11 +8356,10 @@ exports.deletePerson = async (req, res) => {
 
 // Update Person Owner API
 exports.updatePersonOwner = async (req, res) => {
+  const {Activity, Email, Deal, ActivityType, Lead, MasterUser, PersonColumnPreference, OrganizationColumnPreference, LeadPerson : Person, LeadOrganization : Organization, Product, DealProduct, LeadFilter, GroupVisibility, CustomFieldValue, CustomField} = req.models;
   const { personId, ownerId } = req.body;
   const adminId = req.adminId;
   const { Op } = require("sequelize");
-  const Person = require("../../models/leads/personModel");
-  const MasterUser = require("../../models/masterUserModel");
   const sequelize = require("../../config/db");
 
   // Validate required fields
@@ -8463,11 +8439,10 @@ exports.updatePersonOwner = async (req, res) => {
 
 // Update Organization Owner API
 exports.updateOrganizationOwner = async (req, res) => {
+  const {Activity, Email, Deal, ActivityType, Lead, MasterUser, PersonColumnPreference, OrganizationColumnPreference, LeadPerson : Person, LeadOrganization : Organization, Product, DealProduct, LeadFilter, GroupVisibility, CustomFieldValue, CustomField} = req.models;
   const { leadOrganizationId, ownerId } = req.body;
   const adminId = req.adminId;
   const { Op } = require("sequelize");
-  const Organization = require("../../models/leads/leadOrganizationModel");
-  const MasterUser = require("../../models/masterUserModel");
   const sequelize = require("../../config/db");
 
   // Validate required fields
@@ -8547,11 +8522,10 @@ exports.updateOrganizationOwner = async (req, res) => {
 
 // Bulk Update Person Owners API
 exports.bulkUpdatePersonOwners = async (req, res) => {
+  const {Activity, Email, Deal, ActivityType, Lead, MasterUser, PersonColumnPreference, OrganizationColumnPreference, LeadPerson : Person, LeadOrganization : Organization, Product, DealProduct, LeadFilter, GroupVisibility, CustomFieldValue, CustomField} = req.models;
   const { personIds, ownerId } = req.body;
   const adminId = req.adminId;
   const { Op } = require("sequelize");
-  const Person = require("../../models/leads/personModel");
-  const MasterUser = require("../../models/masterUserModel");
   const sequelize = require("../../config/db");
 
   // Validate required fields
@@ -8660,11 +8634,10 @@ exports.bulkUpdatePersonOwners = async (req, res) => {
 
 // Bulk Update Organization Owners API
 exports.bulkUpdateOrganizationOwners = async (req, res) => {
+  const {Activity, Email, Deal, ActivityType, Lead, MasterUser, PersonColumnPreference, OrganizationColumnPreference, LeadPerson : Person, LeadOrganization : Organization, Product, DealProduct, LeadFilter, GroupVisibility, CustomFieldValue, CustomField} = req.models;
   const { leadOrganizationIds, ownerId } = req.body;
   const adminId = req.adminId;
   const { Op } = require("sequelize");
-  const Organization = require("../../models/leads/leadOrganizationModel");
-  const MasterUser = require("../../models/masterUserModel");
   const sequelize = require("../../config/db");
 
   // Validate required fields
@@ -8873,6 +8846,7 @@ function formatFileSize(bytes) {
  * Upload file(s) to an entity (person or organization)
  */
 exports.uploadEntityFiles = async (req, res) => {
+  const {Activity, Email, Deal, ActivityType, Lead, MasterUser, PersonColumnPreference, OrganizationColumnPreference, LeadPerson, LeadOrganization, EntityFile, Product, DealProduct, LeadFilter, GroupVisibility, CustomFieldValue, CustomField} = req.models;
   try {
     const { personId, leadOrganizationId } = req.params;
     const masterUserID = req.adminId;
@@ -8884,8 +8858,8 @@ exports.uploadEntityFiles = async (req, res) => {
     
     // Get appropriate model
     const EntityModel = entityType === 'person' 
-      ? require("../../models/leads/leadPersonModel")
-      : require("../../models/leads/leadOrganizationModel");
+      ? LeadPerson
+      : LeadOrganization;
     
     const idField = entityType === 'person' ? 'personId' : 'leadOrganizationId';
 
@@ -8975,6 +8949,7 @@ exports.uploadEntityFiles = async (req, res) => {
  * Get all files for an entity (person or organization)
  */
 exports.getEntityFiles = async (req, res) => {
+  const {Activity, Email, Deal, ActivityType, Lead, MasterUser, PersonColumnPreference, OrganizationColumnPreference, LeadPerson, LeadOrganization, EntityFile, Product, DealProduct, LeadFilter, GroupVisibility, CustomFieldValue, CustomField} = req.models;
   try {
     const { personId, leadOrganizationId } = req.params;
     const masterUserID = req.adminId;
@@ -8987,10 +8962,9 @@ exports.getEntityFiles = async (req, res) => {
     
     // Get appropriate model
     const EntityModel = entityType === 'person' 
-      ? require("../../models/leads/leadPersonModel")
-      : require("../../models/leads/leadOrganizationModel");
+      ? LeadPerson
+      : LeadOrganization;
     
-    const MasterUser = require("../../models/master/masterUserModel");
     const idField = entityType === 'person' ? 'personId' : 'leadOrganizationId';
 
     // Check if entity exists and user has access
@@ -9120,6 +9094,7 @@ exports.getEntityFiles = async (req, res) => {
  * Download a specific entity file
  */
 exports.downloadEntityFile = async (req, res) => {
+  const { EntityFile } = req.models;
   try {
     const { personId, leadOrganizationId, fileId } = req.params;
     const masterUserID = req.adminId;
@@ -9177,6 +9152,7 @@ exports.downloadEntityFile = async (req, res) => {
  * Delete an entity file
  */
 exports.deleteEntityFile = async (req, res) => {
+  const { EntityFile } = req.models;
   try {
     const { personId, leadOrganizationId, fileId } = req.params;
     const masterUserID = req.adminId;
@@ -9283,8 +9259,8 @@ exports.deleteOrganizationFile = async (req, res) => {
  * Get person sidebar section preferences for the current user
  */
 exports.getPersonSidebarPreferences = async (req, res) => {
+  const { PersonSidebarPreference } = req.models;
   try {
-    const PersonSidebarPreference = require("../../models/leads/personSidebarModel");
     const masterUserID = req.adminId;
 
     // Find existing preferences for this user
@@ -9381,8 +9357,8 @@ exports.getPersonSidebarPreferences = async (req, res) => {
  * Update person sidebar section preferences (toggle visibility, reorder sections)
  */
 exports.updatePersonSidebarPreferences = async (req, res) => {
+  const { PersonSidebarPreference } = req.models;
   try {
-    const PersonSidebarPreference = require("../../models/leads/personSidebarModel");
     const masterUserID = req.adminId;
     const { sidebarSections } = req.body;
 
@@ -9443,8 +9419,8 @@ exports.updatePersonSidebarPreferences = async (req, res) => {
  * Reset person sidebar preferences to default
  */
 exports.resetPersonSidebarPreferences = async (req, res) => {
+  const { PersonSidebarPreference } = req.models;
   try {
-    const PersonSidebarPreference = require("../../models/leads/personSidebarModel");
     const masterUserID = req.adminId;
 
     const defaultSections = [
@@ -9538,8 +9514,8 @@ exports.resetPersonSidebarPreferences = async (req, res) => {
  * Toggle a specific sidebar section visibility
  */
 exports.togglePersonSidebarSection = async (req, res) => {
+  const { PersonSidebarPreference } = req.models;
   try {
-    const PersonSidebarPreference = require("../../models/leads/personSidebarModel");
     const masterUserID = req.adminId;
     const { sectionId, enabled } = req.body;
 
@@ -9682,8 +9658,8 @@ exports.togglePersonSidebarSection = async (req, res) => {
  * Get organization sidebar section preferences for the current user
  */
 exports.getOrganizationSidebarPreferences = async (req, res) => {
+  const { OrganizationSidebarPreference } = req.models;
   try {
-    const OrganizationSidebarPreference = require("../../models/leads/organizationSidebarModel");
     const masterUserID = req.adminId;
 
     // Find existing preferences for this user
@@ -9787,8 +9763,8 @@ exports.getOrganizationSidebarPreferences = async (req, res) => {
  * Update organization sidebar section preferences (toggle visibility, reorder sections)
  */
 exports.updateOrganizationSidebarPreferences = async (req, res) => {
+  const { OrganizationSidebarPreference } = req.models;
   try {
-    const OrganizationSidebarPreference = require("../../models/leads/organizationSidebarModel");
     const masterUserID = req.adminId;
     const { sidebarSections } = req.body;
 
@@ -9849,8 +9825,8 @@ exports.updateOrganizationSidebarPreferences = async (req, res) => {
  * Reset organization sidebar preferences to default
  */
 exports.resetOrganizationSidebarPreferences = async (req, res) => {
+  const { OrganizationSidebarPreference } = req.models;
   try {
-    const OrganizationSidebarPreference = require("../../models/leads/organizationSidebarModel");
     const masterUserID = req.adminId;
 
     const defaultSections = [
@@ -9951,8 +9927,8 @@ exports.resetOrganizationSidebarPreferences = async (req, res) => {
  * Toggle a specific organization sidebar section visibility
  */
 exports.toggleOrganizationSidebarSection = async (req, res) => {
+  const { OrganizationSidebarPreference } = req.models;
   try {
-    const OrganizationSidebarPreference = require("../../models/leads/organizationSidebarModel");
     const masterUserID = req.adminId;
     const { sectionId, enabled } = req.body;
 

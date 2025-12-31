@@ -37,6 +37,7 @@ exports.triggerManualFlagSync = async (req, res) => {
 
 // Get flag sync status for user
 exports.getFlagSyncStatus = async (req, res) => {
+  const { Email } = require.models;
   try {
     const { userID } = req.params;
 
@@ -78,6 +79,7 @@ exports.updateEmailFlags = async (req, res) => {
   try {
     const { userID } = req.params;
     const { emailIDs, isRead } = req.body;
+    const { Email  } = require.models;
 
     if (!Array.isArray(emailIDs) || typeof isRead !== 'boolean') {
       return res.status(400).json({

@@ -1,8 +1,9 @@
 const Card  = require("../../models/insight/cardModel"); // Adjust path as needed
 const { Op, Sequelize } = require("sequelize");
-const sequelize = require("../../config/db");
+const {defaultSequelize : sequelize} = require("../../config/db");
 
 exports.createCard = async (req, res) => {
+  const {Card} = req.models;
   try {
     const { dashboardId, type, uniqueId } = req.body;
     const ownerId = req.adminId;
@@ -76,6 +77,7 @@ exports.createCard = async (req, res) => {
 };
 
 exports.updateCard = async (req, res) => {
+  const {Card} = req.models;
   try {
     const { cardId } = req.params;
     const { dashboardId, type, position, size } = req.body;
@@ -124,6 +126,7 @@ exports.updateCard = async (req, res) => {
 };
 
 exports.getAllCards = async (req, res) => {
+  const {Card} = req.models;
   try {
     const ownerId = req.adminId;
     const { dashboardId } = req.query; // Get dashboardId from query params
@@ -176,6 +179,7 @@ exports.getAllCards = async (req, res) => {
 };
 
 exports.getCardById = async (req, res) => {
+  const {Card} = req.models;
   try {
     const { cardId } = req.params;
     const ownerId = req.adminId;
@@ -211,6 +215,7 @@ exports.getCardById = async (req, res) => {
 };
 
 exports.deleteCardFromDashboard = async (req, res) => {
+  const {Card} = req.models;
   try {
     const { cardId } = req.params;
     const ownerId = req.adminId;
@@ -260,6 +265,7 @@ exports.deleteCardFromDashboard = async (req, res) => {
 };
 
 exports.deleteCard = async (req, res) => {
+  const {Card} = req.models;
   try {
     const { dashboardId, uniqueId, type } = req.body;
     const ownerId = req.adminId;
@@ -322,6 +328,7 @@ exports.deleteCard = async (req, res) => {
 
 // Bulk update positions for reordering
 exports.updateCardPositions = async (req, res) => {
+  const {Card} = req.models;
   try {
     const { cards } = req.body; // Array of { cardId, position }
     const ownerId = req.adminId;

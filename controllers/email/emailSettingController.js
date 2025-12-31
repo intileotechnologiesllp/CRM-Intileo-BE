@@ -125,7 +125,7 @@ const formatDateForIMAP = (date) => {
 exports.createOrUpdateDefaultEmail = async (req, res) => {
   const masterUserID = req.adminId; // Assuming adminId is set in middleware
   const { email, appPassword, senderName, isDefault, provider } = req.body; // <-- add provider here
-
+  const { DefaultEmail  } = require.models;
   try {
     // Validate input
     if (!email || !appPassword) {
@@ -177,7 +177,7 @@ exports.createOrUpdateDefaultEmail = async (req, res) => {
 
 exports.getDefaultEmail = async (req, res) => {
   const masterUserID = req.adminId; // Assuming adminId is set in middleware
-
+  const { DefaultEmail  } = require.models;
   try {
     // Fetch the default email for the user
     const defaultEmail = await DefaultEmail.findOne({
@@ -204,7 +204,7 @@ exports.getDefaultEmail = async (req, res) => {
 exports.updateDefaultEmail = async (req, res) => {
   const masterUserID = req.adminId; // Assuming adminId is set in middleware
   const { email, appPassword, senderName, isDefault } = req.body;
-
+  const { DefaultEmail  } = require.models;
   try {
     // Check if the email exists
     const existingDefaultEmail = await DefaultEmail.findOne({
@@ -243,7 +243,7 @@ exports.updateDefaultEmail = async (req, res) => {
 exports.archiveEmail = async (req, res) => {
   const { emailId } = req.params; // Get the email ID from the request parameters
   const masterUserID = req.adminId; // Assuming adminId is set in middleware
-
+  const { Email  } = require.models;
   try {
     // Find the email by emailId and masterUserID
     const email = await Email.findOne({
@@ -263,10 +263,11 @@ exports.archiveEmail = async (req, res) => {
     res.status(500).json({ message: "Internal server error." });
   }
 };
+
 exports.bulkArchiveEmails = async (req, res) => {
   const masterUserID = req.adminId;
   const { emailIds } = req.body; // Array of email IDs
-
+  const { Email  } = require.models;
   if (!Array.isArray(emailIds) || emailIds.length === 0) {
     return res
       .status(400)
@@ -316,7 +317,7 @@ const folderMapping = {
 exports.queueSyncEmails = async (req, res) => {
   const masterUserID = req.adminId;
   const { syncStartDate, batchSize = 50 } = req.body; // Reduced default batch size for efficiency
-
+  const { UserCredential  } = require.models;
   try {
     console.debug(
       `[queueSyncEmails] masterUserID: ${masterUserID} (type: ${typeof masterUserID}), syncStartDate: ${syncStartDate}, batchSize: ${batchSize}`
@@ -474,6 +475,7 @@ exports.fetchSyncEmails = async (req, res) => {
   const { batchSize = 100, page = 1, startUID, endUID, folder, skipBodyData = false } = req.query; // Accept startUID, endUID and folder for batching
   const masterUserID = req.adminId; // Assuming adminId is set in middleware
   const { syncStartDate: inputSyncStartDate, lightweightSync = false } = req.body; // or req.query.syncStartDate if you prefer
+  const { UserCredential, Email  } = require.models;
   try {
     console.debug(
       `[fetchSyncEmails] masterUserID: ${masterUserID}, batchSize: ${batchSize}, page: ${page}, startUID: ${startUID}, endUID: ${endUID}, folder: ${folder}`
@@ -1054,9 +1056,10 @@ exports.fetchSyncEmails = async (req, res) => {
     res.status(500).json({ message: "Internal server error." });
   }
 };
+
 exports.fetchsyncdata = async (req, res) => {
   const masterUserID = req.adminId; // Assuming `adminId` is passed in the request (e.g., from middleware)
-
+  const { UserCredential } = require.models;
   try {
     // Fetch the user credentials
     const userCredential = await UserCredential.findOne({
@@ -1076,10 +1079,12 @@ exports.fetchsyncdata = async (req, res) => {
     res.status(500).json({ message: "Internal server error." });
   }
 };
+
 // Example restore API
 exports.restoreEmails = async (req, res) => {
   const masterUserID = req.adminId;
   const { emailIds } = req.body; // Array of email IDs
+  const { Email  } = require.models;
 
   if (!Array.isArray(emailIds) || emailIds.length === 0) {
     return res
@@ -1101,6 +1106,7 @@ exports.restoreEmails = async (req, res) => {
 exports.permanentlyDeleteEmails = async (req, res) => {
   const masterUserID = req.adminId;
   const { emailIds } = req.body;
+  const { Email  } = require.models;
 
   if (!Array.isArray(emailIds) || emailIds.length === 0) {
     return res
@@ -1120,6 +1126,7 @@ exports.permanentlyDeleteEmails = async (req, res) => {
 exports.markAsUnread = async (req, res) => {
   const masterUserID = req.adminId;
   const { emailIds } = req.body;
+  const { UserCredential, Email  } = require.models;
 
   if (!Array.isArray(emailIds) || emailIds.length === 0) {
     return res
@@ -1224,6 +1231,7 @@ exports.markAsUnread = async (req, res) => {
 exports.markAsUnreadSingle = async (req, res) => {
   const masterUserID = req.adminId;
   const { emailID } = req.params;
+  const { UserCredential, Email  } = require.models;
 
   if (!emailID) {
     return res.status(400).json({ message: "emailID is required." });
@@ -1329,6 +1337,8 @@ exports.markAsUnreadSingle = async (req, res) => {
 exports.updateSignature = async (req, res) => {
   const masterUserID = req.adminId;
   const { signature, signatureName } = req.body;
+  const { UserCredential, Email  } = require.models;
+
   let signatureImage = req.body.signatureImage;
 
   // If an image was uploaded via multipart/form-data, use its path
@@ -1388,6 +1398,7 @@ exports.updateSignature = async (req, res) => {
 exports.markAsRead = async (req, res) => {
   const masterUserID = req.adminId;
   const { emailIds } = req.body;
+  const { UserCredential, Email  } = require.models;
 
   if (!Array.isArray(emailIds) || emailIds.length === 0) {
     return res
@@ -1491,6 +1502,7 @@ exports.updateEmailSharing = async (req, res) => {
   const masterUserID = req.adminId; // Assuming adminId is set in middleware
   const { emailID } = req.params; // Email ID from URL
   const { isShared } = req.body; // Boolean value in request body
+  const { Email } = require.models;
 
   try {
     const email = await Email.findOne({
@@ -1515,9 +1527,11 @@ exports.updateEmailSharing = async (req, res) => {
     res.status(500).json({ message: "Internal server error." });
   }
 };
+
 exports.setSmartBcc = async (req, res) => {
   const masterUserID = req.adminId;
   const { smartBcc } = req.body;
+  const { UserCredential } = require.models;
 
   try {
     const userCredential = await UserCredential.findOne({
@@ -1534,9 +1548,11 @@ exports.setSmartBcc = async (req, res) => {
       .json({ message: "Failed to update Smart BCC.", error: error.message });
   }
 };
+
 exports.updateBlockedAddress = async (req, res) => {
   const masterUserID = req.adminId;
   const { blockedEmail } = req.body; // comma-separated string or array
+  const { UserCredential, Email  } = require.models;
 
   try {
     const userCredential = await UserCredential.findOne({
@@ -1628,10 +1644,11 @@ exports.updateBlockedAddress = async (req, res) => {
     });
   }
 };
+
 exports.removeBlockedAddress = async (req, res) => {
   const masterUserID = req.adminId;
   const { emailToRemove } = req.body; // The email address to remove
-
+  const { UserCredential } = require.models;
   try {
     const userCredential = await UserCredential.findOne({
       where: { masterUserID },
@@ -1713,9 +1730,10 @@ exports.removeBlockedAddress = async (req, res) => {
     });
   }
 };
+
 exports.getSignature = async (req, res) => {
   const masterUserID = req.adminId;
-
+  const { UserCredential } = require.models;
   try {
     const userCredential = await UserCredential.findOne({
       where: { masterUserID },
@@ -1753,8 +1771,11 @@ exports.getSignature = async (req, res) => {
     });
   }
 };
+
 exports.deleteSignature = async (req, res) => {
   const masterUserID = req.adminId;
+  const { UserCredential, Email  } = require.models;
+
   try {
     const userCredential = await UserCredential.findOne({
       where: { masterUserID },
@@ -1775,8 +1796,10 @@ exports.deleteSignature = async (req, res) => {
     });
   }
 };
+
 exports.getBlockedAddress = async (req, res) => {
   const masterUserID = req.adminId;
+  const { UserCredential } = require.models;
   try {
     const userCredential = await UserCredential.findOne({
       where: { masterUserID },
@@ -1846,8 +1869,11 @@ exports.getBlockedAddress = async (req, res) => {
     });
   }
 };
+
 exports.getSmartBcc = async (req, res) => {
   const masterUserID = req.adminId;
+  const { UserCredential  } = require.models;
+
   try {
     const userCredential = await UserCredential.findOne({
       where: { masterUserID },
@@ -1870,6 +1896,7 @@ exports.getSmartBcc = async (req, res) => {
 exports.getEmailAutocomplete = async (req, res) => {
   const { search = "", page = 1, limit = 50 } = req.query;
   const offset = (parseInt(page) - 1) * parseInt(limit);
+  const { Email } = require.models;
 
   try {
     // Get all email records
@@ -1937,6 +1964,8 @@ exports.getEmailAutocomplete = async (req, res) => {
 exports.downloadAttachment = async (req, res) => {
   const { emailID, filename } = req.query;
   const masterUserID = req.adminId;
+  const { UserCredential, Email, Attachment  } = require.models;
+
   console.debug(
     `[downloadAttachment] emailID: ${emailID}, filename: ${filename}, masterUserID: ${masterUserID}`
   );
@@ -2184,7 +2213,8 @@ exports.downloadAttachment = async (req, res) => {
 // Test endpoint to verify sent folder detection
 exports.testSentFolderDetection = async (req, res) => {
   const masterUserID = req.adminId;
-  
+  const { UserCredential } = require.models;
+
   try {
     // Fetch user credentials
     const userCredential = await UserCredential.findOne({
@@ -2272,7 +2302,8 @@ exports.testSentFolderDetection = async (req, res) => {
 // Test endpoint to verify queueSyncEmails functionality
 exports.testQueueSyncEmails = async (req, res) => {
   const masterUserID = req.adminId;
-  
+  const { UserCredential, Email, Attachment  } = require.models;
+
   try {
     // Fetch user credentials
     const userCredential = await UserCredential.findOne({
@@ -2388,6 +2419,8 @@ exports.diagnoseAttachment = async (req, res) => {
   // Use query parameters for GET endpoint
   const { emailID, filename } = req.query;
   const masterUserID = req.adminId;
+  const { UserCredential, Email, Attachment  } = require.models;
+  
   const diagnostics = [];
   diagnostics.push({ step: "start", emailID, filename, masterUserID });
 

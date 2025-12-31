@@ -1,7 +1,7 @@
-const LostReason = require('../../models/lostReason/lostReasonModal');
 
 // Create lost reason
 exports.createLostReason = async (req, res) => {
+  const { LostReason } = req.models;
   try {
     const { reason } = req.body;
     if (!reason) return res.status(400).json({ message: "Reason is required." });
@@ -14,6 +14,7 @@ exports.createLostReason = async (req, res) => {
 
 // Get all active lost reasons
 exports.getLostReasons = async (req, res) => {
+  const { LostReason } = req.models;
   try {
     const lostReasons = await LostReason.findAll({ where: { isActive: true } });
     res.status(200).json({ lostReasons });

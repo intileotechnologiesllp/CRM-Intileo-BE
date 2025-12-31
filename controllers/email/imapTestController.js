@@ -48,6 +48,7 @@ exports.testImapHealth = async (req, res) => {
  * Test IMAP sync for a specific set of emails
  */
 exports.testImapSync = async (req, res) => {
+  const {  Email  } = require.models;
   try {
     const masterUserID = req.adminId;
     const { emailIds, limit = 10 } = req.body;
@@ -143,6 +144,7 @@ exports.testImapSync = async (req, res) => {
  * Get IMAP sync statistics
  */
 exports.getImapStats = async (req, res) => {
+  const { Email } = require.models;
   try {
     const masterUserID = req.adminId;
     

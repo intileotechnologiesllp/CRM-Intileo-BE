@@ -3,7 +3,11 @@ const Lead = require("../../models/leads/leadsModel");
 const { Op } = require("sequelize");
 const LeadDetails = require("../../models/leads/leadDetailsModel");
 const CustomField = require("../../models/customFieldModel");
+
+
+
 exports.saveLeadColumnPreference = async (req, res) => {
+  const {LeadColumnPreference} = req.models;
   const masterUserID = req.adminId;
   const { columns } = req.body;
 
@@ -20,7 +24,9 @@ exports.saveLeadColumnPreference = async (req, res) => {
     res.status(500).json({ message: "Error saving preferences" });
   }
 };
+
 exports.getLeadColumnPreference = async (req, res) => {
+   const {LeadColumnPreference, CustomField, } = req.models;
   try {
     const pref = await LeadColumnPreference.findOne({ where: {} });
 
@@ -171,7 +177,9 @@ exports.getLeadColumnPreference = async (req, res) => {
     });
   }
 };
+
 exports.deleteLeadColumn = async (req, res) => {
+  const {LeadColumnPreference} = req.models;
   const masterUserID = req.adminId;
   const { key } = req.body; // The column key to remove
 
@@ -202,12 +210,13 @@ exports.deleteLeadColumn = async (req, res) => {
 };
 
 exports.saveAllLeadFieldsWithCheck = async (req, res) => {
+  const {LeadColumnPreference, LeadDetail, } = req.models;
   let LeadDetails;
-  try {
-    LeadDetails = require("../../models/leads/leadDetailsModel");
-  } catch (e) {
-    LeadDetails = null;
-  }
+  // try {
+  //   LeadDetails = require("../../models/leads/leadDetailsModel");
+  // } catch (e) {
+  //   LeadDetails = null;
+  // }
 
   // Get all field names from Lead and LeadDetails models
   const leadFields = Object.keys(Lead.rawAttributes);
@@ -256,6 +265,7 @@ exports.saveAllLeadFieldsWithCheck = async (req, res) => {
 };
 
 exports.updateLeadColumnChecks = async (req, res) => {
+   const {LeadColumnPreference, CustomField, } = req.models;
   // Expecting: { columns: [ { key: "columnName", check: true/false }, ... ] }
   const { columns } = req.body;
 
@@ -407,6 +417,7 @@ exports.updateLeadColumnChecks = async (req, res) => {
 };
 
 exports.syncCustomFieldsWithPreferences = async (req, res) => {
+  const {LeadColumnPreference, CustomField, } = req.models;
   try {
     // Get or create LeadColumnPreference record
     let pref = await LeadColumnPreference.findOne();

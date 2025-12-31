@@ -1990,7 +1990,8 @@ exports.generatePersonPerformanceDataForSave = async (
   durationUnit,
   segmentedBy,
   filters,
-  masterUserId
+  masterUserId,
+  Activity, LeadPerson, LeadOrganization, Deal, Lead, CustomField, MasterUser, Email
 ) => {
   let includeModels = [];
   const baseWhere = {};
@@ -2126,7 +2127,7 @@ exports.generatePersonPerformanceDataForSave = async (
   } else if (xaxis === "organization") {
     // Special handling for organization - join with Organization table
     includeModels.push({
-      model: Organization,
+      model: LeadOrganization,
       as: "LeadOrganization",
       attributes: [],
       required: false,
@@ -2164,7 +2165,7 @@ exports.generatePersonPerformanceDataForSave = async (
       groupBy.push(segmentDateExpression);
     } else if (segmentedBy === "organization") {
       includeModels.push({
-        model: Organization,
+        model: LeadOrganization,
         as: "LeadOrganization",
         attributes: [],
         required: false,

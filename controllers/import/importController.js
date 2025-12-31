@@ -62,6 +62,7 @@ const upload = multer({
 exports.uploadFile = [
   upload.single('file'),
   async (req, res) => {
+     const {  ImportData, AuditTrail } = req.models;
     try {
       const { entityType = 'lead' } = req.body;
       const masterUserID = req.adminId;
@@ -131,6 +132,7 @@ exports.uploadFile = [
 
         // Log audit trail
         await logAuditTrail(
+          AuditTrail,
           PROGRAMS.LEAD_MANAGEMENT,
           "IMPORT_FILE_UPLOADED",
           masterUserID,
@@ -296,6 +298,7 @@ function analyzeExcelFile(filePath, resolve, reject) {
  * Get import status and progress
  */
 exports.getImportStatus = async (req, res) => {
+   const {  ImportData, Lead, LeadPerson, Deal, CustomField } = req.models;
   try {
     const { sessionId } = req.params;
     const masterUserID = req.adminId;
@@ -354,6 +357,7 @@ exports.getImportStatus = async (req, res) => {
  * Get user's import history
  */
 exports.getImportHistory = async (req, res) => {
+   const {  ImportData, Lead, LeadPerson, Deal, CustomField } = req.models;
   try {
     const masterUserID = req.adminId;
     const { page = 1, limit = 10, status, entityType } = req.query;
@@ -407,6 +411,7 @@ exports.getImportHistory = async (req, res) => {
  * Cancel an ongoing import
  */
 exports.cancelImport = async (req, res) => {
+   const {  ImportData, Lead, LeadPerson, Deal, CustomField, AuditTrail } = req.models;
   try {
     const { sessionId } = req.params;
     const masterUserID = req.adminId;
@@ -439,6 +444,7 @@ exports.cancelImport = async (req, res) => {
 
     // Log audit trail
     await logAuditTrail(
+      AuditTrail,
       PROGRAMS.LEAD_MANAGEMENT,
       "IMPORT_CANCELLED",
       masterUserID,
@@ -465,6 +471,7 @@ exports.cancelImport = async (req, res) => {
  * Delete import session and cleanup files
  */
 exports.deleteImport = async (req, res) => {
+  const {  ImportData, Lead, LeadPerson, Deal, CustomField } = req.models;
   try {
     const { sessionId } = req.params;
     const masterUserID = req.adminId;
@@ -494,6 +501,7 @@ exports.deleteImport = async (req, res) => {
 
     // Log audit trail
     await logAuditTrail(
+      AuditTrail,
       PROGRAMS.LEAD_MANAGEMENT,
       "IMPORT_DELETED",
       masterUserID,

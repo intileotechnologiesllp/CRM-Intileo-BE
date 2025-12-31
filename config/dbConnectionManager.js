@@ -120,9 +120,6 @@ class DatabaseConnectionManager {
   static associatedModels = new Map();
   
   /**
-<<<<<<< Updated upstream
-   * Connect to database and ensure user exists
-=======
    * Get model instance for a specific connection
    */
   static getModel(connection, modelName) {
@@ -924,171 +921,232 @@ class DatabaseConnectionManager {
   }
   
   /**
-   * Connect to client database and ensure user exists
->>>>>>> Stashed changes
-   */
-  static async connectAndEnsureUser(email, password) {
-    try {
-      // Get client from central database
-      const client = await getClientByEmail(email);
-      
-      if (!client) {
-        throw new Error("Client not found");
-      }
-      
-      // Verify client password
-      const isPasswordValid = await bcrypt.compare(password, client.password);
-      if (!isPasswordValid) {
-        throw new Error("Invalid password");
-      }
-      
-      // Connect to client's database
-      const clientSequelize = await getClientDbConnection(client);
-      
-      // Initialize models for this client
-      await modelRegistry.initModelsForClient(client.id, clientSequelize);
-      
-      // Get models (they'll use the patched require)
-      const MasterUser = require('../models/master/masterUserModel');
-      
-      // Check if user exists, create if not
-      const userInfo = await this.ensureUserExists(email, password, client, MasterUser);
-      
-      return {
-        clientConnection,
-        clientConfig: client,
-        user: userInfo.user,
-        isNewUser: userInfo.isNew,
-        models
-      };
-      
-    } catch (error) {
-      console.error("Error in connectAndEnsureUser:", error);
-      throw error;
-    }
-  }
-  
-  /**
-   * Ensure user exists in MasterUsers table
-   */
-  static async ensureUserExists(MasterUserModel, email, password, clientConfig) {
-    try {
-      const user = await MasterUserModel.findOne({ 
-        where: { email } 
-      });
-      
-      if (user) {
-        return {
-          user: user.toJSON(),
-          isNew: false
-        };
-      }
-      
-      const hashedPassword = await bcrypt.hash(password, 10);
-      
-      const newUser = await MasterUserModel.create({
-        name: clientConfig.name || 'Admin',
-        email: email,
-        password: hashedPassword,
-        creatorId: 1,
-        createdBy: 'System',
-        loginType: 'admin',
-        userType: 'admin',
-        mobileNumber: '0000000000',
-        isActive: true
-      });
-      
-      return {
-        user: newUser.toJSON(),
-        isNew: true
-      };
-      
-    } catch (error) {
-      console.error("Error ensuring user exists:", error);
-      throw error;
-    }
-  }
-  
-  /**
-   * Verify user in client database (for signin)
-   */
+    * Connect to client database and ensure user exists
+    */
+   static async connectAndEnsureUser(email, password) {
+     try {
+       // Step 1: Get client configuration
+       const client = await getClientConfig(email, password);
+       
+       // Step 2: Connect to client's database
+       const clientConnection = await getClientDbConnection(client);
+       
+       // Step 3: Get all models with associations
+       const models = this.getAllModels(clientConnection);
+       
+       // Step 4: Sync all models in correct order
+       await this.syncModels(clientConnection, models);
+       
+       // Step 5: Check if user exists, create if not
+       const userInfo = await this.ensureUserExists(models.MasterUser, email, password, client);
+       
+       return {
+         clientConnection,
+         clientConfig: client,
+         user: userInfo.user,
+         isNewUser: userInfo.isNew,
+         models
+       };
+       
+     } catch (error) {
+       console.error("Error in connectAndEnsureUser:", error);
+       throw error;
+     }
+   }
+   
+   /**
+    * Ensure user exists in MasterUsers table
+    */
+   static async ensureUserExists(MasterUserModel, email, password, clientConfig) {
+     try {
+       const user = await MasterUserModel.findOne({ 
+         where: { email } 
+       });
+       
+       if (user) {
+         return {
+           user: user.toJSON(),
+           isNew: false
+         };
+       }
+       
+       const hashedPassword = await bcrypt.hash(password, 10);
+       
+       const newUser = await MasterUserModel.create({
+         name: clientConfig.name || 'Admin',
+         email: email,
+         password: hashedPassword,
+         creatorId: 1,
+         createdBy: 'System',
+         loginType: 'admin',
+         userType: 'admin',
+         mobileNumber: '0000000000',
+         isActive: true
+       });
+       
+       return {
+         user: newUser.toJSON(),
+         isNew: true
+       };
+       
+     } catch (error) {
+       console.error("Error ensuring user exists:", error);
+       throw error;
+     }
+   }
+   
+   /**
+    * Verify user in client database (for signin)
+    */
   static async verifyUserInDatabase(email, password) {
-    try {
-      const { centralSequelize } = require("./db");
-      const [client] = await centralSequelize.query(
-        `SELECT * FROM client WHERE email = ? LIMIT 1`,
-        {
-          replacements: [email],
-          type: centralSequelize.QueryTypes.SELECT
-        }
-      );
-      
-      if (!client) {
-        throw new Error("Client not found");
-      }
-      
-      const clientConnection = await getClientDbConnection(client);
-      const models = this.getAllModels(clientConnection);
-      
-      await this.syncModels(clientConnection, models);
-      
-      const user = await models.MasterUser.findOne({ 
-        where: { email } 
-      });
-      
-      if (!user) {
-        throw new Error("User not found in client database");
-      }
-      
-      const creator = await models.MasterUser.findOne({ 
-        where: { masterUserID: user.creatorId } 
-      });
-
-      const isPasswordValid = await bcrypt.compare(password, user.password);
-      if (!isPasswordValid) {
-        throw new Error("Invalid password");
-      }
-      
-      return {
-        user: user.toJSON(),
-        creator: creator ? creator.toJSON() : null,
-        clientConfig: client,
-        clientConnection,
-        models
-      };
-      
-    } catch (error) {
-      console.error("Error verifying user:", error);
-      throw error;
-    }
-  }
-  
-  /**
-   * Get user by ID from client database
-   */
-  static async getUserById(clientConfig, userId) {
-    try {
-      const clientConnection = await getClientDbConnection(clientConfig);
-      const models = this.getAllModels(clientConnection);
-      
-      const user = await models.MasterUser.findByPk(userId, {
-        include: [{
-          model: models.LeadOrganization,
-          as: 'organizations'
-        }]
-      });
-      
-      if (!user) {
-        throw new Error("User not found");
-      }
-      
-      return user.toJSON();
-      
-    } catch (error) {
-      console.error("Error getting user by ID:", error);
-      throw error;
-    }
-  }
+   try {
+     const { centralSequelize } = require("./db");
+     
+     // Get client with plan details
+     const [client] = await centralSequelize.query(
+       `SELECT * FROM client WHERE email = ? LIMIT 1`,
+       {
+         replacements: [email],
+         type: centralSequelize.QueryTypes.SELECT
+       }
+     );
+     
+     if (!client) {
+       throw new Error("Client not found");
+     }
+     // Get plan details with features
+     let planDetails = null;
+     if (client.planId) {
+       planDetails = await this.getPlanWithFeatures(client.planId, centralSequelize);
+     }
+     
+     const clientConnection = await getClientDbConnection(client);
+     const models = this.getAllModels(clientConnection);
+     
+     await this.syncModels(clientConnection, models);
+     
+     const user = await models.MasterUser.findOne({ 
+       where: { email } 
+     });
+     
+     if (!user) {
+       throw new Error("User not found in client database");
+     }
+     
+     const creator = await models.MasterUser.findOne({ 
+       where: { masterUserID: user.creatorId } 
+     });
+ 
+     const isPasswordValid = await bcrypt.compare(password, user.password);
+     if (!isPasswordValid) {
+       throw new Error("Invalid password");
+     }
+     
+     return {
+       user: user.toJSON(),
+       creator: creator ? creator.toJSON() : null,
+       clientConfig: client,
+       planDetails, // Add plan details here
+       clientConnection,
+       models
+     };
+     
+   } catch (error) {
+     console.error("Error verifying user:", error);
+     throw error;
+   }
+ }
+ 
+ // New method to get plan with features
+ static async getPlanWithFeatures(planId, centralSequelize) {
+   try {
+     // Get plan basic details
+     const [plan] = await centralSequelize.query(
+       `SELECT * FROM Plan WHERE id = ? LIMIT 1`,
+       {
+         replacements: [planId],
+         type: centralSequelize.QueryTypes.SELECT
+       }
+     );
+     
+     if (!plan) {
+       return null;
+     }
+     
+     // Get plan features with feature details
+     const features = await centralSequelize.query(
+       `SELECT 
+         pf.id,
+         pf.planId,
+         pf.featureId,
+         pf.value,
+         pf.type,
+         f.key,
+         f.label
+        FROM PlanFeature pf
+        JOIN Feature f ON pf.featureId = f.id
+        WHERE pf.planId = ?`,
+       {
+         replacements: [planId],
+         type: centralSequelize.QueryTypes.SELECT
+       }
+     );
+     
+     // Format features
+     const formattedFeatures = features.map(feature => ({
+       id: feature.id,
+       featureId: feature.featureId,
+       key: feature.key,
+       label: feature.label,
+       value: feature.value,
+       type: feature.type
+     }));
+     
+     return {
+       id: plan.id,
+       name: plan.name,
+       code: plan.code,
+       description: plan.description,
+       currency: plan.currency,
+       unitAmount: plan.unitAmount,
+       billingInterval: plan.billingInterval,
+       trialPeriodDays: plan.trialPeriodDays,
+       isActive: plan.isActive,
+       features: formattedFeatures
+     };
+     
+   } catch (error) {
+     console.error("Error fetching plan with features:", error);
+     return null;
+   }
+ }
+   
+   /**
+    * Get user by ID from client database
+    */
+   static async getUserById(clientConfig, userId) {
+     try {
+       const clientConnection = await getClientDbConnection(clientConfig);
+       const models = this.getAllModels(clientConnection);
+       
+       const user = await models.MasterUser.findByPk(userId, {
+         include: [{
+           model: models.LeadOrganization,
+           as: 'organizations'
+         }]
+       });
+       
+       if (!user) {
+         throw new Error("User not found");
+       }
+       
+       return user.toJSON();
+       
+     } catch (error) {
+       console.error("Error getting user by ID:", error);
+       throw error;
+     }
+   }
 }
 
 module.exports = DatabaseConnectionManager;

@@ -2401,7 +2401,8 @@ exports.generateLeadPerformanceDataForSave = async(
   durationUnit,
   segmentedBy,
   filters,
-  masterUserId
+  masterUserId,
+   Activity, LeadPerson, LeadOrganization, Deal, Lead, CustomField, MasterUser, Email
 ) => {
   let includeModels = [];
   const baseWhere = {};
@@ -2528,7 +2529,7 @@ exports.generateLeadPerformanceDataForSave = async(
   } else if (xaxis === "contactPerson") {
     // Special handling for contactPerson - join with Person table
     includeModels.push({
-      model: Person,
+      model: LeadPerson,
       as: "LeadPerson",
       attributes: [],
       required: false,
@@ -2539,7 +2540,7 @@ exports.generateLeadPerformanceDataForSave = async(
   } else if (xaxis === "organization") {
     // Special handling for organization - join with Organization table
     includeModels.push({
-      model: Organization,
+      model: LeadOrganization,
       as: "LeadOrganization",
       attributes: [],
       required: false,
@@ -2582,7 +2583,7 @@ exports.generateLeadPerformanceDataForSave = async(
       attributes.push([Sequelize.col("assignedUser.team"), "segmentValue"]);
     } else if (segmentedBy === "contactPerson") {
       includeModels.push({
-        model: Person,
+        model: LeadPerson,
         as: "LeadPerson",
         attributes: [],
         required: false,
@@ -2594,7 +2595,7 @@ exports.generateLeadPerformanceDataForSave = async(
       ]);
     } else if (segmentedBy === "organization") {
       includeModels.push({
-        model: Organization,
+        model: LeadOrganization,
         as: "LeadOrganization",
         attributes: [],
         required: false,
@@ -5414,7 +5415,8 @@ exports.generateLeadConversionDataForSave = async(
   durationUnit,
   segmentedBy,
   filters,
-  masterUserId
+  masterUserId,
+  Activity, LeadPerson, LeadOrganization, Deal, Lead, CustomField, MasterUser, Email
 ) => {
   let includeModels = [];
 
@@ -5546,7 +5548,7 @@ exports.generateLeadConversionDataForSave = async(
   } else if (xaxis === "contactPerson") {
     // Special handling for contactPerson - join with Person table
     includeModels.push({
-      model: Person,
+      model: LeadPerson,
       as: "LeadPerson",
       attributes: [],
       required: false,
@@ -5557,7 +5559,7 @@ exports.generateLeadConversionDataForSave = async(
   } else if (xaxis === "organization") {
     // Special handling for organization - join with Organization table
     includeModels.push({
-      model: Organization,
+      model: LeadOrganization,
       as: "LeadOrganization",
       attributes: [],
       required: false,
@@ -5614,7 +5616,7 @@ exports.generateLeadConversionDataForSave = async(
       attributes.push([Sequelize.col("assignedUser.team"), "segmentValue"]);
     } else if (segmentedBy === "contactPerson") {
       includeModels.push({
-        model: Person,
+        model: LeadPerson,
         as: "LeadPerson",
         attributes: [],
         required: false,
@@ -5626,7 +5628,7 @@ exports.generateLeadConversionDataForSave = async(
       ]);
     } else if (segmentedBy === "organization") {
       includeModels.push({
-        model: Organization,
+        model: LeadOrganization,
         as: "LeadOrganization",
         attributes: [],
         required: false,

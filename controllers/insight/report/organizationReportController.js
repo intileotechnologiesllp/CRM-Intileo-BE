@@ -11,6 +11,7 @@ const { Op, Sequelize } = require("sequelize");
 const LeadPerson = require("../../../models/leads/leadPersonModel");
 
 exports.createOrganizationReport = async (req, res) => {
+  const { Report, MasterUser, LeadPerson, Lead, LeadOrganization } = req.models;
   try {
     const {
       reportId,
@@ -100,7 +101,8 @@ exports.createOrganizationReport = async (req, res) => {
             segmentedBy,
             filters,
             page,
-            limit
+            limit,
+            MasterUser, LeadPerson, Lead, LeadOrganization
           );
           reportData = result.data;
           paginationInfo = result.pagination;
@@ -186,7 +188,8 @@ exports.createOrganizationReport = async (req, res) => {
             existingSegmentedBy,
             existingfilters,
             page,
-            limit
+            limit,
+            MasterUser, LeadPerson, Lead, LeadOrganization
           );
           reportData = result.data;
           paginationInfo = result.pagination;
@@ -258,7 +261,8 @@ async function generateExistingOrganizationPerformanceData(
   existingSegmentedBy,
   existingfilters,
   page = 1,
-  limit = 8
+  limit = 8,
+  MasterUser, LeadPerson, Lead, LeadOrganization
 ) {
   let includeModels = [];
   // Calculate offset for pagination
@@ -311,7 +315,8 @@ async function generateExistingOrganizationPerformanceData(
           cond.column,
           cond.operator,
           cond.value,
-          filterIncludeModels
+          filterIncludeModels,
+          MasterUser, LeadPerson, Lead, LeadOrganization
         );
       });
 
@@ -446,7 +451,7 @@ async function generateExistingOrganizationPerformanceData(
   // Pagination and Query logic
   let totalCountResult;
   if (shouldGroupByDuration) {
-    totalCountResult = await Organization.findAll({
+    totalCountResult = await LeadOrganization.findAll({
       where: baseWhere,
       attributes: [
         [
@@ -471,7 +476,7 @@ async function generateExistingOrganizationPerformanceData(
       countColumn = Sequelize.col(`LeadOrganization.${existingxaxis}`);
     }
 
-    totalCountResult = await Organization.findAll({
+    totalCountResult = await LeadOrganization.findAll({
       where: baseWhere,
       attributes: [
         [Sequelize.fn("COUNT", Sequelize.fn("DISTINCT", countColumn)), "total"],
@@ -503,7 +508,7 @@ async function generateExistingOrganizationPerformanceData(
       }
     }
 
-    const paginatedGroups = await Organization.findAll({
+    const paginatedGroups = await LeadOrganization.findAll({
       attributes: paginationAttributes,
       where: baseWhere,
       include: includeModels,
@@ -542,7 +547,7 @@ async function generateExistingOrganizationPerformanceData(
         ? [...finalWhere[Op.and], groupCondition]
         : [groupCondition];
 
-      results = await Organization.findAll({
+      results = await LeadOrganization.findAll({
         where: finalWhere,
         attributes: attributes,
         include: includeModels,
@@ -554,7 +559,7 @@ async function generateExistingOrganizationPerformanceData(
       });
     }
   } else {
-    results = await Organization.findAll({
+    results = await LeadOrganization.findAll({
       where: baseWhere,
       attributes: attributes,
       include: includeModels,
@@ -680,7 +685,8 @@ async function generateOrganizationPerformanceData(
   segmentedBy,
   filters,
   page = 1,
-  limit = 8
+  limit = 8,
+  MasterUser, LeadPerson, Lead, LeadOrganization
 ) {
   let includeModels = [];
 
@@ -737,7 +743,8 @@ async function generateOrganizationPerformanceData(
           cond.column,
           cond.operator,
           cond.value,
-          filterIncludeModels
+          filterIncludeModels,
+          MasterUser, LeadPerson, Lead, LeadOrganization
         );
       });
 
@@ -884,7 +891,7 @@ async function generateOrganizationPerformanceData(
   // Total count calculation
   let totalCountResult;
   if (shouldGroupByDuration) {
-    totalCountResult = await Organization.findAll({
+    totalCountResult = await LeadOrganization.findAll({
       where: baseWhere,
       attributes: [
         [
@@ -911,7 +918,7 @@ async function generateOrganizationPerformanceData(
       countColumn = Sequelize.col(`LeadOrganization.${xaxis}`);
     }
 
-    totalCountResult = await Organization.findAll({
+    totalCountResult = await LeadOrganization.findAll({
       where: baseWhere,
       attributes: [
         [Sequelize.fn("COUNT", Sequelize.fn("DISTINCT", countColumn)), "total"],
@@ -946,7 +953,7 @@ async function generateOrganizationPerformanceData(
       }
     }
 
-    const paginatedGroups = await Organization.findAll({
+    const paginatedGroups = await LeadOrganization.findAll({
       attributes: paginationAttributes,
       where: baseWhere,
       include: includeModels,
@@ -993,7 +1000,7 @@ async function generateOrganizationPerformanceData(
         ? [...finalWhere[Op.and], groupCondition]
         : [groupCondition];
 
-      results = await Organization.findAll({
+      results = await LeadOrganization.findAll({
         where: finalWhere,
         attributes: attributes,
         include: includeModels,
@@ -1005,7 +1012,7 @@ async function generateOrganizationPerformanceData(
       });
     }
   } else {
-    results = await Organization.findAll({
+    results = await LeadOrganization.findAll({
       where: baseWhere,
       attributes: attributes,
       include: includeModels,
@@ -1129,7 +1136,7 @@ function isDateField(xaxis) {
 }
 
 // Helper function to convert operator strings to Sequelize operators
-function getConditionObject(column, operator, value, includeModels = []) {
+function getConditionObject(column, operator, value, includeModels = [], MasterUser, LeadPerson, Lead, LeadOrganization) {
   let conditionValue = value;
 
   // Check if column contains a dot (indicating a related table field)
@@ -1189,7 +1196,7 @@ function getConditionObject(column, operator, value, includeModels = []) {
 
       // For related tables
       if (hasRelation) {
-        addIncludeModel(tableAlias, includeModels);
+        addIncludeModel(tableAlias, includeModels, MasterUser, LeadPerson, Lead, LeadOrganization);
         return {
           [`$${tableAlias}.${fieldName}$`]: {
             [Op.between]: [startOfDay, endOfDay],
@@ -1213,7 +1220,7 @@ function getConditionObject(column, operator, value, includeModels = []) {
 
       // For related tables
       if (hasRelation) {
-        addIncludeModel(tableAlias, includeModels);
+        addIncludeModel(tableAlias, includeModels, MasterUser, LeadPerson, Lead, LeadOrganization);
         return {
           [`$${tableAlias}.${fieldName}$`]: {
             [Op.notBetween]: [startOfDay, endOfDay],
@@ -1239,7 +1246,7 @@ function getConditionObject(column, operator, value, includeModels = []) {
 
   // Handle related table joins
   if (hasRelation) {
-    addIncludeModel(tableAlias, includeModels);
+    addIncludeModel(tableAlias, includeModels, MasterUser, LeadPerson, Lead, LeadOrganization);
 
     const op = getSequelizeOperator(operator);
 
@@ -1283,13 +1290,13 @@ function getConditionObject(column, operator, value, includeModels = []) {
 }
 
 // Helper function to add include models
-function addIncludeModel(tableAlias, includeModels) {
+function addIncludeModel(tableAlias, includeModels, MasterUser, LeadPerson, Lead, LeadOrganization) {
   let modelConfig;
 
   switch (tableAlias) {
     case "LeadOrganization":
       modelConfig = {
-        model: Organization,
+        model: LeadOrganization,
         as: "LeadOrganization",
         required: false,
         attributes: [],
@@ -2198,6 +2205,7 @@ async function generateOrganizationPerformanceDataForSave(
 }
 
 exports.saveOrganizationReport = async (req, res) => {
+  const { Report, Dashboard, MasterUser, LeadPerson, Lead, LeadOrganization } = req.models;
   try {
     const {
       reportId,
@@ -2243,7 +2251,8 @@ exports.saveOrganizationReport = async (req, res) => {
             yaxis,
             durationUnit,
             segmentedBy,
-            filters
+            filters,
+            MasterUser, LeadPerson, Lead, LeadOrganization
           );
           reportData = result.data;
           totalValue = result.totalValue;
@@ -2310,7 +2319,8 @@ exports.saveOrganizationReport = async (req, res) => {
               existingyaxis,
               existingDurationUnit,
               existingSegmentedBy,
-              existingfilters
+              existingfilters,
+              MasterUser, LeadPerson, Lead, LeadOrganization
             );
           reportData = result.data;
           totalValue = result.totalValue;
@@ -2421,7 +2431,7 @@ exports.saveOrganizationReport = async (req, res) => {
 
     for (const dashboardId of dashboardIdsArray) {
       // Verify dashboard ownership
-      const dashboard = await DASHBOARD.findOne({
+      const dashboard = await Dashboard.findOne({
         where: { dashboardId, ownerId },
       });
       if (!dashboard) {
@@ -2482,6 +2492,7 @@ exports.saveOrganizationReport = async (req, res) => {
 };
 
 exports.getOrganizationReportSummary = async (req, res) => {
+  const { Report, Dashboard, MasterUser, LeadPerson, Lead, LeadOrganization } = req.models;
   try {
     const {
       reportId,
@@ -2534,7 +2545,8 @@ exports.getOrganizationReportSummary = async (req, res) => {
                 cond.column,
                 cond.operator,
                 cond.value,
-                filterIncludeModels
+                filterIncludeModels,
+                MasterUser, LeadPerson, Lead, LeadOrganization
               );
             });
     
@@ -2586,12 +2598,12 @@ exports.getOrganizationReportSummary = async (req, res) => {
     }
 
     // Get total count
-    const totalCount = await Organization.count({
+    const totalCount = await LeadOrganization.count({
       where: baseWhere,
     });
 
     // Get paginated results
-    const organizations = await Organization.findAll({
+    const organizations = await LeadOrganization.findAll({
       where: baseWhere,
       order: order,
       limit: parseInt(limit),
@@ -2647,7 +2659,8 @@ exports.getOrganizationReportSummary = async (req, res) => {
         segmentedBy,
         filters,
         page,
-        limit
+        limit,
+        MasterUser, LeadPerson, Lead, LeadOrganization
       );
       reportData = reportResult.data;
 
@@ -2714,7 +2727,8 @@ exports.getOrganizationReportSummary = async (req, res) => {
         existingSegmentedBy,
         existingfilters,
         page,
-        limit
+        limit,
+        MasterUser, LeadPerson, Lead, LeadOrganization
       );
       reportData = reportResult.data;
 

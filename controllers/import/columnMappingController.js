@@ -15,6 +15,7 @@ exports.getAvailableFields = async (req, res) => {
     const { entityType } = req.params;
     const { search, fieldType, isRequired, isCustomField } = req.query;
     const masterUserID = req.adminId;
+    const {  ImportData, Lead, LeadPerson, Deal, CustomField } = req.models;
 
     console.log('getAvailableFields called with entityType:', entityType);
     console.log('Search params:', { search, fieldType, isRequired, isCustomField });
@@ -28,7 +29,7 @@ exports.getAvailableFields = async (req, res) => {
       });
     }
 
-    let fields = await getEntityFields(entityType);
+    let fields = await getEntityFields(entityType, CustomField);
     
     console.log('Fields before filtering:', fields.length);
 
@@ -129,6 +130,7 @@ exports.saveColumnMapping = async (req, res) => {
     const { sessionId } = req.params;
     const { columnMapping, importOptions = {} } = req.body;
     const masterUserID = req.adminId;
+    const {  ImportData, Lead, LeadPerson, Deal, CustomField, AuditTrail } = req.models;
 
     // Validate inputs
     if (!columnMapping || typeof columnMapping !== 'object') {
@@ -151,7 +153,7 @@ exports.saveColumnMapping = async (req, res) => {
     }
 
     // Enhanced validation for column mapping with fieldId and entityType support
-    const validationResult = await validateColumnMappingWithEntitySupport(columnMapping, importRecord.entityType);
+    const validationResult = await validateColumnMappingWithEntitySupport(columnMapping, importRecord.entityType, CustomField);
     if (!validationResult.isValid) {
       return res.status(400).json({
         success: false,
@@ -161,7 +163,7 @@ exports.saveColumnMapping = async (req, res) => {
     }
 
     // Process and normalize column mapping to include entityType and fieldId
-    const normalizedColumnMapping = await normalizeColumnMapping(columnMapping, importRecord.entityType);
+    const normalizedColumnMapping = await normalizeColumnMapping(columnMapping, importRecord.entityType, CustomField);
 
     // Update import record with mapping
     await importRecord.update({
@@ -172,6 +174,7 @@ exports.saveColumnMapping = async (req, res) => {
 
     // Log audit trail
     await logAuditTrail(
+      AuditTrail,
       PROGRAMS.LEAD_MANAGEMENT,
       "IMPORT_MAPPING_SAVED",
       masterUserID,
@@ -204,6 +207,7 @@ exports.saveColumnMapping = async (req, res) => {
  * Get suggested mappings based on column names
  */
 exports.getSuggestedMappings = async (req, res) => {
+  const {  ImportData, Lead, LeadPerson, Deal, CustomField, AuditTrail } = req.models;
   try {
     const { sessionId } = req.params;
     const masterUserID = req.adminId;
@@ -221,7 +225,7 @@ exports.getSuggestedMappings = async (req, res) => {
     }
 
     // Get available fields for the entity type
-    const availableFields = await getEntityFields(importRecord.entityType);
+    const availableFields = await getEntityFields(importRecord.entityType, CustomField);
     const columnHeaders = importRecord.columnHeaders || [];
 
     // Generate suggested mappings
@@ -253,6 +257,7 @@ exports.getSuggestedMappings = async (req, res) => {
  * Validate data before import
  */
 exports.validateData = async (req, res) => {
+  const {  ImportData, Lead, LeadPerson, Deal, CustomField, AuditTrail } = req.models;
   try {
     const { sessionId } = req.params;
     const masterUserID = req.adminId;
@@ -332,7 +337,7 @@ exports.validateData = async (req, res) => {
 /**
  * Helper function to get entity fields
  */
-async function getEntityFields(entityType) {
+async function getEntityFields(entityType, CustomField) {
   const fields = [];
 
   // Helper function to convert Sequelize data types to readable format
@@ -592,12 +597,12 @@ async function getEntityFields(entityType) {
 /**
  * Enhanced validation for column mapping with entity type and field ID support
  */
-async function validateColumnMappingWithEntitySupport(columnMapping, entityType) {
+async function validateColumnMappingWithEntitySupport(columnMapping, entityType, CustomField) {
   const errors = [];
   
   try {
     // Get available fields for validation
-    const availableFields = await getEntityFields(entityType);
+    const availableFields = await getEntityFields(entityType, CustomField);
     const availableFieldsMap = new Map();
     
     // Create a map for quick lookup - handle both standard and custom fields
@@ -689,9 +694,9 @@ async function validateColumnMappingWithEntitySupport(columnMapping, entityType)
 /**
  * Normalize column mapping to include entityType and fieldId
  */
-async function normalizeColumnMapping(columnMapping, entityType) {
+async function normalizeColumnMapping(columnMapping, entityType, CustomField) {
   try {
-    const availableFields = await getEntityFields(entityType);
+    const availableFields = await getEntityFields(entityType, CustomField);
     const fieldsMap = new Map();
     
     // Create lookup map

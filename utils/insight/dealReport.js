@@ -2328,7 +2328,8 @@ exports.generateDealPerformanceDataForSave = async(
   durationUnit,
   segmentedBy,
   filters,
-  masterUserId
+  masterUserId,
+   Activity, LeadPerson, LeadOrganization, Deal, Lead, CustomField, MasterUser, Email
 ) => {
   let includeModels = [];
 
@@ -2468,7 +2469,7 @@ exports.generateDealPerformanceDataForSave = async(
   } else if (xaxis === "contactPerson") {
     // Special handling for contactPerson - join with Person table
     includeModels.push({
-      model: Person,
+      model: LeadPerson,
       as: "Person",
       attributes: [],
       required: false,
@@ -2479,7 +2480,7 @@ exports.generateDealPerformanceDataForSave = async(
   } else if (xaxis === "organization") {
     // Special handling for organization - join with Organization table
     includeModels.push({
-      model: Organization,
+      model: LeadOrganization,
       as: "Organization",
       attributes: [],
       required: false,
@@ -2526,7 +2527,7 @@ exports.generateDealPerformanceDataForSave = async(
     } else if (segmentedBy === "contactPerson") {
       // Special handling for contactPerson - join with Person table
       includeModels.push({
-        model: Person,
+        model: LeadPerson,
         as: "Person",
         attributes: [],
         required: false,
@@ -2537,7 +2538,7 @@ exports.generateDealPerformanceDataForSave = async(
     } else if (segmentedBy === "organization") {
       // Special handling for organization - join with Organization table
       includeModels.push({
-        model: Organization,
+        model: LeadOrganization,
         as: "Organization",
         attributes: [],
         required: false,
@@ -4784,7 +4785,8 @@ exports.generateDealConversionDataForSave = async(
   durationUnit,
   segmentedBy,
   filters,
-  masterUserId
+  masterUserId,
+   Activity, LeadPerson, LeadOrganization, Deal, Lead, CustomField, MasterUser, Email
 ) => {
   let includeModels = [];
 
@@ -8218,7 +8220,8 @@ exports.generateDealProgressDataForSave = async(
   segmentedBy,
   filters,
   pipelineId = null,
-  masterUserId
+  masterUserId,
+   Activity, LeadPerson, LeadOrganization, Deal, Lead, CustomField, MasterUser, Email, PipelineStage
 ) => {
   let includeModels = [];
   const baseWhere = {};
@@ -8368,7 +8371,7 @@ exports.generateDealProgressDataForSave = async(
     groupBy.push("stageData.stageName");
   } else if (xaxis === "contactPerson") {
     includeModels.push({
-      model: Person,
+      model: LeadPerson,
       as: "Person",
       attributes: [],
       required: false,
@@ -8378,7 +8381,7 @@ exports.generateDealProgressDataForSave = async(
     attributes.push([Sequelize.col("Person.contactPerson"), "xValue"]);
   } else if (xaxis === "organization") {
     includeModels.push({
-      model: Organization,
+      model: LeadOrganization,
       as: "Organization",
       attributes: [],
       required: false,
@@ -8419,7 +8422,7 @@ exports.generateDealProgressDataForSave = async(
       groupBy.push(segmentDateExpression);
     } else if (segmentedBy === "contactPerson") {
       includeModels.push({
-        model: Person,
+        model: LeadPerson,
         as: "Person",
         attributes: [],
         required: false,
@@ -8428,7 +8431,7 @@ exports.generateDealProgressDataForSave = async(
       attributes.push([Sequelize.col("Person.contactPerson"), "segmentValue"]);
     } else if (segmentedBy === "organization") {
       includeModels.push({
-        model: Organization,
+        model: LeadOrganization,
         as: "Organization",
         attributes: [],
         required: false,

@@ -2,6 +2,7 @@
 // =============== ENTITY COLUMNS API ===============
 // Returns available columns for Deal, Person, and Organization
 exports.getEntityColumns = async (req, res) => {
+  const {CustomField, Lead, Deal, LeadPerson, LeadOrganization} = req.models;
   try {
     // Dynamically fetch model attributes (excluding ID fields)
     const getModelColumns = (model) => {
@@ -14,10 +15,9 @@ exports.getEntityColumns = async (req, res) => {
     };
 
     // Fetch custom fields for each entity
-    const CustomFieldModel = require("../../models/customFieldModel");
     async function getCustomFields(entityType) {
       // entityType: 'Deal', 'Person', 'Organization'
-      const fields = await CustomFieldModel.findAll({
+      const fields = await CustomField.findAll({
         where: { entityType, isActive: true },
         attributes: ["fieldName"],
       });
@@ -25,9 +25,6 @@ exports.getEntityColumns = async (req, res) => {
     }
 
     // Get columns for each entity
-    const dealModel = require("../../models/deals/dealsModels");
-    const personModel = require("../../models/leads/leadPersonModel");
-    const organizationModel = require("../../models/leads/leadOrganizationModel");
 
     const [dealCustom, personCustom, orgCustom] = await Promise.all([
       getCustomFields("Deal"),
@@ -35,10 +32,10 @@ exports.getEntityColumns = async (req, res) => {
       getCustomFields("Organization"),
     ]);
 
-    const dealColumns = [...getModelColumns(dealModel), ...dealCustom];
-    const personColumns = [...getModelColumns(personModel), ...personCustom];
+    const dealColumns = [...getModelColumns(Deal), ...dealCustom];
+    const personColumns = [...getModelColumns(LeadPerson), ...personCustom];
     const organizationColumns = [
-      ...getModelColumns(organizationModel),
+      ...getModelColumns(LeadOrganization),
       ...orgCustom,
     ];
 
@@ -91,7 +88,7 @@ const Deal = require("../../models/deals/dealsModels");
 const DealStageHistory = require("../../models/deals/dealsStageHistoryModel");
 const Lead = require("../../models/leads/leadsModel");
 const Activity = require("../../models/activity/activityModel");
-const MasterUser = require("../../models/master/masterUserModel");
+const MasterUser = require("../../models/master/masterUserModel");        
 const { Op } = require("sequelize");
 const ReportFolder = require("../../models/insight/reportFolderModel");
 // const {  generateActivityPerformanceDataForSave } = require("./report/activityReportController");
@@ -122,6 +119,7 @@ const {
 // =============== DASHBOARD MANAGEMENT ===============
 
 exports.createDashboard = async (req, res) => {
+  const {Dashboard} = req.models;
   try {
     const { name, folder, type, parentId } = req.body;
     const ownerId = req.adminId;
@@ -153,7 +151,7 @@ exports.createDashboard = async (req, res) => {
         console.log(`[DEBUG] Looking for existing folder: "${folder}"`);
 
         // Look for existing folder with the provided name
-        let existingFolder = await DASHBOARD.findOne({
+        let existingFolder = await Dashboard.findOne({
           where: {
             name: folder,
             ownerId,
@@ -176,7 +174,7 @@ exports.createDashboard = async (req, res) => {
         if (!existingFolder) {
           console.log(`[DEBUG] Creating new folder: "${folder}"`);
           // Auto-create the folder if it doesn't exist
-          existingFolder = await DASHBOARD.create({
+          existingFolder = await Dashboard.create({
             name: folder,
             folder: folder, // Set folder field to its own name
             type: "folder",
@@ -196,7 +194,7 @@ exports.createDashboard = async (req, res) => {
       }
     } else if (parentId) {
       // If parentId is provided, validate it is a folder and get its name
-      const parentFolder = await DASHBOARD.findOne({
+      const parentFolder = await Dashboard.findOne({
         where: {
           dashboardId: parentId,
           ownerId,
@@ -216,7 +214,7 @@ exports.createDashboard = async (req, res) => {
     }
 
     // Check if a dashboard with the same name already exists in the same folder
-    const existingDashboard = await DASHBOARD.findOne({
+    const existingDashboard = await Dashboard.findOne({
       where: {
         name,
         ownerId,
@@ -234,7 +232,7 @@ exports.createDashboard = async (req, res) => {
       });
     }
 
-    const newDashboard = await DASHBOARD.create({
+    const newDashboard = await Dashboard.create({
       name,
       folder: resolvedFolderName, // Allow null values
       type: itemType,
@@ -260,6 +258,7 @@ exports.createDashboard = async (req, res) => {
 };
 
 exports.getDashboards = async (req, res) => {
+  const {Dashboard, Goal, Report} = req.models;
   try {
     const ownerId = req.adminId;
     const role = req.role;
@@ -267,7 +266,7 @@ exports.getDashboards = async (req, res) => {
 
     // First, get dashboards without including Reports
     if (role === "admin") {
-      dashboards = await DASHBOARD.findAll({
+      dashboards = await Dashboard.findAll({
         include: [
           {
             model: Goal,
@@ -278,7 +277,7 @@ exports.getDashboards = async (req, res) => {
         order: [["createdAt", "DESC"]],
       });
     } else {
-      dashboards = await DASHBOARD.findAll({
+      dashboards = await Dashboard.findAll({
         where: { ownerId },
         include: [
           {
@@ -397,6 +396,7 @@ exports.getDashboards = async (req, res) => {
 };
 
 exports.getSingleDashboard = async (req, res) => {
+  const {Dashboard} = req.models;
   try {
     const { dashboardId } = req.params;
     const ownerId = req.adminId;
@@ -405,13 +405,13 @@ exports.getSingleDashboard = async (req, res) => {
     // First, get the dashboard
     let dashboard;
     if (role === "admin") {
-      dashboard = await DASHBOARD.findOne({
+      dashboard = await Dashboard.findOne({
         where: {
           dashboardId,
         },
       });
     } else {
-      dashboard = await DASHBOARD.findOne({
+      dashboard = await Dashboard.findOne({
         where: {
           dashboardId,
           ownerId,
@@ -441,12 +441,13 @@ exports.getSingleDashboard = async (req, res) => {
 };
 
 exports.getDashboard = async (req, res) => {
+  const {Dashboard, Goal, Report} = req.models;
   try {
     const { dashboardId } = req.params;
     const ownerId = req.adminId;
 
     // First, get the dashboard
-    const dashboard = await DASHBOARD.findOne({
+    const dashboard = await Dashboard.findOne({
       where: {
         dashboardId,
         ownerId,
@@ -531,12 +532,13 @@ exports.getDashboard = async (req, res) => {
 };
 
 exports.updateDashboard = async (req, res) => {
+  const {Dashboard, Goal, Report} = req.models;
   try {
     const { dashboardId } = req.params;
     const { name, folder } = req.body;
     const ownerId = req.adminId;
 
-    const dashboard = await DASHBOARD.findOne({
+    const dashboard = await Dashboard.findOne({
       where: {
         dashboardId,
         ownerId,
@@ -571,11 +573,12 @@ exports.updateDashboard = async (req, res) => {
 };
 
 exports.deleteDashboard = async (req, res) => {
+  const {Dashboard, Goal, Report} = req.models;
   try {
     const { dashboardId } = req.params;
     const ownerId = req.adminId;
 
-    const dashboard = await DASHBOARD.findOne({
+    const dashboard = await Dashboard.findOne({
       where: {
         dashboardId,
         ownerId,
@@ -610,6 +613,7 @@ exports.deleteDashboard = async (req, res) => {
 
 // Bulk delete multiple dashboards
 exports.bulkDeleteDashboards = async (req, res) => {
+  const {Dashboard, Goal, Report} = req.models;
   try {
     const { dashboardIds } = req.body;
     const ownerId = req.adminId;
@@ -630,13 +634,13 @@ exports.bulkDeleteDashboards = async (req, res) => {
     // Get all dashboards for admin, or only user's dashboards for non-admin
     let allUserDashboards;
     if (role === "admin") {
-      allUserDashboards = await DASHBOARD.findAll({
+      allUserDashboards = await Dashboard.findAll({
         where: {
           type: { [Op.ne]: "folder" },
         },
       });
     } else {
-      allUserDashboards = await DASHBOARD.findAll({
+      allUserDashboards = await Dashboard.findAll({
         where: {
           ownerId,
           type: { [Op.ne]: "folder" },
@@ -660,13 +664,13 @@ exports.bulkDeleteDashboards = async (req, res) => {
     // Find dashboards to delete (admin: all, non-admin: only own)
     let dashboardsToDelete;
     if (role === "admin") {
-      dashboardsToDelete = await DASHBOARD.findAll({
+      dashboardsToDelete = await Dashboard.findAll({
         where: {
           dashboardId: { [Op.in]: dashboardIds },
         },
       });
     } else {
-      dashboardsToDelete = await DASHBOARD.findAll({
+      dashboardsToDelete = await Dashboard.findAll({
         where: {
           dashboardId: { [Op.in]: dashboardIds },
           ownerId,
@@ -701,7 +705,7 @@ exports.bulkDeleteDashboards = async (req, res) => {
     // Delete the dashboards
     let deleteWhere = { dashboardId: { [Op.in]: foundIds } };
     if (role !== "admin") deleteWhere.ownerId = ownerId;
-    const deletedCount = await DASHBOARD.destroy({
+    const deletedCount = await Dashboard.destroy({
       where: deleteWhere,
     });
 
@@ -733,6 +737,7 @@ exports.bulkDeleteDashboards = async (req, res) => {
 // =============== FOLDER MANAGEMENT ===============
 
 exports.createFolder = async (req, res) => {
+  const {Dashboard, Goal, Report} = req.models;
   try {
     const { name, parentId, folder } = req.body;
     const ownerId = req.adminId;
@@ -746,7 +751,7 @@ exports.createFolder = async (req, res) => {
     }
 
     // Check if a folder with the same name already exists in the same location
-    const existingFolder = await DASHBOARD.findOne({
+    const existingFolder = await Dashboard.findOne({
       where: {
         name,
         ownerId,
@@ -764,7 +769,7 @@ exports.createFolder = async (req, res) => {
 
     // If creating subfolder, validate parent exists
     if (parentId) {
-      const parentFolder = await DASHBOARD.findOne({
+      const parentFolder = await Dashboard.findOne({
         where: {
           dashboardId: parentId,
           ownerId,
@@ -780,7 +785,7 @@ exports.createFolder = async (req, res) => {
       }
     }
 
-    const newFolder = await DASHBOARD.create({
+    const newFolder = await Dashboard.create({
       name,
       folder: name, // Set folder field to its own name
       type: "folder",
@@ -804,12 +809,13 @@ exports.createFolder = async (req, res) => {
 };
 
 exports.getFolderContents = async (req, res) => {
+  const {Dashboard, Goal, Report} = req.models;
   try {
     const { folderId } = req.params;
     const ownerId = req.adminId;
 
     // Verify folder ownership
-    const folder = await DASHBOARD.findOne({
+    const folder = await Dashboard.findOne({
       where: {
         dashboardId: folderId,
         ownerId,
@@ -825,7 +831,7 @@ exports.getFolderContents = async (req, res) => {
     }
 
     // Get all items in this folder
-    const contents = await DASHBOARD.findAll({
+    const contents = await Dashboard.findAll({
       where: {
         parentId: folderId,
         ownerId,
@@ -866,13 +872,14 @@ exports.getFolderContents = async (req, res) => {
 };
 
 exports.moveToFolder = async (req, res) => {
+  const {Dashboard, Goal, Report} = req.models;
   try {
     const { itemId } = req.params;
     const { targetFolderId } = req.body;
     const ownerId = req.adminId;
 
     // Verify item ownership
-    const item = await DASHBOARD.findOne({
+    const item = await Dashboard.findOne({
       where: {
         dashboardId: itemId,
         ownerId,
@@ -888,7 +895,7 @@ exports.moveToFolder = async (req, res) => {
 
     // If moving to a folder, verify folder exists
     if (targetFolderId) {
-      const targetFolder = await DASHBOARD.findOne({
+      const targetFolder = await Dashboard.findOne({
         where: {
           dashboardId: targetFolderId,
           ownerId,
@@ -908,7 +915,8 @@ exports.moveToFolder = async (req, res) => {
         const isDescendant = await checkIfDescendant(
           targetFolderId,
           itemId,
-          ownerId
+          ownerId,
+          Dashboard
         );
         if (isDescendant || targetFolderId === itemId) {
           return res.status(400).json({
@@ -939,8 +947,9 @@ exports.moveToFolder = async (req, res) => {
 };
 
 // Helper function to check if target is a descendant of source
-async function checkIfDescendant(targetId, sourceId, ownerId) {
-  const descendants = await DASHBOARD.findAll({
+async function checkIfDescendant(targetId, sourceId, ownerId, Dashboard) {
+
+  const descendants = await Dashboard.findAll({
     where: {
       parentId: sourceId,
       ownerId,
@@ -955,7 +964,8 @@ async function checkIfDescendant(targetId, sourceId, ownerId) {
       const isSubDescendant = await checkIfDescendant(
         targetId,
         descendant.dashboardId,
-        ownerId
+        ownerId,
+        Dashboard
       );
       if (isSubDescendant) {
         return true;
@@ -969,6 +979,7 @@ async function checkIfDescendant(targetId, sourceId, ownerId) {
 // =============== REPORT MANAGEMENT ===============
 
 exports.createReport = async (req, res) => {
+  const {Dashboard, Goal, Report} = req.models;
   try {
     const { dashboardId, entity, type, config, position, name, description } =
       req.body;
@@ -983,7 +994,7 @@ exports.createReport = async (req, res) => {
     }
 
     // Verify dashboard ownership
-    const dashboard = await DASHBOARD.findOne({
+    const dashboard = await Dashboard.findOne({
       where: {
         dashboardId,
         ownerId,
@@ -1076,12 +1087,13 @@ exports.createReport = async (req, res) => {
 };
 
 exports.getReportsForDashboard = async (req, res) => {
+  const {Dashboard, Goal, Report} = req.models;
   try {
     const { dashboardId } = req.params;
     const ownerId = req.adminId;
 
     // Verify dashboard ownership
-    const dashboard = await DASHBOARD.findOne({
+    const dashboard = await Dashboard.findOne({
       where: {
         dashboardId,
         ownerId,
@@ -1129,6 +1141,7 @@ exports.getReportsForDashboard = async (req, res) => {
 };
 
 exports.updateReport = async (req, res) => {
+  const {Dashboard, Goal, Report} = req.models;
   try {
     const { reportId } = req.params;
     const { entity, type, config, position, name, description } = req.body;
@@ -1138,7 +1151,7 @@ exports.updateReport = async (req, res) => {
       where: { reportId },
       include: [
         {
-          model: DASHBOARD,
+          model: Dashboard,
           as: "Dashboard",
           where: { ownerId },
         },
@@ -1177,6 +1190,7 @@ exports.updateReport = async (req, res) => {
 };
 
 exports.deleteReport = async (req, res) => {
+  const {Dashboard, Goal, Report} = req.models;
   try {
     const { reportId } = req.params;
     const ownerId = req.adminId;
@@ -1185,7 +1199,7 @@ exports.deleteReport = async (req, res) => {
       where: { reportId },
       include: [
         {
-          model: DASHBOARD,
+          model: Dashboard,
           as: "Dashboard",
           where: { ownerId },
         },
@@ -1216,6 +1230,7 @@ exports.deleteReport = async (req, res) => {
 };
 
 exports.getReportData = async (req, res) => {
+  const {Dashboard, Goal, Report} = req.models;
   try {
     const { reportId } = req.params;
     const ownerId = req.adminId;
@@ -1224,7 +1239,7 @@ exports.getReportData = async (req, res) => {
       where: { reportId },
       include: [
         {
-          model: DASHBOARD,
+          model: Dashboard,
           as: "Dashboard",
           where: { ownerId },
         },
@@ -1258,6 +1273,7 @@ exports.getReportData = async (req, res) => {
 
 // Get available goal types for entity selection
 exports.getGoalTypes = async (req, res) => {
+  const {Dashboard, Goal, Report} = req.models;
   try {
     const goalTypes = {
       Deal: [
@@ -1314,6 +1330,7 @@ exports.getGoalTypes = async (req, res) => {
 };
 
 exports.createGoal = async (req, res) => {
+  const {Dashboard, Goal, Report, MasterUser, DealStageHistory, Activity, ReportFolder, LeadPerson, Deal, Lead, LeadOrganization} = req.models;
   try {
     const {
       dashboardId,
@@ -1387,7 +1404,7 @@ exports.createGoal = async (req, res) => {
 
     // Verify dashboard ownership if dashboardId is provided
     if (dashboardId) {
-      const dashboard = await DASHBOARD.findOne({
+      const dashboard = await Dashboard.findOne({
         where: {
           dashboardId,
           ownerId,
@@ -2441,6 +2458,7 @@ exports.createGoal = async (req, res) => {
 
 // Get all goals (not tied to specific dashboard)
 exports.getAllGoals = async (req, res) => {
+  const {Dashboard, Goal, Report, MasterUser, DealStageHistory, Activity, ReportFolder, LeadPerson, Deal, Lead, LeadOrganization} = req.models;
   try {
     const ownerId = req.adminId;
     const now = new Date();
@@ -2456,7 +2474,7 @@ exports.getAllGoals = async (req, res) => {
     // Calculate progress for each goal and parse config
     const goalsWithProgress = await Promise.all(
       goals.map(async (goal) => {
-        const progress = await calculateGoalProgress(goal, ownerId);
+        const progress = await calculateGoalProgress(goal, ownerId, Deal, Lead, LeadPerson, Activity, DealStageHistory, LeadOrganization, MasterUser);
         // Parse JSON strings back to objects
         const parsedGoal = {
           ...goal.toJSON(),
@@ -2534,6 +2552,7 @@ exports.getAllGoals = async (req, res) => {
 };
 
 exports.getAllGoalsDashboardWise = async (req, res) => {
+   const {Dashboard, Goal, Report, MasterUser, DealStageHistory, Activity, ReportFolder, LeadPerson, Deal, Lead, LeadOrganization} = req.models;
   try {
     const { dashboardId } = req.params;
     const ownerId = req.adminId;
@@ -2635,7 +2654,8 @@ exports.getAllGoalsDashboardWise = async (req, res) => {
             trackingMetric,
           },
           null,
-          period
+          period,
+          Dashboard, Goal, Report, MasterUser, DealStageHistory, Activity, ReportFolder, LeadPerson, Deal, Lead, LeadOrganization
         );
 
         config = { ...config, ...data };
@@ -2672,7 +2692,8 @@ exports.getAllGoalsDashboardWise = async (req, res) => {
             trackingMetric,
           },
           null,
-          period
+          period,
+          Dashboard, Goal, Report, MasterUser, DealStageHistory, Activity, ReportFolder, LeadPerson, Deal, Lead, LeadOrganization
         );
 
         config = { ...config, ...data };
@@ -2708,7 +2729,8 @@ exports.getAllGoalsDashboardWise = async (req, res) => {
             trackingMetric,
           },
           null,
-          period
+          period,
+          Dashboard, Goal, Report, MasterUser, DealStageHistory, Activity, ReportFolder, LeadPerson, Deal, Lead, LeadOrganization
         );
 
         config = { ...config, ...data };
@@ -2733,6 +2755,7 @@ exports.getAllGoalsDashboardWise = async (req, res) => {
 
 // Add goal to dashboard
 exports.addGoalToDashboard = async (req, res) => {
+  const {Dashboard, Goal, Report, MasterUser, DealStageHistory, Activity, ReportFolder, LeadPerson, Deal, Lead, LeadOrganization} = req.models;
   try {
     const { goalId } = req.params;
     const { dashboardId } = req.body;
@@ -2752,7 +2775,7 @@ exports.addGoalToDashboard = async (req, res) => {
     }
 
     // For admin, do not filter by ownerId
-    const dashboard = await DASHBOARD.findOne({
+    const dashboard = await Dashboard.findOne({
       where: role === "admin" ? { dashboardId } : { dashboardId, ownerId },
     });
 
@@ -2783,6 +2806,7 @@ exports.addGoalToDashboard = async (req, res) => {
 };
 
 exports.getGoalsForDashboard = async (req, res) => {
+  const {Dashboard, Goal, Report, MasterUser, DealStageHistory, Activity, ReportFolder, LeadPerson, Deal, Lead, LeadOrganization} = req.models;
   try {
     const { dashboardId } = req.params;
     const ownerId = req.adminId;
@@ -2802,7 +2826,7 @@ exports.getGoalsForDashboard = async (req, res) => {
       // Calculate progress for each goal
       const goalsWithProgress = await Promise.all(
         goals.map(async (goal) => {
-          const progress = await calculateGoalProgress(goal, ownerId);
+          const progress = await calculateGoalProgress(goal, ownerId, Deal, Lead, LeadPerson, Activity, DealStageHistory, LeadOrganization, MasterUser);
           return {
             ...goal.toJSON(),
             progress,
@@ -2818,7 +2842,7 @@ exports.getGoalsForDashboard = async (req, res) => {
     }
 
     // Verify dashboard ownership (admin can access all dashboards)
-    const dashboard = await DASHBOARD.findOne({
+    const dashboard = await Dashboard.findOne({
       where: role === "admin" ? { dashboardId } : { dashboardId, ownerId },
     });
 
@@ -2843,7 +2867,7 @@ exports.getGoalsForDashboard = async (req, res) => {
     // Calculate progress for each goal
     const goalsWithProgress = await Promise.all(
       goals.map(async (goal) => {
-        const progress = await calculateGoalProgress(goal, ownerId);
+        const progress = await calculateGoalProgress(goal, ownerId, Deal, Lead, LeadPerson, Activity, DealStageHistory, LeadOrganization, MasterUser);
         return {
           ...goal.toJSON(),
           progress,
@@ -2868,6 +2892,7 @@ exports.getGoalsForDashboard = async (req, res) => {
 };
 
 exports.updateGoal = async (req, res) => {
+  const {Dashboard, Goal, Report, MasterUser, DealStageHistory, Activity, ReportFolder, LeadPerson, Deal, Lead, LeadOrganization} = req.models;
   try {
     const { goalId } = req.params;
     const {
@@ -2941,6 +2966,7 @@ exports.updateGoal = async (req, res) => {
 
 // Reorder goals on dashboard (for drag and drop functionality)
 exports.reorderGoals = async (req, res) => {
+  const {Dashboard, Goal, Report, MasterUser, DealStageHistory, Activity, ReportFolder, LeadPerson, Deal, Lead, LeadOrganization} = req.models;
   try {
     const { dashboardId } = req.params;
     const { goalOrders } = req.body; // Array of objects: [{goalId: 'id1', position: 0}, {goalId: 'id2', position: 1}, ...]
@@ -2956,7 +2982,7 @@ exports.reorderGoals = async (req, res) => {
     }
 
     // Verify dashboard ownership
-    const dashboard = await DASHBOARD.findOne({
+    const dashboard = await Dashboard.findOne({
       where: role === "admin" ? { dashboardId } : { dashboardId, ownerId },
     });
 
@@ -3033,6 +3059,7 @@ exports.reorderGoals = async (req, res) => {
 };
 
 exports.removeGoalFromDashboard = async (req, res) => {
+  const {Dashboard, Goal, Report, MasterUser, DealStageHistory, Activity, ReportFolder, LeadPerson, Deal, Lead, LeadOrganization} = req.models;
   try {
     const { goalId } = req.params;
     const ownerId = req.adminId;
@@ -3102,6 +3129,7 @@ exports.removeGoalFromDashboard = async (req, res) => {
 };
 
 exports.softDeleteGoal = async (req, res) => {
+  const {Dashboard, Goal, Report, MasterUser, DealStageHistory, Activity, ReportFolder, LeadPerson, Deal, Lead, LeadOrganization} = req.models;
   try {
     const { goalId } = req.params;
     const ownerId = req.adminId;
@@ -3140,6 +3168,7 @@ exports.softDeleteGoal = async (req, res) => {
 };
 
 exports.deleteGoal = async (req, res) => {
+  const {Dashboard, Goal, Report, MasterUser, DealStageHistory, Activity, ReportFolder, LeadPerson, Deal, Lead, LeadOrganization} = req.models;
   try {
     const { goalId } = req.params;
     const ownerId = req.adminId;
@@ -3175,6 +3204,7 @@ exports.deleteGoal = async (req, res) => {
 };
 
 exports.getGoalProgress = async (req, res) => {
+  const {Dashboard, Goal, Report, MasterUser, DealStageHistory, Activity, ReportFolder, LeadPerson, Deal, Lead, LeadOrganization} = req.models;
   try {
     const { goalId } = req.params;
     const ownerId = req.adminId;
@@ -3194,7 +3224,7 @@ exports.getGoalProgress = async (req, res) => {
       });
     }
 
-    const progress = await calculateGoalProgress(goal, ownerId);
+    const progress = await calculateGoalProgress(goal, ownerId, Deal, Lead, LeadPerson, Activity, DealStageHistory, LeadOrganization, MasterUser);
 
     res.status(200).json({
       success: true,
@@ -3215,6 +3245,7 @@ exports.getGoalProgress = async (req, res) => {
 
 // Get filtered data for a specific goal or all goals in a dashboard
 exports.getGoalData = async (req, res) => {
+  const {Dashboard, Goal, Report, MasterUser, DealStageHistory, Activity, ReportFolder, LeadPerson, Deal, Lead, LeadOrganization, CustomField} = req.models;
   try {
     const { goalId, dashboardId } = req.params;
     const ownerId = req.adminId;
@@ -3254,7 +3285,7 @@ exports.getGoalData = async (req, res) => {
       }
 
       // Verify dashboard ownership (admin can access all dashboards)
-      const dashboard = await DASHBOARD.findOne({
+      const dashboard = await Dashboard.findOne({
         where:
           role === "admin"
             ? { dashboardId: targetDashboardId }
@@ -3308,7 +3339,7 @@ exports.getGoalData = async (req, res) => {
           (col) =>
             !/id$/i.test(col) && col !== "createdAt" && col !== "updatedAt"
         );
-      const CustomFieldModel = require("../../models/customFieldModel");
+      const CustomFieldModel = CustomField;
       async function getCustomFields(entityType) {
         const fields = await CustomFieldModel.findAll({
           where: { entityType, isActive: true },
@@ -3318,16 +3349,16 @@ exports.getGoalData = async (req, res) => {
       }
       let model, entityType;
       if (entity === "Deal") {
-        model = require("../../models/deals/dealsModels");
+        model = Deal;
         entityType = "Deal";
       } else if (entity === "Person") {
-        model = require("../../models/leads/leadPersonModel");
+        model = LeadPerson;
         entityType = "Person";
       } else if (entity === "Organization") {
-        model = require("../../models/leads/leadOrganizationModel");
+        model = LeadOrganization;
         entityType = "Organization";
       } else if (entity === "Activity") {
-        model = require("../../models/activity/activityModel");
+        model = Activity;
         entityType = "Activity";
       }
       const modelCols = getModelColumns(model);
@@ -3430,7 +3461,7 @@ exports.getGoalData = async (req, res) => {
 };
 
 // Helper function to process individual goal data (extracted from original getGoalData)
-async function processGoalData(goal, ownerId, periodFilter, startDateFilter = null, endDateFilter = null) {
+async function processGoalData(goal, ownerId, periodFilter, startDateFilter = null, endDateFilter = null, Dashboard, Goal, Report, MasterUser, DealStageHistory, Activity, ReportFolder, LeadPerson, Deal, Lead, LeadOrganization) {
   const {
     entity,
     goalType,
@@ -3719,7 +3750,7 @@ async function processGoalData(goal, ownerId, periodFilter, startDateFilter = nu
       const include = [];
       if (selectedColumns.some((col) => col.startsWith("person."))) {
         include.push({
-          model: require("../../models/personModel"),
+          model: LeadPerson,
           as: "person",
           attributes: selectedColumns
             .filter((col) => col.startsWith("person."))
@@ -3728,7 +3759,7 @@ async function processGoalData(goal, ownerId, periodFilter, startDateFilter = nu
       }
       if (selectedColumns.some((col) => col.startsWith("organization."))) {
         include.push({
-          model: require("../../models/organizationModel"),
+          model: LeadOrganization,
           as: "organization",
           attributes: selectedColumns
             .filter((col) => col.startsWith("organization."))
@@ -3859,7 +3890,7 @@ async function processGoalData(goal, ownerId, periodFilter, startDateFilter = nu
       const include = [];
       if (selectedColumns.some((col) => col.startsWith("person."))) {
         include.push({
-          model: require("../../models/personModel"),
+          model: LeadPerson,
           as: "person",
           attributes: selectedColumns
             .filter((col) => col.startsWith("person."))
@@ -3868,7 +3899,7 @@ async function processGoalData(goal, ownerId, periodFilter, startDateFilter = nu
       }
       if (selectedColumns.some((col) => col.startsWith("organization."))) {
         include.push({
-          model: require("../../models/organizationModel"),
+          model: LeadOrganization,
           as: "organization",
           attributes: selectedColumns
             .filter((col) => col.startsWith("organization."))
@@ -4031,7 +4062,7 @@ async function processGoalData(goal, ownerId, periodFilter, startDateFilter = nu
         const include = [];
         if (selectedColumns.some((col) => col.startsWith("person."))) {
           include.push({
-            model: require("../../models/personModel"),
+            model: LeadPerson,
             as: "person",
             attributes: selectedColumns
               .filter((col) => col.startsWith("person."))
@@ -4040,7 +4071,7 @@ async function processGoalData(goal, ownerId, periodFilter, startDateFilter = nu
         }
         if (selectedColumns.some((col) => col.startsWith("organization."))) {
           include.push({
-            model: require("../../models/organizationModel"),
+            model: LeadOrganization,
             as: "organization",
             attributes: selectedColumns
               .filter((col) => col.startsWith("organization."))
@@ -6679,7 +6710,7 @@ async function generateGoalBreakdownData(
   };
 }
 
-async function calculateGoalProgress(goal, ownerId) {
+async function calculateGoalProgress(goal, ownerId, Deal, Lead, LeadPerson, Activity, DealStageHistory, LeadOrganization, MasterUser) {
   const {
     entity,
     goalType,
@@ -7601,6 +7632,7 @@ function generateQuarterlyBreakdownForProgressed(
 }
 // Bulk delete multiple or single goals
 exports.bulkDeleteGoal = async (req, res) => {
+  const {Dashboard, Goal, Report, MasterUser, DealStageHistory, Activity, ReportFolder, LeadPerson, Deal, Lead, LeadOrganization, CustomField} = req.models;
   try {
     let { goalIds } = req.body;
     const ownerId = req.adminId;
@@ -7681,6 +7713,7 @@ exports.bulkDeleteGoal = async (req, res) => {
 };
 
 exports.bulkDeleteReports = async (req, res) => {
+  const {Dashboard, Goal, Report, MasterUser, DealStageHistory, Activity, ReportFolder, LeadPerson, Deal, Lead, LeadOrganization, CustomField} = req.models;
   try {
     const { reportIds, folderIds } = req.body; // Array of report IDs to delete
     const ownerId = req.adminId;
@@ -7855,6 +7888,7 @@ exports.bulkDeleteReports = async (req, res) => {
 // };
 
 exports.GetAllReports = async (req, res) => {
+  const { ReportFolder, Report } = req.models;
   try {
     const ownerId = req.adminId;
     const role = req.role;
@@ -7960,6 +7994,7 @@ exports.GetAllReports = async (req, res) => {
 };
 
 exports.GetReportsDataReportWise = async (req, res) => {
+  const { Report } = req.models;
   try {
     const { reportId } = req.body;
 
@@ -8034,6 +8069,7 @@ exports.GetReportsDataReportWise = async (req, res) => {
 };
 
 exports.GetReportsDataDashboardWise = async (req, res) => {
+  const { Dashboard, Activity, LeadPerson, Report, LeadOrganization, Deal, Lead, CustomField, ReportFolder, MasterUser, Email } = req.models;
   try {
     const { dashboardId } = req.params;
     const ownerId = req.adminId;
@@ -8134,7 +8170,8 @@ exports.GetReportsDataDashboardWise = async (req, res) => {
             config?.segmentedBy,
             // {},
             filter,
-            masterUserId
+            masterUserId, 
+            Activity, LeadPerson, LeadOrganization, Deal, Lead, CustomField, MasterUser, Email
           );
         } else if (entity === "Activity" && type === "Emails") {
           data = await generateEmailPerformanceDataForSave(
@@ -8144,7 +8181,8 @@ exports.GetReportsDataDashboardWise = async (req, res) => {
             config?.yaxis,
             config?.segmentedBy,
             filter,
-            masterUserId
+            masterUserId,
+             Activity, LeadPerson, LeadOrganization, Deal, Lead, CustomField, MasterUser, Email
           );
         } else if (entity === "Lead" && type === "Performance") {
           data = await generateLeadPerformanceDataForSave(
@@ -8155,7 +8193,8 @@ exports.GetReportsDataDashboardWise = async (req, res) => {
             config?.durationUnit,
             config?.segmentedBy,
             filter,
-            masterUserId
+            masterUserId,
+            Activity, LeadPerson, LeadOrganization, Deal, Lead, CustomField, MasterUser, Email
           );
         } else if (entity === "Lead" && type === "Conversion") {
           data = await generateLeadConversionDataForSave(
@@ -8166,7 +8205,8 @@ exports.GetReportsDataDashboardWise = async (req, res) => {
             config?.durationUnit,
             config?.segmentedBy,
             filter,
-            masterUserId
+            masterUserId,
+            Activity, LeadPerson, LeadOrganization, Deal, Lead, CustomField, MasterUser, Email
           );
         } else if (entity === "Deal" && type === "Conversion") {
           data = await generateDealConversionDataForSave(
@@ -8177,7 +8217,8 @@ exports.GetReportsDataDashboardWise = async (req, res) => {
             config?.durationUnit,
             config?.segmentedBy,
             filter,
-            masterUserId
+            masterUserId,
+            Activity, LeadPerson, LeadOrganization, Deal, Lead, CustomField, MasterUser, Email
           );
         } else if (entity === "Deal" && type === "Progress") {
           data = await generateDealProgressDataForSave(
@@ -8189,7 +8230,8 @@ exports.GetReportsDataDashboardWise = async (req, res) => {
             config?.segmentedBy,
             filter,
             "",
-            masterUserId
+            masterUserId,
+            Activity, LeadPerson, LeadOrganization, Deal, Lead, CustomField, MasterUser, Email
           );
         } else if (entity === "Deal" && type === "Duration") {
           data = await generateDealDurationData(
@@ -8201,7 +8243,8 @@ exports.GetReportsDataDashboardWise = async (req, res) => {
             config?.durationUnit,
             config?.segmentedBy,
             filter,
-            masterUserId
+            masterUserId,
+            Activity, LeadPerson, LeadOrganization, Deal, Lead, CustomField, MasterUser, Email
           );
         } else if (entity === "Deal" && type === "Performance") {
           data = await generateDealPerformanceDataForSave(
@@ -8212,7 +8255,8 @@ exports.GetReportsDataDashboardWise = async (req, res) => {
             config?.durationUnit,
             config?.segmentedBy,
             filter,
-            masterUserId
+            masterUserId,
+             Activity, LeadPerson, LeadOrganization, Deal, Lead, CustomField, MasterUser, Email
           );
         } else if (entity === "Contact" && type === "Person") {
           data = await generatePersonPerformanceDataForSave(
@@ -8223,7 +8267,8 @@ exports.GetReportsDataDashboardWise = async (req, res) => {
             config?.durationUnit,
             config?.segmentedBy,
             filter,
-            masterUserId
+            masterUserId,
+             Activity, LeadPerson, LeadOrganization, Deal, Lead, CustomField, MasterUser, Email
           );
         } else if (entity === "Contact" && type === "Organization") {
           data = await generateOrganizationPerformanceDataForSave(
@@ -8234,7 +8279,8 @@ exports.GetReportsDataDashboardWise = async (req, res) => {
             config?.durationUnit,
             config?.segmentedBy,
             filter,
-            masterUserId
+            masterUserId,
+             Activity, LeadPerson, LeadOrganization, Deal, Lead, CustomField, MasterUser, Email
           );
         }
 
@@ -8287,6 +8333,7 @@ exports.GetReportsDataDashboardWise = async (req, res) => {
 };
 
 exports.removeReportFromDashboard = async (req, res) => {
+  const { Report } = req.models;
   try {
     const { reportId } = req.params;
     const ownerId = req.adminId;
@@ -8376,6 +8423,7 @@ exports.removeReportFromDashboard = async (req, res) => {
 };
 
 exports.softDeleteSingleReport = async (req, res) => {
+  const { Report } = req.models;
   try {
     const { reportId } = req.params;
     const ownerId = req.adminId;
@@ -8413,6 +8461,7 @@ exports.softDeleteSingleReport = async (req, res) => {
 };
 
 exports.deleteSingleReport = async (req, res) => {
+  const {Report} = req.models;
   try {
     const { reportId } = req.params;
     const ownerId = req.adminId;

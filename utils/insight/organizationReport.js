@@ -1768,7 +1768,8 @@ exports.generateOrganizationPerformanceDataForSave = async(
   durationUnit,
   segmentedBy,
   filters,
-  masterUserId
+  masterUserId,
+  Activity, LeadPerson, LeadOrganization, Deal, Lead, CustomField, MasterUser, Email
 ) => {
   let includeModels = [];
   const baseWhere = {};
@@ -1971,7 +1972,7 @@ exports.generateOrganizationPerformanceDataForSave = async(
 
   if (segmentedBy && segmentedBy !== "none") {
     // For segmented queries - get all results without pagination
-    results = await Organization.findAll({
+    results = await LeadOrganization.findAll({
       where: baseWhere,
       attributes: attributes,
       include: includeModels,
@@ -1983,7 +1984,7 @@ exports.generateOrganizationPerformanceDataForSave = async(
     });
   } else {
     // Get all results without pagination
-    results = await Organization.findAll({
+    results = await LeadOrganization.findAll({
       where: baseWhere,
       attributes: attributes,
       include: includeModels,
