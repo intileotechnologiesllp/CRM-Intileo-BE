@@ -2,6 +2,13 @@ const schedulingLinkService = require("../../services/schedulingLinkService");
 const SchedulingLink = require("../../models/meeting/schedulingLinkModel");
 const MasterUser = require("../../models/master/masterUserModel");
 const googleCalendarService = require("../../services/googleCalendarService");
+const { google } = require("googleapis");
+
+const oauth2Client = new google.auth.OAuth2(
+  process.env.GOOGLE_CLIENT_ID,
+  process.env.GOOGLE_CLIENT_SECRET,
+  process.env.GOOGLE_REDIRECT_URI
+);
 
 /**
  * Create or update a scheduling link
@@ -25,10 +32,14 @@ exports.createOrUpdateLink = async (req, res) => {
     });
 
     // Generate full booking URL
-    const bookingUrl = `${process.env.FRONTEND_URL || "http://localhost:3000"}/book/${link.uniqueToken}`;
+    const bookingUrl = `${
+      process.env.FRONTEND_URL || "http://localhost:3000"
+    }/meeting-link/${link.uniqueToken}`;
 
     res.json({
-      message: linkId ? "Scheduling link updated successfully" : "Scheduling link created successfully",
+      message: linkId
+        ? "Scheduling link updated successfully"
+        : "Scheduling link created successfully",
       link,
       bookingUrl,
     });
@@ -55,9 +66,11 @@ exports.getUserLinks = async (req, res) => {
     const links = await schedulingLinkService.getUserLinks(masterUserID);
 
     // Add booking URLs
-    const linksWithUrls = links.map(link => ({
+    const linksWithUrls = links.map((link) => ({
       ...link.toJSON(),
-      bookingUrl: `${process.env.FRONTEND_URL || "http://localhost:3000"}/book/${link.uniqueToken}`,
+      bookingUrl: `${
+        process.env.FRONTEND_URL || "http://localhost:3000"
+      }/book/${link.uniqueToken}`,
     }));
 
     res.json({
@@ -85,15 +98,26 @@ exports.getLinkById = async (req, res) => {
     }
 
     const { id } = req.params;
-    const link = await SchedulingLink.findByPk(id, {
-      include: [{ model: MasterUser, as: "owner", attributes: ["masterUserID", "name", "email"] }],
-    });
+    const link = await SchedulingLink.findOne(
+      { uniqueToken: id },
+      {
+        include: [
+          {
+            model: MasterUser,
+            as: "owner",
+            attributes: ["masterUserID", "name", "email"],
+          },
+        ],
+      }
+    );
 
     if (!link || link.masterUserID !== masterUserID) {
       return res.status(404).json({ message: "Scheduling link not found" });
     }
 
-    const bookingUrl = `${process.env.FRONTEND_URL || "http://localhost:3000"}/book/${link.uniqueToken}`;
+    const bookingUrl = `${
+      process.env.FRONTEND_URL || "http://localhost:3000"
+    }/book/${link.uniqueToken}`;
 
     res.json({
       link: {
@@ -137,7 +161,7 @@ exports.deleteLink = async (req, res) => {
 /**
  * PUBLIC: Get available slots for a scheduling link (no auth required)
  * GET /api/meetings/scheduling/:token/available-slots
- * 
+ *
  * Query Parameters:
  * - startDate (optional): Start date in ISO format (default: today)
  * - endDate (optional): End date in ISO format (default: today + advanceBookingDays)
@@ -151,7 +175,7 @@ exports.getAvailableSlotsPublic = async (req, res) => {
 
     // Get link details first to include in response
     const link = await schedulingLinkService.getLinkByToken(token);
-    
+
     // Get available slots
     const slots = await schedulingLinkService.getAvailableSlotsForLink({
       token,
@@ -160,19 +184,19 @@ exports.getAvailableSlotsPublic = async (req, res) => {
     });
 
     // Format slots with additional information
-    const formattedSlots = slots.map(slot => ({
+    const formattedSlots = slots.map((slot) => ({
       start: slot.start,
       end: slot.end,
       startLocal: slot.startLocal,
       endLocal: slot.endLocal,
       durationMinutes: slot.durationMinutes,
-      date: slot.startLocal.split(' ')[0], // Extract date part
-      time: slot.startLocal.split(' ')[1], // Extract time part
+      date: slot.startLocal.split(" ")[0], // Extract date part
+      time: slot.startLocal.split(" ")[1], // Extract time part
     }));
 
     // Group by date if requested
     let groupedSlots = null;
-    if (groupByDate === 'true' || groupByDate === true) {
+    if (groupByDate === "true" || groupByDate === true) {
       groupedSlots = formattedSlots.reduce((acc, slot) => {
         const date = slot.date;
         if (!acc[date]) {
@@ -191,9 +215,12 @@ exports.getAvailableSlotsPublic = async (req, res) => {
     }
 
     // Determine source (Google Calendar or working hours)
-    const source = slots.length > 0 && slots[0]._source 
-      ? slots[0]._source 
-      : (await googleCalendarService.isConnected(link.masterUserID) ? 'google_calendar' : 'working_hours');
+    const source =
+      slots.length > 0 && slots[0]._source
+        ? slots[0]._source
+        : (await googleCalendarService.isConnected(link.masterUserID))
+        ? "google_calendar"
+        : "working_hours";
 
     // Remove metadata from response
     const cleanSlots = formattedSlots.map(({ date, time, ...rest }) => rest);
@@ -226,17 +253,20 @@ exports.getAvailableSlotsPublic = async (req, res) => {
     // Add date range info
     if (cleanSlots.length > 0) {
       response.dateRange = {
-        earliest: cleanSlots[0].startLocal.split(' ')[0],
-        latest: cleanSlots[cleanSlots.length - 1].startLocal.split(' ')[0],
+        earliest: cleanSlots[0].startLocal.split(" ")[0],
+        latest: cleanSlots[cleanSlots.length - 1].startLocal.split(" ")[0],
       };
     }
 
     res.json(response);
   } catch (error) {
     console.error("Error getting available slots:", error);
-    
+
     // Handle specific error cases
-    if (error.message.includes("not found") || error.message.includes("inactive")) {
+    if (
+      error.message.includes("not found") ||
+      error.message.includes("inactive")
+    ) {
       return res.status(404).json({
         success: false,
         message: "Scheduling link not found or inactive",
@@ -303,7 +333,8 @@ exports.bookMeeting = async (req, res) => {
 
     if (!selectedSlotStart || !attendeeName || !attendeeEmail) {
       return res.status(400).json({
-        message: "selectedSlotStart, attendeeName, and attendeeEmail are required",
+        message:
+          "selectedSlotStart, attendeeName, and attendeeEmail are required",
       });
     }
 
@@ -328,7 +359,8 @@ exports.bookMeeting = async (req, res) => {
         meetingUrl: result.meeting.meetingUrl,
       },
       googleCalendar: result.googleCalendar,
-      googleMeetLink: result.googleCalendar?.meetLink || result.meeting.meetingUrl,
+      googleMeetLink:
+        result.googleCalendar?.meetLink || result.meeting.meetingUrl,
       success: true,
     });
   } catch (error) {
@@ -340,3 +372,62 @@ exports.bookMeeting = async (req, res) => {
   }
 };
 
+exports.bookGoogleMeet = async (req, res) => {
+  try {
+    const { masterUserId, summary, description, start, end, email } = req.body;
+    const user = await MasterUser.findByPk(masterUserId);
+    if (!user || !user.googleOAuthToken) {
+      return res.status(400).json({
+        message: "User not connected to Google Calendar",
+      });
+    }
+
+    oauth2Client.setCredentials({
+      refresh_token: user.googleOAuthToken,
+    });
+
+    const calendar = google.calendar({
+      version: "v3",
+      auth: oauth2Client,
+    });
+    const event = {
+      summary: "Client Meeting",
+      description: "Meeting booked via scheduling link",
+      start: {
+        dateTime: "2025-01-05T10:00:00+05:30",
+        timeZone: "Asia/Kolkata",
+      },
+      end: {
+        dateTime: "2025-01-05T10:30:00+05:30",
+        timeZone: "Asia/Kolkata",
+      },
+      conferenceData: {
+        createRequest: {
+          requestId: `meet-${Date.now()}`,
+          conferenceSolutionKey: {
+            type: "hangoutsMeet",
+          },
+        },
+      },
+      attendees: [{ email }],
+    };
+
+    const response = await calendar.events.insert({
+      calendarId: "primary",
+      resource: event,
+      conferenceDataVersion: 1,
+      sendUpdates: "all",
+    });
+
+    return {
+      eventId: response.data.id,
+      meetLink: response.data.hangoutLink,
+    };
+  } catch (e) {
+    console.error("Error booking Google Meet:", e);
+    res.status(500).json({
+      message: "Failed to book Google Meet",
+      error: e.message,
+    });
+  }
+};
