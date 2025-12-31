@@ -162,7 +162,7 @@ exports.getFormById = async (req, res) => {
     const masterUserID = req.adminId;
 
     const form = await WebForm.findOne({
-      where: { formId, masterUserID },
+      where: { formId },
       include: [
         {
           model: WebFormField,

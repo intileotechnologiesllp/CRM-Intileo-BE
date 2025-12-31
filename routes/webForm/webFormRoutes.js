@@ -11,7 +11,7 @@ const { verifyToken } = require("../../middlewares/authMiddleware");
 // Form Management
 router.post("/", verifyToken, webFormController.createForm);
 router.get("/", verifyToken, webFormController.getAllForms);
-router.get("/:formId", verifyToken, webFormController.getFormById);
+router.get("/:formId", webFormController.getFormById);
 router.put("/:formId", verifyToken, webFormController.updateForm);
 router.delete("/:formId", verifyToken, webFormController.deleteForm);
 router.post("/:formId/duplicate", verifyToken, webFormController.duplicateForm);
