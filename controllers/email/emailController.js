@@ -11932,4 +11932,125 @@ exports.getDetailedConnectionStatus = async (req, res) => {
   }
 };
 
+/**
+ * CREATE
+ */
+exports.createTemplate = async (req, res) => {
+  try {
+    const { templateName, subject, body } = req.body;
+    const createdBy = req.user.id; // from auth middleware
+
+    const template = await EmailTemplate.create({
+      templateName,
+      subject,
+      body,
+      createdBy,
+    });
+
+    res.status(201).json({
+      success: true,
+      data: template,
+    });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+/**
+ * READ ALL
+ */
+exports.getAllTemplates = async (req, res) => {
+  try {
+    const templates = await EmailTemplate.findAll({
+      order: [["createdAt", "DESC"]],
+    });
+
+    res.json({ success: true, data: templates });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+/**
+ * READ BY ID
+ */
+exports.getTemplateById = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const template = await EmailTemplate.findByPk(id);
+
+    if (!template) {
+      return res.status(404).json({
+        success: false,
+        message: "Template not found",
+      });
+    }
+
+    res.json({ success: true, data: template });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+/**
+ * UPDATE
+ */
+exports.updateTemplate = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { templateName, subject, body } = req.body;
+
+    const template = await EmailTemplate.findByPk(id);
+
+    if (!template) {
+      return res.status(404).json({
+        success: false,
+        message: "Template not found",
+      });
+    }
+
+    await template.update({
+      templateName,
+      subject,
+      body,
+    });
+
+    res.json({
+      success: true,
+      data: template,
+    });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+/**
+ * DELETE
+ */
+exports.deleteTemplate = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const template = await EmailTemplate.findByPk(id);
+
+    if (!template) {
+      return res.status(404).json({
+        success: false,
+        message: "Template not found",
+      });
+    }
+
+    await template.destroy();
+
+    res.json({
+      success: true,
+      message: "Template deleted successfully",
+    });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+
 //hello

@@ -107,6 +107,14 @@ const cors = require("cors");
 app.use(cors());
 // Middleware
 app.use(express.json());
+app.use((req, res, next) => {
+  res.setHeader(
+    "Content-Security-Policy",
+    "frame-ancestors *"
+  );
+  next();
+});
+
 // Expose environment variables to the frontend
 app.get("/api/env", (req, res) => {
   res.json({
