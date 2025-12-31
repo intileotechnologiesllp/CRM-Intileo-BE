@@ -992,7 +992,10 @@ exports.getDeals = async (req, res) => {
       // Fetch the saved filter
       const filter = await LeadFilter.findByPk(filterId);
       if (!filter) {
-        return res.status(404).json({ message: "Filter not found." });
+        return res.status(404).json({ 
+          statusCode: 404,
+          message: "Filter not found." 
+        });
       }
 
       console.log("Found filter:", filter.filterName);
@@ -1782,6 +1785,7 @@ exports.getDeals = async (req, res) => {
     // }
 
     res.status(200).json({
+      statusCode: 200,
       message: "Deals fetched successfully",
       totalDeals: total,
       totalPages: Math.ceil(total / limit),
@@ -1798,6 +1802,7 @@ exports.getDeals = async (req, res) => {
     console.error("❌ Error stack:", error.stack);
     console.error("❌ Error message:", error.message);
     res.status(500).json({ 
+      statusCode: 500,
       message: "Internal server error",
       error: process.env.NODE_ENV === 'development' ? error.message : undefined
     });
