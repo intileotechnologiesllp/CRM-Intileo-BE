@@ -79,19 +79,7 @@ const http = require('http');
 // const { initRabbitMQ } = require("./services/rabbitmqService");
 const app = express();
 const server = http.createServer(app); // Create HTTP server for Socket.IO
-// 🔐 Allow embedding in iframe (for CRM webforms)
-app.use((req, res, next) => {
-  // Remove legacy iframe blocking
-  res.removeHeader('X-Frame-Options');
 
-  // Allow iframe embedding from any domain (for embed forms)
-  res.setHeader(
-    'Content-Security-Policy',
-    'frame-ancestors *'
-  );
-
-  next();
-});
 require("./utils/cronJob.js");
 // REMOVED: Email queue workers are now handled by dedicated PM2 processes
 // require("./utils/emailQueueWorker");
@@ -104,14 +92,28 @@ console.log(
   "........//.....//"
 );
 const cors = require("cors");
-app.use(cors());
+// Configure CORS to allow credentials and embedding
+app.use(cors({
+  origin: '*', // Allow all origins for embedded forms
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization']
+}));
+
 // Middleware
 app.use(express.json());
+
+// 🔐 Allow embedding in iframe (for CRM webforms) - MUST BE AFTER CORS
 app.use((req, res, next) => {
-  res.setHeader(
-    "Content-Security-Policy",
-    "frame-ancestors *"
-  );
+  // Remove X-Frame-Options to allow iframe embedding
+  res.removeHeader('X-Frame-Options');
+  
+  // Allow iframe embedding from any domain
+  res.setHeader('Content-Security-Policy', 'frame-ancestors *');
+  
+  // Additional headers for iframe compatibility
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  
   next();
 });
 
