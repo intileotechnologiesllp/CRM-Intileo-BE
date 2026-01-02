@@ -93,39 +93,47 @@ exports.getUserLinks = async (req, res) => {
  */
 exports.getLinkById = async (req, res) => {
   try {
-    // const masterUserID = req.adminId || req.user?.id;
-    // if (!masterUserID) {
-    //   return res.status(401).json({ message: "Unauthorized" });
-    // }
 
     const { id } = req.params;
-    const link = await SchedulingLink.findOne(
-      { uniqueToken: id },
-      {
-        include: [
-          {
-            model: MasterUser,
-            as: "owner",
-            attributes: ["masterUserID", "name", "email"],
-          },
-        ],
-      }
-    );
 
-    // if (!link || link.masterUserID !== masterUserID) {
-    //   return res.status(404).json({ message: "Scheduling link not found" });
-    // }
+    const link = await SchedulingLink.findOne({
+      where: { uniqueToken: id },
+      include: [
+        {
+          model: MasterUser,
+          as: "owner",
+          attributes: ["masterUserID", "name", "email"],
+        },
+      ],
+    });
+
+    if (!link) {
+      return res.status(404).json({
+        message: "Scheduling link not found",
+      });
+    }
+
+    // Parse working hours safely
+    let workingHours;
+    try {
+      workingHours =
+        typeof link.workingHours === "string"
+          ? JSON.parse(link.workingHours)
+          : link.workingHours;
+    } catch (err) {
+      return res.status(500).json({
+        message: "Invalid working hours format",
+      });
+    }
 
     const bookingUrl = `${
       process.env.FRONTEND_URL || "http://localhost:3000"
     }/book/${link.uniqueToken}`;
 
     res.json({
-      // link: {
-      //   ...link.toJSON(),
-      //   bookingUrl,
-      // },
-      dates: JSON.parse(JSON.parse(link.workingHours))
+      bookingUrl,
+      owner: link.owner,
+      dates: JSON.parse(workingHours),
     });
   } catch (error) {
     console.error("Error fetching scheduling link:", error);
@@ -434,15 +442,17 @@ exports.bookGoogleMeet = async (req, res) => {
   }
 };
 
-exports.getTimeSlots = async (req, res) =>{
-  try{
+exports.getTimeSlots = async (req, res) => {
+  try {
     const { id, date } = req.query;
 
-    const availableSlots = await SchedulingLink.findOne({ where: { uniqueToken: id } });  
+    const availableSlots = await SchedulingLink.findOne({
+      where: { uniqueToken: id },
+    });
 
     // console
     const workingHours = await JSON.parse(availableSlots.workingHours);
-    
+
     const works = JSON.parse(workingHours);
 
     const slots = await works[date];
@@ -450,11 +460,11 @@ exports.getTimeSlots = async (req, res) =>{
       message: "Time slots retrieved successfully",
       slots: slots,
     });
-  }catch(error){
+  } catch (error) {
     console.error("Error getting time slots:", error);
     res.status(500).json({
       message: "Failed to get time slots",
       error: error.message,
     });
   }
-}
+};
