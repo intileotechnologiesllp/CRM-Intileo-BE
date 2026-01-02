@@ -21,10 +21,18 @@ exports.signIn = async (req, res) => {
 
   const locationInfo = systemInfo?.approximateLocation
   try {
+    // Check if the user exists
+    const user = await MasterUser.findOne({ where: { email } });
 
-  const result = await DatabaseConnectionManager.verifyUserInDatabase(email, password);
-    
-  const { user, creator, clientConfig } = result;
+    if (!user) {
+      await logAuditTrail(
+        PROGRAMS.AUTHENTICATION,
+        "SIGN_IN",
+        "Invalid email",
+        null
+      );
+      return res.status(404).json({ message: "User not found" });
+    }
 
     // Verify the password
     const isPasswordValid = await bcrypt.compare(password, user.password);
@@ -36,9 +44,32 @@ exports.signIn = async (req, res) => {
         "Invalid password",
         user.masterUserID
       );
-      return res.status(401).json({ message: "Invalid password" });
+      return res.status(401).json({ statusCode: 401, message: "Invalid password" });
     }
 
+    // Check if 2FA is enabled
+    if (user.twoFactorEnabled) {
+      await logAuditTrail(
+        PROGRAMS.AUTHENTICATION,
+        "SIGN_IN_2FA_REQUIRED",
+        "Password verified, awaiting 2FA",
+        user.masterUserID
+      );
+      
+      return res.status(200).json({
+        message: "2FA verification required",
+        requiresTwoFactor: true,
+        userId: user.masterUserID,
+        email: user.email,
+        sessionData: {
+          systemInfo,
+          device,
+          longitude,
+          latitude,
+          ipAddress
+        }
+      });
+    }
     // Get the current UTC time
     const loginTimeUTC = new Date();
 
@@ -181,6 +212,7 @@ exports.signIn = async (req, res) => {
 
     // Return the response with totalSessionDuration and user groups
     res.status(200).json({
+      statusCode: 200,
       message: `${
         user.loginType === "admin" ? "Admin" : "General User"
       } sign-in successful`,
@@ -217,7 +249,7 @@ exports.signIn = async (req, res) => {
       error.message || "Internal server error"
     );
 
-    res.status(500).json({ message: "Internal server error" });
+    res.status(500).json({ statusCode: 500, message: "Internal server error" });
   }
 };
 

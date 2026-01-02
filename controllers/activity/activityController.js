@@ -346,7 +346,10 @@ exports.getActivities = async (req, res) => {
     if (filterId) {
       const filter = await LeadFilter.findByPk(filterId);
       if (!filter) {
-        return res.status(404).json({ message: "Filter not found." });
+        return res.status(404).json({ 
+          statusCode: 404,
+          message: "Filter not found." 
+        });
       }
       const filterConfig =
         typeof filter.filterConfig === "string"
@@ -691,6 +694,7 @@ exports.getActivities = async (req, res) => {
     if (hasProductFilters && productFilteredActivityIds.length === 1 && productFilteredActivityIds[0] === -1) {
       console.log("[DEBUG] Product filters resulted in no matches - returning empty result");
       return res.status(200).json({
+        statusCode: 200,
         total: 0,
         totalPages: 0,
         currentPage: parseInt(page),
@@ -1168,6 +1172,7 @@ exports.getActivities = async (req, res) => {
 
     // Calculate overdue and upcoming counts when dateFilter is "To-do"
     let responseData = {
+      statusCode: 200,
       total,
       totalPages: Math.ceil(total / limit),
       currentPage: parseInt(page),
@@ -1253,7 +1258,10 @@ exports.getActivities = async (req, res) => {
     res.status(200).json(responseData);
   } catch (error) {
     console.error("Error fetching activities:", error);
-    res.status(500).json({ message: "Internal server error" });
+    res.status(500).json({ 
+      statusCode: 500,
+      message: "Internal server error" 
+    });
   }
 };
 

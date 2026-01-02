@@ -11,6 +11,7 @@ const Designation = require("./models/admin/masters/designationModel"); // Impor
 const Department = require("./models/admin/masters/departmentModel"); // Import the Department model
 const Label = require("./models/admin/masters/labelModel"); // Import Label model
 const adminRoutes = require("./routes/auth/adminRoutes"); // Import admin routes
+const twoFactorRoutes = require("./routes/auth/twoFactorRoutes"); // Import 2FA routes
 const designationRoutes = require("./routes/admin/masters/designation/designationRoutes");
 const departmentRoutes = require("./routes/admin/masters/department/departmentRoutes");
 const organizationRoutes = require("./routes/admin/masters/organization/organizationRoutes"); // Import organization routes
@@ -67,14 +68,30 @@ const userInterfacePreferencesRoutes = require('./routes/userInterfacePreference
 const googleDriveRoutes  = require('./routes/google-drive/googledrive.js'); // Import Google Drive routes
 const meetingRoutes = require('./routes/meeting/meetingRoutes.js'); // Import meeting routes
 const schedulingLinkRoutes = require('./routes/meeting/schedulingLinkRoutes.js'); // Import scheduling link routes
+const mergeRoutes = require('./routes/merge/mergeRoute.js'); // Import scheduling link routes
+const webFormRoutes = require('./routes/webForm/webFormRoutes.js'); // Import web form routes
+const webFormPublicRoutes = require('./routes/webForm/webFormPublicRoutes.js'); // Import web form public routes
 
 const { loadPrograms } = require("./utils/programCache");
 const imapIdleManager = require('./services/imapIdleManager'); // IMAP IDLE for real-time sync
-const { initializeSocket } = require('./config/socket'); // Socket.IO for real-time notifications
+const { initializeSocket, getIO } = require('./config/socket'); // Socket.IO for real-time notifications
 const http = require('http');
 // const { initRabbitMQ } = require("./services/rabbitmqService");
 const app = express();
 const server = http.createServer(app); // Create HTTP server for Socket.IO
+// // 🔐 Allow embedding in iframe (for CRM webforms)
+// app.use((req, res, next) => {
+//   // Remove legacy iframe blocking
+//   res.removeHeader('X-Frame-Options');
+
+//   // Allow iframe embedding from any domain (for embed forms)
+//   res.setHeader(
+//     'Content-Security-Policy',
+//     'frame-ancestors *'
+//   );
+
+//   next();
+// });
 require("./utils/cronJob.js");
 // REMOVED: Email queue workers are now handled by dedicated PM2 processes
 // require("./utils/emailQueueWorker");
@@ -90,6 +107,16 @@ const cors = require("cors");
 app.use(cors());
 // Middleware
 app.use(express.json());
+
+// 🔐 ONLY allow iframe embedding for /embed-form routes (not all routes)
+app.use("/embed-form", (req, res, next) => {
+  // Remove X-Frame-Options to allow iframe embedding
+  res.removeHeader('X-Frame-Options');
+  // Allow iframe embedding from any domain for embed forms
+  res.setHeader('Content-Security-Policy', 'frame-ancestors *');
+  next();
+});
+
 // Expose environment variables to the frontend
 app.get("/api/env", (req, res) => {
   res.json({
@@ -99,6 +126,20 @@ app.get("/api/env", (req, res) => {
 
 // await loadPrograms(); // Call this once at startup
 // Routes
+
+// Add debugging middleware for 2FA routes
+app.use("/api/auth/2fa", (req, res, next) => {
+  console.log('🔍 [MIDDLEWARE] 2FA Route intercepted!');
+  console.log('📍 Method:', req.method);
+  console.log('📍 URL:', req.url);
+  console.log('📍 Path:', req.path);
+  console.log('📍 Original URL:', req.originalUrl);
+  console.log('📍 Base URL:', req.baseUrl);
+  console.log('📍 Headers:', JSON.stringify(req.headers, null, 2));
+  next(); // Continue to actual routes
+});
+
+app.use("/api/auth/2fa", twoFactorRoutes); // Register 2FA routes FIRST
 app.use("/api", adminRoutes);
 app.use("/api/designations", designationRoutes);
 app.use("/api/departments", departmentRoutes);
@@ -160,6 +201,10 @@ app.use('/api/user-sessions', userSessionRoutes); // Register user session/devic
 app.use('/api/drive', googleDriveRoutes); // Register Google Drive routes
 app.use('/api/meetings', meetingRoutes); // Register meeting routes
 app.use('/api/meetings/scheduling-links', schedulingLinkRoutes); // Register scheduling link routes
+app.use('/api/webforms', webFormRoutes); // Register web form admin routes
+app.use('/api/public/webforms', webFormPublicRoutes); // Register web form public routes (no auth)
+app.use('/embed-form', webFormPublicRoutes); // Register embed form route (for iframe embedding)
+app.use('/api/merge', mergeRoutes); // Register merge routes
 
 // Public scheduling link routes (must be registered separately for public access)
 const schedulingLinkController = require('./controllers/meeting/schedulingLinkController');
@@ -170,6 +215,25 @@ app.post('/api/meetings/scheduling/:token/book', schedulingLinkController.bookMe
 // Notification routes (will be added next)
 const notificationRoutes = require('./routes/notification/notificationRoutes.js'); // Import notification routes
 app.use('/api/notifications', notificationRoutes); // Register notification routes
+
+// Debug route to emit a notification event to all connected clients
+// Useful for testing toast delivery without creating DB records
+app.post('/debug/emit-all', (req, res) => {
+  try {
+    const payload = req.body && Object.keys(req.body).length
+      ? req.body
+      : { notification: { title: 'debug', message: 'hi' }, unreadCount: 1 };
+
+    // Get Socket.IO instance (throws if not initialized)
+    const io = getIO();
+    io.emit('new_notification', payload);
+    console.log("📤 [Debug] Emitted 'new_notification' to all connected clients", payload);
+    res.json({ ok: true });
+  } catch (error) {
+    console.error('[Debug] Failed to emit new_notification to all:', error);
+    res.status(500).json({ ok: false, error: error.message });
+  }
+});
 
 app.get("/track/open/:tempMessageId", async (req, res) => {
   const { tempMessageId } = req.params;
@@ -207,6 +271,7 @@ app.get("/track/click", async (req, res) => {
     res.status(500).send("Internal Server Error");
   }
 });
+
 
 // (async () => {
 //   try {

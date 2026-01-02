@@ -3133,7 +3133,10 @@ exports.createPerson = async (req, res) => {
     if (!req.body || !req.body.contactPerson) {
       return res
         .status(400)
-        .json({ message: "Contact person is required." });
+        .json({ 
+          statusCode: 400,
+          message: "Contact person is required." 
+        });
     }
     
     const {
@@ -3164,6 +3167,7 @@ exports.createPerson = async (req, res) => {
     // Require at least one email
     if (emailList.length === 0) {
       return res.status(400).json({ 
+        statusCode: 400,
         message: "At least one email address is required." 
       });
     }
@@ -3188,6 +3192,7 @@ exports.createPerson = async (req, res) => {
       
       if (!emailRegex.test(emailToValidate) || emailToValidate.length > 254) {
         return res.status(400).json({
+          statusCode: 400,
           message: `Invalid email format: ${emailToValidate}. Please provide a valid email address.`,
         });
       }
@@ -3201,6 +3206,7 @@ exports.createPerson = async (req, res) => {
       
       if (!phoneRegex.test(phoneToValidate.trim())) {
         return res.status(400).json({
+          statusCode: 400,
           message: `Invalid phone number format: ${phoneToValidate}. Phone number should contain only digits (7-15 digits) with optional + for country code. No spaces, dashes, or other characters allowed.`,
         });
       }
@@ -3295,6 +3301,7 @@ exports.createPerson = async (req, res) => {
     };
 
     const response = {
+      statusCode: 201,
       message: activityId 
         ? "Person created and linked to activity successfully" 
         : "Person created successfully",
@@ -3320,6 +3327,7 @@ exports.createPerson = async (req, res) => {
 
       if (field === "email") {
         return res.status(409).json({
+          statusCode: 409,
           message: `A person with email address "${value}" already exists.`,
           field: "email",
           value: value,
@@ -3327,6 +3335,7 @@ exports.createPerson = async (req, res) => {
       }
 
       return res.status(409).json({
+        statusCode: 409,
         message: `A person with this ${field} already exists.`,
         field: field,
         value: value,
@@ -3335,7 +3344,11 @@ exports.createPerson = async (req, res) => {
 
     res
       .status(500)
-      .json({ message: "Internal server error", error: error.message });
+      .json({ 
+        statusCode: 500,
+        message: "Internal server error", 
+        error: error.message 
+      });
   }
 };
 
@@ -3399,7 +3412,10 @@ exports.createOrganization = async (req, res) => {
     if (!req.body || !req.body.organization) {
       return res
         .status(400)
-        .json({ message: "Organization name is required." });
+        .json({ 
+          statusCode: 400,
+          message: "Organization name is required." 
+        });
     }
     const { 
       organization, 
@@ -3415,6 +3431,7 @@ exports.createOrganization = async (req, res) => {
     const existingOrg = await LeadOrganization.findOne({ where: { organization } });
     if (existingOrg) {
       return res.status(409).json({
+        statusCode: 409,
         message: "Organization already exists.",
         organization: existingOrg,
       });
@@ -3484,6 +3501,7 @@ exports.createOrganization = async (req, res) => {
     }
 
     const response = {
+      statusCode: 201,
       message: activityId 
         ? "Organization created and linked to activity successfully" 
         : "Organization created successfully",
@@ -3501,7 +3519,10 @@ exports.createOrganization = async (req, res) => {
     res.status(201).json(response);
   } catch (error) {
     console.error("Error creating organization:", error);
-    res.status(500).json({ message: "Internal server error" });
+    res.status(500).json({ 
+      statusCode: 500,
+      message: "Internal server error" 
+    });
   }
 };
 

@@ -247,6 +247,7 @@ exports.createLead = async (req, res) => {
     });
     if (existingContactOrgTitleLead) {
       return res.status(409).json({
+        statusCode: 409,
         message:
           "A lead with this exact combination of contact person, organization, and title already exists. Please use a different title for a new project with the same contact.",
         existingLeadId: existingContactOrgTitleLead.leadId,
@@ -271,6 +272,7 @@ exports.createLead = async (req, res) => {
         null
       );
       return res.status(403).json({
+        statusCode: 403,
         message: "Access denied. You do not have permission to create leads.",
       });
     }
@@ -317,6 +319,7 @@ exports.createLead = async (req, res) => {
             null
           );
           return res.status(403).json({
+            statusCode: 403,
             message:
               "Access denied. Your visibility group does not have permission to create leads.",
           });
@@ -345,7 +348,10 @@ exports.createLead = async (req, res) => {
     if (organization && organization.trim() !== "" && (!orgRecord || !orgRecord.leadOrganizationId)) {
       return res
         .status(500)
-        .json({ message: "Failed to create/find organization." });
+        .json({ 
+          statusCode: 500,
+          message: "Failed to create/find organization." 
+        });
     }
     
     // 2. Find or create Person (linked to organization if available)
@@ -649,6 +655,7 @@ exports.createLead = async (req, res) => {
     };
 
     const response = {
+      statusCode: 201,
       message: activityId 
         ? "Lead created and linked to activity successfully" 
         : "Lead created successfully",
@@ -676,7 +683,10 @@ exports.createLead = async (req, res) => {
       "Error creating lead: " + error.message, // Error description
       null
     );
-    res.status(500).json(error);
+    res.status(500).json({
+      statusCode: 500,
+      error: error.message
+    });
   }
 };
 
@@ -852,6 +862,7 @@ exports.getLeads = async (req, res) => {
       } else {
         console.log("→ Favorite record not found or not accessible");
         return res.status(404).json({
+          statusCode: 404,
           message: "Favorite not found or you don't have access to it."
         });
       }
@@ -882,6 +893,7 @@ exports.getLeads = async (req, res) => {
       } else {
         console.log("→ Favorite filter not found or not accessible");
         return res.status(404).json({
+          statusCode: 404,
           message: "Favorite filter not found or you don't have access to it."
         });
       }
@@ -1130,7 +1142,10 @@ exports.getLeads = async (req, res) => {
       // Fetch the saved filter
       const filter = await LeadFilter.findByPk(effectiveFilterId);
       if (!filter) {
-        return res.status(404).json({ message: "Filter not found." });
+        return res.status(404).json({ 
+          statusCode: 404,
+          message: "Filter not found." 
+        });
       }
 
       // console.log("Found filter:", filter.filterName);
@@ -2931,6 +2946,7 @@ exports.getLeads = async (req, res) => {
     // }
 
     res.status(200).json({
+      statusCode: 200,
       message: "Leads fetched successfully",
       totalRecords: leads.count,
       totalLeadCount, // Total unconverted leads count  
@@ -2955,7 +2971,10 @@ exports.getLeads = async (req, res) => {
       null
     );
     console.error("Error fetching leads:", error);
-    res.status(500).json({ message: "Internal server error" });
+    res.status(500).json({ 
+      statusCode: 500,
+      message: "Internal server error" 
+    });
   }
 };
 
@@ -5069,6 +5088,31 @@ exports.getAllLeadDetails = async (req, res) => {
       });
     }
 
+    // Build "focus" array: only upcoming or overdue activities
+    // Each item will include a focusCategory ('upcoming' or 'overdue'),
+    // minutesUntil (positive for upcoming, negative for overdue) and isCompleted flag.
+    const now = new Date();
+    const focus = (activities || [])
+      .filter((a) => a && a.startDateTime) // only activities with a start date
+      .map((a) => {
+        const start = new Date(a.startDateTime);
+        const isCompleted =
+          a.isCompleted === true ||
+          (a.status && ["completed", "done", "finished"].includes(String(a.status).toLowerCase()));
+        const minutesUntil = Math.round((start.getTime() - now.getTime()) / 60000);
+        const focusCategory = isCompleted ? null : start < now ? "overdue" : "upcoming";
+        return {
+          ...a,
+          focusCategory,
+          minutesUntil,
+          isCompleted,
+        };
+      })
+      .filter((f) => f.focusCategory !== null)
+      // sort by soonest first (overdue will have negative minutesUntil so order works)
+      .sort((x, y) => x.minutesUntil - y.minutesUntil);
+
+
     // Fetch all active custom fields for leads
     const allCustomFields = await CustomField.findAll({
       where: {
@@ -5196,6 +5240,7 @@ exports.getAllLeadDetails = async (req, res) => {
       customFields,
       notes: notesWithCreator,
       emails: relatedEmails,
+      focus,
       activities,
       person: person ? [person] : [], // Person array (single person if exists)
       leadOrganization: leadOrganization ? [leadOrganization] : [], // Lead organization array (single organization if exists)
