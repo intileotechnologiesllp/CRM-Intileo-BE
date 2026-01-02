@@ -132,6 +132,7 @@ exports.getLinkById = async (req, res) => {
     res.json({
       bookingUrl,
       owner: link.owner,
+      ...link.toJSON(),
       dates: JSON.parse(JSON.parse(link.workingHours)),
     });
   } catch (error) {
