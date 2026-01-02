@@ -1018,10 +1018,6 @@ exports.getDeals = async (req, res) => {
       let dealProductWhere = {};
       let productWhere = {};
 
-      console.log("Available deal fields:", dealFields);
-      console.log("Available dealDetails fields:", dealDetailsFields);
-      console.log("Available dealProduct fields:", dealProductFields);
-      console.log("Available product fields:", productFields);
 
       // Process 'all' conditions (AND logic)
       if (all.length > 0) {
@@ -1033,7 +1029,6 @@ exports.getDeals = async (req, res) => {
         productWhere[Op.and] = [];
 
         all.forEach((cond) => {
-          console.log("Processing condition:", cond);
 
           if (dealFields.includes(cond.field)) {
             console.log(`Field '${cond.field}' found in Deal fields`);

@@ -4458,6 +4458,7 @@ exports.getNonAdminMasterUserNames = async (req, res) => {
         null
       );
       return res.status(403).json({
+        statusCode: 403,
         message: "Access denied. Invalid user role.",
       });
     }
@@ -4471,6 +4472,7 @@ exports.getNonAdminMasterUserNames = async (req, res) => {
     );
 
     res.status(200).json({
+      statusCode: 200,
       users,
       message: `Found ${users.length} users`,
       userRole: req.role,
@@ -4484,7 +4486,10 @@ exports.getNonAdminMasterUserNames = async (req, res) => {
       null
     );
     console.error("Error fetching master users:", error);
-    res.status(500).json({ message: "Internal server error" });
+    res.status(500).json({ 
+      statusCode: 500,
+      message: "Internal server error" 
+    });
   }
 };
 exports.getLeadsByMasterUser = async (req, res) => {
