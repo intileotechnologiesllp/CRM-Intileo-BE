@@ -380,6 +380,21 @@ exports.createAdmin = async (req, res) => {
 exports.forgotPassword = async (req, res) => {
   const { email } = req.body;
 
+  // Validate email field is provided
+  if (!email || email.trim() === "") {
+    await logAuditTrail(
+      PROGRAMS.FORGOT_PASSWORD,
+      "forgot_password",
+      null,
+      "Email field is required but not provided"
+    );
+    return res.status(400).json({ 
+      statusCode: 400,
+      message: "Email is required",
+      error: "Please provide your email address to reset your password"
+    });
+  }
+
   try {
     let user = await Admin.findOne({ where: { email } });
     let loginType = "admin";
@@ -396,7 +411,10 @@ exports.forgotPassword = async (req, res) => {
         null,
         "User not found"
       );
-      return res.status(404).json({ message: "User not found" });
+      return res.status(404).json({ 
+        statusCode: 404,
+        message: "User not found" 
+      });
     }
 
     // Generate OTP
@@ -426,7 +444,10 @@ exports.forgotPassword = async (req, res) => {
 
     await transporter.sendMail(mailOptions);
 
-    res.status(200).json({ message: "OTP sent to your email address." });
+    res.status(200).json({ 
+      statusCode: 200,
+      message: "OTP sent to your email address." 
+    });
   } catch (error) {
     console.error("Error during forgot password:", error);
     await logAuditTrail(
@@ -435,7 +456,10 @@ exports.forgotPassword = async (req, res) => {
       null,
       error.message || "Internal server error"
     );
-    res.status(500).json({ message: "Internal server error" });
+    res.status(500).json({ 
+      statusCode: 500,
+      message: "Internal server error" 
+    });
   }
 };
 

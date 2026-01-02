@@ -129,13 +129,7 @@ app.get("/api/env", (req, res) => {
 
 // Add debugging middleware for 2FA routes
 app.use("/api/auth/2fa", (req, res, next) => {
-  console.log('🔍 [MIDDLEWARE] 2FA Route intercepted!');
-  console.log('📍 Method:', req.method);
-  console.log('📍 URL:', req.url);
-  console.log('📍 Path:', req.path);
-  console.log('📍 Original URL:', req.originalUrl);
-  console.log('📍 Base URL:', req.baseUrl);
-  console.log('📍 Headers:', JSON.stringify(req.headers, null, 2));
+ 
   next(); // Continue to actual routes
 });
 

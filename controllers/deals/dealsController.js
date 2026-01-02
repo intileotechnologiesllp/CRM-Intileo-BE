@@ -1731,6 +1731,25 @@ exports.getDeals = async (req, res) => {
     }));
     summary.sort((a, b) => b.totalValue - a.totalValue);
 
+    // Calculate deal status counts
+    let dealWonCount = 0;
+    let dealLostCount = 0;
+    let dealClosedCount = 0;
+
+    summaryDeals.forEach((deal) => {
+      const status = (deal.status || '').toLowerCase().trim();
+      
+      if (status === 'won') {
+        dealWonCount++;
+        dealClosedCount++; // Won deals are also closed deals
+      } else if (status === 'lost') {
+        dealLostCount++;
+        dealClosedCount++; // Lost deals are also closed deals
+      }
+    });
+
+    console.log(`📊 Deal Status Counts - Total: ${totalDealCount}, Won: ${dealWonCount}, Lost: ${dealLostCount}, Closed: ${dealClosedCount}`);
+
     // const filterDeals = dealsWithCustomFields.filter(deal => deal?.visibilityGroupId == groupId);
     const findGroup = await GroupVisibility.findOne({
       where:{
@@ -1795,6 +1814,9 @@ exports.getDeals = async (req, res) => {
       totalValue,
       totalWeightedValue,
       totalDealCount,
+      dealWonCount,
+      dealLostCount,
+      dealClosedCount,
       summary,
     });
   } catch (error) {
@@ -3704,6 +3726,35 @@ exports.changeDealOwner = async (req, res) => {
     // Update the deal owner
     await deal.update({ ownerId: newOwnerId });
 
+    // 🔔 Send Notification - Deal Assigned to New Owner
+    try {
+      console.log('🔔 Sending deal ownership change notification...');
+      
+      // Get the user who is changing the owner
+      const changedByUser = await MasterUser.findByPk(req.adminId, {
+        attributes: ['masterUserID', 'name']
+      });
+      
+      // Trigger deal assignment notification
+      await NotificationTriggers.dealAssigned(
+        {
+          dealId: deal.dealId,
+          dealTitle: deal.title,
+          dealValue: deal.value
+        },
+        newOwnerId,
+        {
+          userId: req.adminId,
+          name: changedByUser ? changedByUser.name : 'Unknown User'
+        }
+      );
+      
+      console.log('🔔 Deal ownership change notification sent successfully! ✅');
+    } catch (notifError) {
+      console.error('🔔 ❌ NOTIFICATION ERROR:', notifError);
+      console.error('🔔 Error message:', notifError.message);
+    }
+
     // Log the ownership change
     await historyLogger(
       getProgramId("DEALS"),
@@ -3720,6 +3771,7 @@ exports.changeDealOwner = async (req, res) => {
     );
 
     res.status(200).json({
+      statusCode: 200,
       message: "Deal owner updated successfully",
       data: {
         dealId: parseInt(dealId),
@@ -3742,6 +3794,7 @@ exports.changeDealOwner = async (req, res) => {
     );
 
     res.status(500).json({
+      statusCode: 500,
       message: "Internal server error",
       error: error.message
     });
@@ -3752,15 +3805,6 @@ exports.updateDeal = async (req, res) => {
   try {
     const { dealId } = req.params;
 
-    // Debug: Log the complete request body
-    console.log("=== UPDATE DEAL REQUEST DEBUG ===");
-    console.log("dealId:", dealId);
-    console.log("req.body:", JSON.stringify(req.body, null, 2));
-    console.log("req.body type:", typeof req.body);
-    console.log("req.body keys:", Object.keys(req.body));
-    console.log("req.adminId:", req.adminId);
-    console.log("req.role:", req.role);
-    console.log("req.user:", req.user);
 
     const updateFields = { ...req.body };
 
