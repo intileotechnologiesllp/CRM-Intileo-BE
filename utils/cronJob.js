@@ -454,10 +454,10 @@ function parseReceivers(receiversString) {
 }
 
 // Schedule campaign cron job to run every minute
-cron.schedule("* * * * *", async () => {
-  try {
-    await queueCampaignJobs();
-  } catch (error) {
-    console.error("Error running campaign cron job:", error);
-  }
-});
+// cron.schedule("* * * * *", async () => {
+//   try {
+//     await queueCampaignJobs();
+//   } catch (error) {
+//     console.error("Error running campaign cron job:", error);
+//   }
+// });
