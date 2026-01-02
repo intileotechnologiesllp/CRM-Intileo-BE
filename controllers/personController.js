@@ -1,5 +1,6 @@
 // Bulk update persons with custom fields
 exports.bulkUpdatePersons = async (req, res) => {
+  const {  MasterUser, AuditTrail, History, LeadPerson, CustomField, CustomFieldValue,  } = req.models;
   const { updates } = req.body; // [{ personId, customFields }]
   const masterUserID = req.adminId;
   const entityType = "person";
@@ -140,6 +141,7 @@ const historyLogger = require("../utils/historyLogger").logHistory;
 
 // Create a new person with custom fields
 exports.createPerson = async (req, res) => {
+  const {  MasterUser, AuditTrail, History, LeadPerson, CustomField, CustomFieldValue,  } = req.models;
   const { customFields } = req.body;
   const masterUserID = req.adminId;
   const entityType = "person";
@@ -313,6 +315,7 @@ exports.createPerson = async (req, res) => {
 
       // Log the creation
       await historyLogger(
+        History,
         PROGRAMS.LEAD_MANAGEMENT,
         "PERSON_CREATION",
         masterUserID,
@@ -365,6 +368,7 @@ exports.createPerson = async (req, res) => {
 
 // Get all persons with custom fields
 exports.getAllPersons = async (req, res) => {
+  const {  MasterUser, AuditTrail, History, LeadPerson, CustomField, CustomFieldValue,  } = req.models;
   const masterUserID = req.adminId;
   const entityType = "person";
 
@@ -442,6 +446,7 @@ exports.getAllPersons = async (req, res) => {
 
 // Get a specific person with custom fields
 exports.getPersonById = async (req, res) => {
+  const {  MasterUser, AuditTrail, History, LeadPerson, CustomField, CustomFieldValue,  } = req.models;
   const { personId } = req.params;
   const masterUserID = req.adminId;
   const entityType = "person";
@@ -541,6 +546,7 @@ exports.getPersonById = async (req, res) => {
 
 // Update a person with custom fields
 exports.updatePerson = async (req, res) => {
+  const {  MasterUser, AuditTrail, History, LeadPerson, CustomField, CustomFieldValue,  } = req.models;
   const { personId } = req.params;
   const { customFields } = req.body;
   const masterUserID = req.adminId;
@@ -685,6 +691,7 @@ exports.updatePerson = async (req, res) => {
 
       // Log the update
       await historyLogger(
+        History,
         PROGRAMS.LEAD_MANAGEMENT,
         "PERSON_UPDATE",
         masterUserID,
@@ -715,6 +722,7 @@ exports.updatePerson = async (req, res) => {
 
 // Delete a person
 exports.deletePerson = async (req, res) => {
+  const {  MasterUser, AuditTrail, History, LeadPerson, CustomField, CustomFieldValue,  } = req.models;
   const { personId } = req.params;
   const masterUserID = req.adminId;
   const role = req.role;
@@ -769,6 +777,7 @@ exports.deletePerson = async (req, res) => {
 
       // Log the deletion
       await historyLogger(
+        History,
         PROGRAMS.LEAD_MANAGEMENT,
         "PERSON_DELETION",
         masterUserID,

@@ -10,6 +10,7 @@ const NotificationTriggers = require("../services/notification/notificationTrigg
 
 // Create a new deal with custom fields
 exports.createDeal = async (req, res) => {
+  const {  CustomField, CustomFieldValue, AuditTrail, Deal, History } = req.models;
   const { customFields } = req.body;
   const masterUserID = req.adminId;
   const entityType = "deal";
@@ -178,6 +179,7 @@ exports.createDeal = async (req, res) => {
 
       // Log the creation
       await historyLogger(
+        History,
         PROGRAMS.LEAD_MANAGEMENT,
         "DEAL_CREATION",
         masterUserID,
@@ -209,6 +211,7 @@ exports.createDeal = async (req, res) => {
 
 // Get all deals with custom fields
 exports.getAllDeals = async (req, res) => {
+  const {  CustomField, CustomFieldValue, AuditTrail, Deal, History } = req.models;
   const masterUserID = req.adminId;
   const entityType = "deal";
 
@@ -290,6 +293,7 @@ exports.getAllDeals = async (req, res) => {
 
 // Get a specific deal with custom fields
 exports.getDealById = async (req, res) => {
+  const {  CustomField, CustomFieldValue, AuditTrail, Deal, History } = req.models;
   const { dealId } = req.params;
   const masterUserID = req.adminId;
   const entityType = "deal";
@@ -393,6 +397,7 @@ exports.getDealById = async (req, res) => {
 
 // Update a deal with custom fields
 exports.updateDeal = async (req, res) => {
+  const {  CustomField, CustomFieldValue, AuditTrail, Deal, History } = req.models;
   const { dealId } = req.params;
   const { customFields } = req.body;
   const masterUserID = req.adminId;
@@ -572,6 +577,7 @@ exports.updateDeal = async (req, res) => {
 
       // Log the update
       await historyLogger(
+        History,
         PROGRAMS.LEAD_MANAGEMENT,
         "DEAL_UPDATE",
         masterUserID,
@@ -602,6 +608,7 @@ exports.updateDeal = async (req, res) => {
 
 // Delete a deal
 exports.deleteDeal = async (req, res) => {
+  const {  CustomField, CustomFieldValue, AuditTrail, Deal, History } = req.models;
   const { dealId } = req.params;
   const masterUserID = req.adminId;
   const entityType = "deal";
@@ -640,6 +647,7 @@ exports.deleteDeal = async (req, res) => {
 
       // Log the deletion
       await historyLogger(
+        History,
         PROGRAMS.LEAD_MANAGEMENT,
         "DEAL_DELETION",
         masterUserID,

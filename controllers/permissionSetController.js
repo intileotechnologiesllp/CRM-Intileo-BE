@@ -3,9 +3,10 @@ const MasterUser = require("../models/master/masterUserModel");
 const permissionSet = require("../models/permissionsetModel");
 
 exports.createPermissionSet = async (req, res) => {
+  const {  GroupVisibility, MasterUser, AuditTrail, PermissionSet, History, } = req.models;
   const { name, description, permission, groupName } = req.body; // [{ personId, customFields }]
 
-  const findSet = await permissionSet.findOne({
+  const findSet = await PermissionSet.findOne({
     where: {
       name: name?.toLowerCase(),
     },
@@ -17,7 +18,7 @@ exports.createPermissionSet = async (req, res) => {
     });
   }
 
-  await permissionSet.create({
+  await PermissionSet.create({
     name: name,
     description: description,
     permissions: permission,
@@ -27,9 +28,11 @@ exports.createPermissionSet = async (req, res) => {
     message: "permission set create successfully.",
   });
 };
+
 exports.getPermissionSet = async (req, res) => {
+  const {  GroupVisibility, MasterUser, AuditTrail, PermissionSet, History, } = req.models;
   try {
-    const findSet = await permissionSet.findAll({
+    const findSet = await PermissionSet.findAll({
       include: [{ model: MasterUser, as: "pusers" }],
     });
 
@@ -87,10 +90,11 @@ exports.getPermissionSet = async (req, res) => {
 };
 
 exports.updatePermissionSet = async (req, res) => {
+   const {  GroupVisibility, MasterUser, AuditTrail, PermissionSet, History, } = req.models;
   try {
     const { name, permission } = req.body; // [{ personId, customFields }]
 
-    const findSet = await permissionSet.findOne({
+    const findSet = await PermissionSet.findOne({
       where: {
         name: name?.toLowerCase(),
       },
@@ -104,7 +108,7 @@ exports.updatePermissionSet = async (req, res) => {
     }
 
     console.log(permission);
-    await permissionSet.update(
+    await PermissionSet.update(
       {
         permissions: permission,
       },

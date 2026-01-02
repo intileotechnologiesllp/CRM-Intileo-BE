@@ -95,6 +95,7 @@ exports.uploadProductImage = (req, res, next) => {
 
 // Create a new product
 exports.createProduct = async (req, res) => {
+  const { ProductColumn, Product, ProductVariation, DealProduct,  Deal, MasterUser, GroupVisibility} = req.models;
   try {
     const {
       name,
@@ -215,6 +216,7 @@ exports.createProduct = async (req, res) => {
 
 // Get all products with filtering and pagination
 exports.getProducts = async (req, res) => {
+  const { ProductColumn, Product, ProductVariation, DealProduct,  Deal, MasterUser, GroupVisibility} = req.models;
   try {
     const {
       page = 1,
@@ -379,6 +381,7 @@ exports.getProducts = async (req, res) => {
 
 // Get single product by ID
 exports.getProductById = async (req, res) => {
+  const { ProductColumn, Product, ProductVariation, DealProduct,  Deal, MasterUser, GroupVisibility,} = req.models;
   try {
     const { id } = req.params;
 
@@ -507,6 +510,7 @@ exports.getProductById = async (req, res) => {
 
 // Update product
 exports.updateProduct = async (req, res) => {
+  const { ProductColumn, Product, ProductVariation, DealProduct,  Deal, MasterUser, GroupVisibility} = req.models;
   try {
     const { id } = req.params;
     const updateData = req.body;
@@ -619,6 +623,7 @@ exports.updateProduct = async (req, res) => {
 
 // Delete product (soft delete)
 exports.deleteProduct = async (req, res) => {
+  const { ProductColumn, Product, ProductVariation, DealProduct,  Deal, MasterUser, GroupVisibility} = req.models;
   try {
     const { id } = req.params;
 
@@ -650,6 +655,7 @@ exports.deleteProduct = async (req, res) => {
 
 // Get product categories (unique list)
 exports.getCategories = async (req, res) => {
+  const { ProductColumn, Product, ProductVariation, DealProduct,  Deal, MasterUser, GroupVisibility} = req.models;
   try {
     const categories = await Product.findAll({
       attributes: ["category"],
@@ -679,6 +685,7 @@ exports.getCategories = async (req, res) => {
 
 // Add product to deal
 exports.addProductToDeal = async (req, res) => {
+  const { ProductColumn, Product, ProductVariation, DealProduct,  Deal, MasterUser, GroupVisibility} = req.models;
   try {
     console.log("🔵 [ADD PRODUCT TO DEAL] Request received");
     console.log("🔵 Request body:", JSON.stringify(req.body, null, 2));
@@ -810,6 +817,7 @@ exports.addProductToDeal = async (req, res) => {
 
 // Get products for a deal
 exports.getDealProducts = async (req, res) => {
+  const { ProductColumn, Product, ProductVariation, DealProduct,  Deal, MasterUser, GroupVisibility} = req.models;
   try {
     const { dealId } = req.params;
 
@@ -935,6 +943,7 @@ exports.getDealProducts = async (req, res) => {
 
 // Update deal product
 exports.updateDealProduct = async (req, res) => {
+  const { ProductColumn, Product, ProductVariation, DealProduct,  Deal, MasterUser, GroupVisibility} = req.models;
   try {
     const { id } = req.params;
     const updateData = req.body;
@@ -1026,6 +1035,7 @@ exports.updateDealProduct = async (req, res) => {
 
 // Remove product from deal
 exports.removeDealProduct = async (req, res) => {
+  const { ProductColumn, Product, ProductVariation, DealProduct,  Deal, MasterUser, GroupVisibility} = req.models;
   try {
     const { id } = req.params;
 
@@ -1056,6 +1066,7 @@ exports.removeDealProduct = async (req, res) => {
 
 // Update deal-level tax settings (applies to all products in deal)
 exports.updateDealTaxSettings = async (req, res) => {
+  const { ProductColumn, Product, ProductVariation, DealProduct,  Deal, MasterUser, GroupVisibility} = req.models;
   try {
     const { dealId } = req.params;
     const { taxType, taxPercentage } = req.body;
@@ -1109,6 +1120,7 @@ exports.updateDealTaxSettings = async (req, res) => {
 
 // Search products (for autocomplete in deal product form)
 exports.searchProducts = async (req, res) => {
+  const { ProductColumn, Product, ProductVariation, DealProduct,  Deal, MasterUser, GroupVisibility} = req.models;
   try {
     const { query, limit = 10 } = req.query;
 
@@ -1155,6 +1167,7 @@ exports.searchProducts = async (req, res) => {
 
 // Delete product variation (soft delete)
 exports.deleteProductVariation = async (req, res) => {
+  const { ProductColumn, Product, ProductVariation, DealProduct,  Deal, MasterUser, GroupVisibility} = req.models;
   try {
     const { variationId } = req.params;
     const ownerId = req.adminId;
@@ -1199,6 +1212,7 @@ exports.deleteProductVariation = async (req, res) => {
 };
 
 exports.getProductsFields = async (req, res) => {
+  const { ProductColumn, Product, ProductVariation, DealProduct,  Deal, MasterUser, GroupVisibility} = req.models;
   try {
     // Fetch data from ActivityColumnPreference table
     const pref = await ProductColumn.findOne();
@@ -1243,6 +1257,7 @@ exports.getProductsFields = async (req, res) => {
 };
 
 exports.updateProductColumnChecks = async (req, res) => {
+  const { ProductColumn, Product, ProductVariation, DealProduct,  Deal, MasterUser, GroupVisibility} = req.models;
   // Expecting: { columns: [ { key: "columnName", check: true/false }, ... ] }
   const { columns } = req.body;
 

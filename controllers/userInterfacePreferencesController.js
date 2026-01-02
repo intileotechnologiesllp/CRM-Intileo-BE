@@ -2,6 +2,7 @@ const UserInterfacePreference = require("../models/userInterfacePreferences");
 
 // Get user interface preferences
 exports.getInterfacePreferences = async (req, res) => {
+   const {  MasterUser, AuditTrail, History, UserInterfacePreference,  } = req.models;
   try {
     const masterUserID = req.adminId;
 
@@ -53,6 +54,7 @@ exports.getInterfacePreferences = async (req, res) => {
 
 // Update user interface preferences
 exports.updateInterfacePreferences = async (req, res) => {
+  const {  MasterUser, AuditTrail, History, UserInterfacePreference,  } = req.models;
   try {
     const masterUserID = req.adminId;
     const {
@@ -132,6 +134,7 @@ exports.updateInterfacePreferences = async (req, res) => {
 
 // Reset user interface preferences to default
 exports.resetInterfacePreferences = async (req, res) => {
+  const {  MasterUser, AuditTrail, History, UserInterfacePreference,  } = req.models;
   try {
     const masterUserID = req.adminId;
 

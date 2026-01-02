@@ -8,6 +8,7 @@ const moment = require("moment-timezone");
  * @access Private
  */
 exports.getActiveSessions = async (req, res) => {
+   const { LoginHistory, } = req.models;
   try {
     const userId = req.adminId || req.user?.id;
     const currentSessionId = req.sessionId; // From JWT token
@@ -65,6 +66,7 @@ exports.getActiveSessions = async (req, res) => {
  * @access Private
  */
 exports.getSessionHistory = async (req, res) => {
+   const { LoginHistory, } = req.models;
   try {
     const userId = req.adminId || req.user?.id;
     const { page = 1, limit = 50 } = req.query;
@@ -143,6 +145,7 @@ exports.getSessionHistory = async (req, res) => {
  * @access Private
  */
 exports.logoutSpecificSession = async (req, res) => {
+  const { LoginHistory, } = req.models;
   try {
     const userId = req.adminId || req.user?.id;
     const { sessionId } = req.params;
@@ -227,6 +230,7 @@ exports.logoutSpecificSession = async (req, res) => {
  * @access Private
  */
 exports.logoutAllOtherSessions = async (req, res) => {
+   const { LoginHistory, } = req.models;
   try {
     const userId = req.adminId || req.user?.id;
     const currentSessionId = req.sessionId; // From JWT token
@@ -301,6 +305,7 @@ exports.logoutAllOtherSessions = async (req, res) => {
  * @access Private
  */
 exports.exportSessionHistory = async (req, res) => {
+   const { LoginHistory, } = req.models;
   try {
     const userId = req.adminId || req.user?.id;
 

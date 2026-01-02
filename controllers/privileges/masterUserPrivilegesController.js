@@ -4,6 +4,7 @@ const MasterUser = require("../../models/master/masterUserModel");
 const Program = require("../../models/admin/masters/programModel");
 
 exports.createPrivileges = async (req, res) => {
+  const { MasterUserPrivileges, MasterUser } = req.models;
   const { masterUserID, permissions, mode } = req.body;
 
   try {
@@ -75,6 +76,7 @@ exports.createPrivileges = async (req, res) => {
 };
 
 exports.updatePrivileges = async (req, res) => {
+  const { MasterUserPrivileges, MasterUser } = req.models;
   const { masterUserID, permissions } = req.body;
 
   try {
@@ -172,6 +174,7 @@ exports.updatePrivileges = async (req, res) => {
 };
 
 exports.getUsersWithPrivileges = async (req, res) => {
+  const { MasterUserPrivileges, MasterUser } = req.models;
   const {
     userType,
     masterUserID,
@@ -357,6 +360,7 @@ exports.getUsersWithPrivileges = async (req, res) => {
 // };
 
 exports.deletePrivileges = async (req, res) => {
+  const { MasterUserPrivileges, MasterUser } = req.models;
   const { masterUserID } = req.params;
 
   try {
@@ -392,6 +396,7 @@ exports.deletePrivileges = async (req, res) => {
 };
 
 exports.getAllPrivileges = async (req, res) => {
+  const { MasterUserPrivileges, MasterUser } = req.models;
   try {
     // Extract masterUserID from req.user (set by authMiddleware)
     const masterUserID = req.adminId;
@@ -445,6 +450,7 @@ exports.getAllPrivileges = async (req, res) => {
 
 // Deactivate/Activate User
 exports.toggleUserStatus = async (req, res) => {
+  const { MasterUserPrivileges, MasterUser } = req.models;
   const { masterUserID } = req.params;
   const { status, reason } = req.body; // status: "active"/"inactive", reason: optional reason for deactivation
 
@@ -546,6 +552,7 @@ exports.toggleUserStatus = async (req, res) => {
 
 // Get deactivated users
 exports.getDeactivatedUsers = async (req, res) => {
+  const { MasterUserPrivileges, MasterUser } = req.models;
   const {
     page = 1,
     limit = 10,
@@ -604,6 +611,7 @@ exports.getDeactivatedUsers = async (req, res) => {
 
 // Bulk deactivate users
 exports.bulkToggleUserStatus = async (req, res) => {
+  const { MasterUserPrivileges, MasterUser } = req.models;
   const { userIds, status, reason } = req.body;
 
   try {

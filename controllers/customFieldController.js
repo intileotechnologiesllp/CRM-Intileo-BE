@@ -15,6 +15,7 @@ const historyLogger = require("../utils/historyLogger").logHistory;
 // Helper function to extract default fields from Sequelize model
 // Helper function to extract specific default fields from database models
 const getDefaultFieldsFromModels = async (entityType, masterUserID = null) => {
+  const { Lead, Deal, CustomField, CustomFieldValue, Pipeline, PipelineStage, Label, } = req.models;
   // Get pipeline options if dealing with deals
   let pipelineOptions = [];
   let stageOptions = [];
@@ -670,6 +671,7 @@ const validateFieldAndEntityTypes = (fieldType, entityType) => {
 
 // Create a new custom field
 exports.createCustomField = async (req, res) => {
+  const { Lead, Deal, CustomField, CustomFieldValue, Pipeline, PipelineStage, Label, History, AuditTrail} = req.models;
   const {
     fieldName,
     fieldLabel,
@@ -910,6 +912,7 @@ exports.createCustomField = async (req, res) => {
     );
 
     await historyLogger(
+      History,
       PROGRAMS.LEAD_MANAGEMENT,
       "CUSTOM_FIELD_CREATION",
       masterUserID,
@@ -975,6 +978,7 @@ exports.createCustomField = async (req, res) => {
     }
 
     await logAuditTrail(
+      AuditTrail,
       PROGRAMS.LEAD_MANAGEMENT,
       "CUSTOM_FIELD_CREATION",
       null,
@@ -990,6 +994,7 @@ exports.createCustomField = async (req, res) => {
 
 // Get all custom fields for an entity type
 exports.getCustomFields = async (req, res) => {
+   const { Lead, Deal, CustomField, CustomFieldValue, Pipeline, PipelineStage, Label, History, AuditTrail} = req.models;
   const {
     entityType,
     includeInactive,
@@ -1358,6 +1363,7 @@ exports.getCustomFields = async (req, res) => {
 
 // Update a custom field
 exports.updateCustomField = async (req, res) => {
+  const { Lead, Deal, CustomField, CustomFieldValue, Pipeline, PipelineStage, Label, History, AuditTrail} = req.models;
   const { fieldId } = req.params;
   const {
     fieldLabel,
@@ -1609,6 +1615,7 @@ exports.updateCustomField = async (req, res) => {
     });
 
     await historyLogger(
+      History,
       PROGRAMS.LEAD_MANAGEMENT,
       "CUSTOM_FIELD_UPDATE",
       null,
@@ -1740,6 +1747,7 @@ exports.updateCustomField = async (req, res) => {
 
 // Delete a custom field
 exports.deleteCustomField = async (req, res) => {
+  const { Lead, Deal, CustomField, CustomFieldValue, Pipeline, PipelineStage, Label, History, AuditTrail} = req.models;
   const { fieldId } = req.params;
   const masterUserID = req.adminId;
 
@@ -1764,6 +1772,7 @@ exports.deleteCustomField = async (req, res) => {
     await customField.destroy();
 
     await historyLogger(
+      History,
       PROGRAMS.LEAD_MANAGEMENT,
       "CUSTOM_FIELD_DELETION",
       null,
@@ -1787,6 +1796,7 @@ exports.deleteCustomField = async (req, res) => {
 
 // Save custom field values for an entity
 exports.saveCustomFieldValues = async (req, res) => {
+   const { Lead, Deal, CustomField, CustomFieldValue, Pipeline, PipelineStage, Label, History, AuditTrail} = req.models;
   const { entityId, entityType, fieldValues } = req.body;
   const masterUserID = req.adminId;
 
@@ -1876,6 +1886,7 @@ exports.saveCustomFieldValues = async (req, res) => {
 
 // Get custom field values for an entity
 exports.getCustomFieldValues = async (req, res) => {
+   const { Lead, Deal, CustomField, CustomFieldValue, Pipeline, PipelineStage, Label, History, AuditTrail} = req.models;
   const { entityId, entityType } = req.params;
   const masterUserID = req.adminId;
 
@@ -1948,6 +1959,7 @@ exports.getCustomFieldValues = async (req, res) => {
 
 // Bulk update display order
 exports.updateFieldDisplayOrder = async (req, res) => {
+   const { Lead, Deal, CustomField, CustomFieldValue, Pipeline, PipelineStage, Label, History, AuditTrail} = req.models;
   const { fieldOrders } = req.body; // Array of { fieldId, displayOrder }
   const masterUserID = req.adminId;
 
@@ -1973,6 +1985,7 @@ exports.updateFieldDisplayOrder = async (req, res) => {
 
 // Update custom field values for an entity
 exports.updateCustomFieldValues = async (req, res) => {
+  const { Lead, Deal, CustomField, CustomFieldValue, Pipeline, PipelineStage, Label, History, AuditTrail} = req.models;
   const { entityId, entityType } = req.params;
   const { fieldValues } = req.body;
   const masterUserID = req.adminId;
@@ -2048,6 +2061,7 @@ exports.updateCustomFieldValues = async (req, res) => {
 
 // Delete a custom field value
 exports.deleteCustomFieldValue = async (req, res) => {
+   const { Lead, Deal, CustomField, CustomFieldValue, Pipeline, PipelineStage, Label, History, AuditTrail} = req.models;
   const { valueId } = req.params;
   const masterUserID = req.adminId;
 
@@ -2078,6 +2092,7 @@ exports.deleteCustomFieldValue = async (req, res) => {
 
 // Update field order
 exports.updateFieldOrder = async (req, res) => {
+   const { Lead, Deal, CustomField, CustomFieldValue, Pipeline, PipelineStage, Label, History, AuditTrail} = req.models;
   const { fieldId } = req.params;
   const { displayOrder } = req.body;
   const masterUserID = req.adminId;
@@ -2110,6 +2125,7 @@ exports.updateFieldOrder = async (req, res) => {
 
 // Update field category
 exports.updateFieldCategory = async (req, res) => {
+   const { Lead, Deal, CustomField, CustomFieldValue, Pipeline, PipelineStage, Label, History, AuditTrail} = req.models;
   const { fieldId } = req.params;
   const { category } = req.body;
   const masterUserID = req.adminId;
@@ -2142,6 +2158,7 @@ exports.updateFieldCategory = async (req, res) => {
 
 // Update field group
 exports.updateFieldGroup = async (req, res) => {
+   const { Lead, Deal, CustomField, CustomFieldValue, Pipeline, PipelineStage, Label, History, AuditTrail} = req.models;
   const { fieldId } = req.params;
   const { fieldGroup } = req.body;
   const masterUserID = req.adminId;
@@ -2174,6 +2191,7 @@ exports.updateFieldGroup = async (req, res) => {
 
 // Get all custom fields for a specific entity type with statistics
 exports.getCustomFieldsWithStats = async (req, res) => {
+  const { Lead, Deal, CustomField, CustomFieldValue, Pipeline, PipelineStage, Label, History, AuditTrail} = req.models;
   const { entityType } = req.params;
   const masterUserID = req.adminId;
 
@@ -2242,6 +2260,7 @@ exports.getCustomFieldsWithStats = async (req, res) => {
 
 // Get all available field groups for an entity type
 exports.getFieldGroups = async (req, res) => {
+   const { Lead, Deal, CustomField, CustomFieldValue, Pipeline, PipelineStage, Label, History, AuditTrail} = req.models;
   const { entityType } = req.params;
 
   try {
@@ -2275,6 +2294,7 @@ exports.getFieldGroups = async (req, res) => {
 
 // Get default fields for an entity type (built-in CRM fields)
 exports.getDefaultFields = async (req, res) => {
+   const { Lead, Deal, CustomField, CustomFieldValue, Pipeline, PipelineStage, Label, History, AuditTrail} = req.models;
   const { entityType } = req.params;
 
   try {
@@ -2757,6 +2777,7 @@ exports.getDefaultFields = async (req, res) => {
 
 // Get system fields for an entity type (read-only system fields)
 exports.getSystemFields = async (req, res) => {
+  const { Lead, Deal, CustomField, CustomFieldValue, Pipeline, PipelineStage, Label, History, AuditTrail} = req.models;
   const { entityType } = req.params;
 
   try {
@@ -2970,6 +2991,7 @@ exports.getSystemFields = async (req, res) => {
 
 // Add field to summary section
 exports.addFieldToSummary = async (req, res) => {
+   const { Lead, Deal, CustomField, CustomFieldValue, Pipeline, PipelineStage, Label, History, AuditTrail} = req.models;
   const { fieldId } = req.params;
   const masterUserID = req.adminId;
 
@@ -3004,6 +3026,7 @@ exports.addFieldToSummary = async (req, res) => {
 
 // Remove field from summary section
 exports.removeFieldFromSummary = async (req, res) => {
+   const { Lead, Deal, CustomField, CustomFieldValue, Pipeline, PipelineStage, Label, History, AuditTrail} = req.models;
   const { fieldId } = req.params;
   const masterUserID = req.adminId;
 
@@ -3038,6 +3061,7 @@ exports.removeFieldFromSummary = async (req, res) => {
 
 // Create entity with only custom fields (pure custom approach)
 exports.createEntityWithCustomFields = async (req, res) => {
+   const { Lead, Deal, CustomField, CustomFieldValue, Pipeline, PipelineStage, Label, History, AuditTrail} = req.models;
   const { entityType, customFields } = req.body;
   const masterUserID = req.adminId;
 
@@ -3171,6 +3195,7 @@ exports.createEntityWithCustomFields = async (req, res) => {
 
       // Log the creation
       await historyLogger(
+        History,
         PROGRAMS.LEAD_MANAGEMENT,
         `${entityType.toUpperCase()}_CREATION`,
         masterUserID,
@@ -3202,6 +3227,7 @@ exports.createEntityWithCustomFields = async (req, res) => {
 
 // Create person with only custom fields
 exports.createPersonWithCustomFields = async (req, res) => {
+   const { Lead, Deal, CustomField, CustomFieldValue, Pipeline, PipelineStage, Label, History, AuditTrail} = req.models;
   const { customFields } = req.body;
   const masterUserID = req.adminId;
   const entityType = "person";
@@ -3335,6 +3361,7 @@ exports.createPersonWithCustomFields = async (req, res) => {
 
       // Log the creation
       await historyLogger(
+        History,
         PROGRAMS.LEAD_MANAGEMENT,
         "PERSON_CREATION",
         masterUserID,
@@ -3366,6 +3393,7 @@ exports.createPersonWithCustomFields = async (req, res) => {
 
 // Create organization with only custom fields
 exports.createOrganizationWithCustomFields = async (req, res) => {
+   const { Lead, Deal, CustomField, CustomFieldValue, Pipeline, PipelineStage, Label, History, AuditTrail} = req.models;
   const { customFields } = req.body;
   const masterUserID = req.adminId;
   const entityType = "organization";
@@ -3499,6 +3527,7 @@ exports.createOrganizationWithCustomFields = async (req, res) => {
 
       // Log the creation
       await historyLogger(
+        History,
         PROGRAMS.LEAD_MANAGEMENT,
         "ORGANIZATION_CREATION",
         masterUserID,
@@ -3530,6 +3559,7 @@ exports.createOrganizationWithCustomFields = async (req, res) => {
 
 // Get person with custom fields
 exports.getPersonWithCustomFields = async (req, res) => {
+  const { Lead, Deal, CustomField, CustomFieldValue, Pipeline, PipelineStage, Label, History, AuditTrail} = req.models;
   const { entityId } = req.params;
   const masterUserID = req.adminId;
   const entityType = "person";
@@ -3605,6 +3635,7 @@ exports.getPersonWithCustomFields = async (req, res) => {
 
 // Get organization with custom fields
 exports.getOrganizationWithCustomFields = async (req, res) => {
+  const { Lead, Deal, CustomField, CustomFieldValue, Pipeline, PipelineStage, Label, History, AuditTrail} = req.models;
   const { entityId } = req.params;
   const masterUserID = req.adminId;
   const entityType = "organization";
@@ -3680,6 +3711,7 @@ exports.getOrganizationWithCustomFields = async (req, res) => {
 
 // Get custom fields organized by sections
 exports.getHybridFieldsSections = async (req, res) => {
+   const { Lead, Deal, CustomField, CustomFieldValue, Pipeline, PipelineStage, Label, History, AuditTrail} = req.models;
   const { entityType } = req.params;
   const masterUserID = req.adminId;
 
@@ -4027,6 +4059,7 @@ exports.getHybridFieldsSections = async (req, res) => {
 
 // Bulk update leadView and dealView for multiple fields
 exports.bulkUpdateFieldVisibility = async (req, res) => {
+   const { Lead, Deal, CustomField, CustomFieldValue, Pipeline, PipelineStage, Label, History, AuditTrail} = req.models;
   const { fieldUpdates } = req.body; // Array of { fieldId, leadView, dealView, listView, pipelines }
   const masterUserID = req.adminId;
 
@@ -4102,6 +4135,7 @@ exports.bulkUpdateFieldVisibility = async (req, res) => {
 
         // Log the update
         await historyLogger(
+          History,
           PROGRAMS.LEAD_MANAGEMENT,
           "CUSTOM_FIELD_BULK_UPDATE",
           masterUserID,
@@ -4155,6 +4189,7 @@ exports.bulkUpdateFieldVisibility = async (req, res) => {
 
 // Clean up corrupted JSON data in custom fields
 exports.cleanupCorruptedData = async (req, res) => {
+   const { Lead, Deal, CustomField, CustomFieldValue, Pipeline, PipelineStage, Label, History, AuditTrail} = req.models;
   const { dryRun = false } = req.query;
   const masterUserID = req.adminId;
 
@@ -4314,6 +4349,7 @@ exports.cleanupCorruptedData = async (req, res) => {
 };
 
 exports.migrateFieldsToNewStructure = async (req, res) => {
+   const { Lead, Deal, CustomField, CustomFieldValue, Pipeline, PipelineStage, Label, History, AuditTrail} = req.models;
   const { entityType, dryRun = false } = req.query;
   const masterUserID = req.adminId;
 
@@ -4388,6 +4424,7 @@ exports.migrateFieldsToNewStructure = async (req, res) => {
           });
 
           await historyLogger(
+            History,
             PROGRAMS.LEAD_MANAGEMENT,
             "CUSTOM_FIELD_MIGRATION",
             masterUserID,
@@ -4430,6 +4467,7 @@ exports.migrateFieldsToNewStructure = async (req, res) => {
 
 // Get pipeline and stage options for custom field dropdowns
 exports.getPipelineOptions = async (req, res) => {
+   const { Lead, Deal, CustomField, CustomFieldValue, Pipeline, PipelineStage, Label, History, AuditTrail} = req.models;
   const masterUserID = req.adminId;
 
   try {
@@ -4518,6 +4556,7 @@ exports.getPipelineOptions = async (req, res) => {
 
 // POST /api/custom-fields/reorder
 exports.reorderCustomFields = async (req, res) => {
+   const { Lead, Deal, CustomField, CustomFieldValue, Pipeline, PipelineStage, Label, History, AuditTrail} = req.models;
   const { orderedIds} = req.body; // e.g., { orderedIds: [3, 1, 2, 4], entityType: "deal" }
   try {
     for (let i = 0; i < orderedIds.length; i++) {

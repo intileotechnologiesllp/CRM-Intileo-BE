@@ -6,6 +6,7 @@ const PROGRAMS = require("../utils/programConstants");
 
 // Get all data fields with Pipedrive-style organization
 exports.getDataFields = async (req, res) => {
+  const {  CustomField, CustomFieldValue, AuditTrail } = req.models;
   try {
     const { entityType = "lead" } = req.query; // Default to lead, can be "lead", "deal", "person", "organization"
 
@@ -107,6 +108,7 @@ exports.getDataFields = async (req, res) => {
     });
 
     await logAuditTrail(
+      AuditTrail,
       PROGRAMS.LEAD_MANAGEMENT,
       "DATA_FIELDS_FETCH",
       req.adminId,
@@ -124,6 +126,7 @@ exports.getDataFields = async (req, res) => {
   } catch (error) {
     console.error("Error fetching data fields:", error);
     await logAuditTrail(
+      AuditTrail,
       PROGRAMS.LEAD_MANAGEMENT,
       "DATA_FIELDS_FETCH",
       req.adminId,
@@ -136,6 +139,7 @@ exports.getDataFields = async (req, res) => {
 
 // Create a new custom field
 exports.createCustomField = async (req, res) => {
+  const {  CustomField, CustomFieldValue, AuditTrail } = req.models;
   try {
     const {
       fieldName,
@@ -193,6 +197,7 @@ exports.createCustomField = async (req, res) => {
     });
 
     await logAuditTrail(
+      AuditTrail,
       PROGRAMS.LEAD_MANAGEMENT,
       "CUSTOM_FIELD_CREATE",
       req.adminId,
@@ -207,6 +212,7 @@ exports.createCustomField = async (req, res) => {
   } catch (error) {
     console.error("Error creating custom field:", error);
     await logAuditTrail(
+      AuditTrail,
       PROGRAMS.LEAD_MANAGEMENT,
       "CUSTOM_FIELD_CREATE",
       req.adminId,
@@ -219,6 +225,7 @@ exports.createCustomField = async (req, res) => {
 
 // Update a custom field
 exports.updateCustomField = async (req, res) => {
+  const {  CustomField, CustomFieldValue, AuditTrail } = req.models;
   try {
     const { fieldId } = req.params;
     const updateData = req.body;
@@ -244,6 +251,7 @@ exports.updateCustomField = async (req, res) => {
     await customField.update(updateData);
 
     await logAuditTrail(
+      AuditTrail,
       PROGRAMS.LEAD_MANAGEMENT,
       "CUSTOM_FIELD_UPDATE",
       req.adminId,
@@ -263,6 +271,7 @@ exports.updateCustomField = async (req, res) => {
 
 // Delete a custom field
 exports.deleteCustomField = async (req, res) => {
+  const {  CustomField, CustomFieldValue, AuditTrail } = req.models;
   try {
     const { fieldId } = req.params;
 
@@ -293,6 +302,7 @@ exports.deleteCustomField = async (req, res) => {
     });
 
     await logAuditTrail(
+      AuditTrail,
       PROGRAMS.LEAD_MANAGEMENT,
       "CUSTOM_FIELD_DELETE",
       req.adminId,
@@ -311,6 +321,7 @@ exports.deleteCustomField = async (req, res) => {
 
 // Reorder fields within a category
 exports.reorderFields = async (req, res) => {
+  const {  CustomField, CustomFieldValue, AuditTrail } = req.models;
   try {
     const { category, fieldOrders } = req.body; // fieldOrders: [{ fieldId, displayOrder }, ...]
 
@@ -335,6 +346,7 @@ exports.reorderFields = async (req, res) => {
     }
 
     await logAuditTrail(
+      AuditTrail,
       PROGRAMS.LEAD_MANAGEMENT,
       "FIELDS_REORDER",
       req.adminId,
@@ -353,6 +365,7 @@ exports.reorderFields = async (req, res) => {
 
 // Organize fields - update categories, groups, and order
 exports.organizeFields = async (req, res) => {
+  const {  CustomField, CustomFieldValue, AuditTrail } = req.models;
   try {
     const { updates } = req.body; // Array of { fieldId, category, fieldGroup, displayOrder }
 
@@ -381,6 +394,7 @@ exports.organizeFields = async (req, res) => {
     }
 
     await logAuditTrail(
+      AuditTrail,
       PROGRAMS.LEAD_MANAGEMENT,
       "FIELDS_ORGANIZE",
       req.adminId,
@@ -400,6 +414,7 @@ exports.organizeFields = async (req, res) => {
 
 // Get field usage statistics
 exports.getFieldStatistics = async (req, res) => {
+  const {  CustomField, CustomFieldValue, AuditTrail } = req.models;
   try {
     const { entityType = "lead" } = req.query;
 
@@ -449,6 +464,7 @@ exports.getFieldStatistics = async (req, res) => {
 
 // Get field values for a specific entity
 exports.getFieldValues = async (req, res) => {
+  const {  CustomField, CustomFieldValue, AuditTrail } = req.models;
   try {
     const { entityType, entityId } = req.params;
 

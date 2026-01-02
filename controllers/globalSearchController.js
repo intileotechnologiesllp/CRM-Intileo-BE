@@ -1,5 +1,6 @@
 // Mark a search result as recently viewed
 exports.markRecentlyViewed = async (req, res) => {
+  const {  CustomField, CustomFieldValue, AuditTrail, Deal, History, LeadPerson, LeadOrganization, Lead, Activity } = req.models;
   try {
     const { entityType, entityId, searchTerm, searchTypes } = req.body;
     const masterUserID = req.adminId;
@@ -25,7 +26,7 @@ exports.markRecentlyViewed = async (req, res) => {
         )
           canMark = true;
       } else if (entityType === "person") {
-        entity = await Person.findOne({ where: { personId: entityId } });
+        entity = await LeadPerson.findOne({ where: { personId: entityId } });
         if (
           entity &&
           (entity.masterUserID === masterUserID ||
@@ -33,7 +34,7 @@ exports.markRecentlyViewed = async (req, res) => {
         )
           canMark = true;
       } else if (entityType === "organization") {
-        entity = await Organization.findOne({
+        entity = await LeadOrganization.findOne({
           where: { leadOrganizationId: entityId },
         });
         if (
@@ -101,6 +102,7 @@ exports.markRecentlyViewed = async (req, res) => {
 
 // Get recently viewed items for the user, including full entity data
 exports.getRecentlyViewed = async (req, res) => {
+  const {  CustomField, CustomFieldValue, AuditTrail, Deal, History, LeadPerson, LeadOrganization, Lead, Activity } = req.models;
   try {
     const { limit = 10 } = req.query;
     // Only fetch items marked as recently viewed for this user
@@ -123,11 +125,11 @@ exports.getRecentlyViewed = async (req, res) => {
               where: { dealId: item.entityId },
             });
           } else if (item.entityType === "person") {
-            entityData = await Person.findOne({
+            entityData = await LeadPerson.findOne({
               where: { personId: item.entityId },
             });
           } else if (item.entityType === "organization") {
-            entityData = await Organization.findOne({
+            entityData = await LeadOrganization.findOne({
               where: { leadOrganizationId: item.entityId },
             });
           } else if (item.entityType === "lead") {
@@ -173,6 +175,7 @@ const { sequelize } = require("../models");
 const { cleanupDuplicateSearches } = require("../utils/recentSearchCleanup");
 
 exports.globalSearch = async (req, res) => {
+  const {  CustomField, CustomFieldValue, AuditTrail, Deal, History, LeadPerson : Person, LeadOrganization : Organization, Lead, Activity, RecentSearch, Email } = req.models;
   try {
     const {
       q: searchTerm,
@@ -893,7 +896,8 @@ exports.globalSearch = async (req, res) => {
         searchQuery,
         searchTypes,
         results.totalResults,
-        results // Pass the full results object
+        results,
+        RecentSearch
       );
     } else {
       console.log(
@@ -936,7 +940,8 @@ async function saveRecentSearch(
   searchTerm,
   searchTypes,
   resultsCount,
-  searchResults = null
+  searchResults = null,
+  RecentSearch
 ) {
   try {
     // Check if this exact search was already performed recently (within last hour)
@@ -1025,6 +1030,7 @@ async function saveRecentSearch(
 
 // Get search suggestions/autocomplete
 exports.getSearchSuggestions = async (req, res) => {
+  const {  CustomField, CustomFieldValue, AuditTrail, Deal, History, LeadPerson : Person, LeadOrganization : Organization, Lead, Activity, RecentSearch, Email } = req.models;
   try {
     const { q: searchTerm, limit = 5 } = req.query;
 
@@ -1117,6 +1123,7 @@ exports.getSearchSuggestions = async (req, res) => {
 
 // Get recent searches
 exports.getRecentSearches = async (req, res) => {
+  const {  CustomField, CustomFieldValue, AuditTrail, Deal, History, LeadPerson : Person, LeadOrganization : Organization, Lead, Activity, RecentSearch, Email } = req.models;
   try {
     const {
       limit = 10,
@@ -1282,6 +1289,7 @@ function groupSearchesByDate(searches) {
 
 // Clear recent searches
 exports.clearRecentSearches = async (req, res) => {
+  const {  CustomField, CustomFieldValue, AuditTrail, Deal, History, LeadPerson : Person, LeadOrganization : Organization, Lead, Activity, RecentSearch, Email } = req.models;
   try {
     const { searchId } = req.params;
 
@@ -1332,6 +1340,7 @@ exports.clearRecentSearches = async (req, res) => {
 
 // Get recent search statistics
 exports.getRecentSearchStats = async (req, res) => {
+  const {  CustomField, CustomFieldValue, AuditTrail, Deal, History, LeadPerson : Person, LeadOrganization : Organization, Lead, Activity, RecentSearch, Email } = req.models;
   try {
     const { getRecentSearchStats } = require("../utils/recentSearchCleanup");
 
@@ -1433,6 +1442,7 @@ exports.getRecentSearchStats = async (req, res) => {
 
 // Clean up searches with zero results
 exports.cleanupEmptySearches = async (req, res) => {
+   const {  CustomField, CustomFieldValue, AuditTrail, Deal, History, LeadPerson : Person, LeadOrganization : Organization, Lead, Activity, RecentSearch, Email } = req.models;
   try {
     console.log("=== CLEANUP EMPTY SEARCHES ===");
     console.log("Admin ID:", req.adminId);
@@ -1463,6 +1473,7 @@ exports.cleanupEmptySearches = async (req, res) => {
 
 // Manual cleanup of recent searches
 exports.cleanupRecentSearches = async (req, res) => {
+   const {  CustomField, CustomFieldValue, AuditTrail, Deal, History, LeadPerson : Person, LeadOrganization : Organization, Lead, Activity, RecentSearch, Email } = req.models;
   try {
     const {
       daysToKeep = 30,
@@ -1531,6 +1542,7 @@ exports.cleanupRecentSearches = async (req, res) => {
 
 // Test endpoint for debugging person search issues
 exports.testPersonSearch = async (req, res) => {
+   const {  CustomField, CustomFieldValue, AuditTrail, Deal, History, LeadPerson : Person, LeadOrganization : Organization, Lead, Activity, RecentSearch, Email } = req.models;
   try {
     const { searchTerm = "john", adminId } = req.query;
     const userAdminId = adminId || req.adminId;

@@ -9,6 +9,7 @@ const historyLogger = require("../utils/historyLogger").logHistory;
 
 // Create a new organization with custom fields
 exports.createOrganization = async (req, res) => {
+  const {  CustomField, CustomFieldValue, AuditTrail, Deal, History, LeadPerson, LeadOrganization, Lead, Activity, RecentSearch, Email } = req.models;
   const { customFields } = req.body;
   const masterUserID = req.adminId;
   const entityType = "organization";
@@ -162,6 +163,7 @@ exports.createOrganization = async (req, res) => {
 
       // Log the creation
       await historyLogger(
+        History,
         PROGRAMS.LEAD_MANAGEMENT,
         "ORGANIZATION_CREATION",
         masterUserID,
@@ -193,6 +195,7 @@ exports.createOrganization = async (req, res) => {
 
 // Get all organizations with custom fields
 exports.getAllOrganizations = async (req, res) => {
+  const {  CustomField, CustomFieldValue, AuditTrail, Deal, History, LeadPerson, LeadOrganization, Lead, Activity, RecentSearch, Email } = req.models;
   const masterUserID = req.adminId;
   const entityType = "organization";
 
@@ -270,6 +273,7 @@ exports.getAllOrganizations = async (req, res) => {
 
 // Get a specific organization with custom fields
 exports.getOrganizationById = async (req, res) => {
+  const {  CustomField, CustomFieldValue, AuditTrail, Deal, History, LeadPerson, LeadOrganization, Lead, Activity, RecentSearch, Email } = req.models;
   const { organizationId } = req.params;
   const masterUserID = req.adminId;
   const entityType = "organization";
@@ -369,6 +373,7 @@ exports.getOrganizationById = async (req, res) => {
 
 // Update an organization with custom fields
 exports.updateOrganization = async (req, res) => {
+  const {  CustomField, CustomFieldValue, AuditTrail, Deal, History, LeadPerson, LeadOrganization, Lead, Activity, RecentSearch, Email } = req.models;
   const { organizationId } = req.params;
   const { customFields } = req.body;
   const masterUserID = req.adminId;
@@ -513,6 +518,7 @@ exports.updateOrganization = async (req, res) => {
 
       // Log the update
       await historyLogger(
+        History,
         PROGRAMS.LEAD_MANAGEMENT,
         "ORGANIZATION_UPDATE",
         masterUserID,
@@ -543,6 +549,7 @@ exports.updateOrganization = async (req, res) => {
 
 // Delete an organization
 exports.deleteOrganization = async (req, res) => {
+  const {  CustomField, CustomFieldValue, AuditTrail, Deal, History, LeadPerson, LeadOrganization, Lead, Activity, RecentSearch, Email } = req.models;
   const { organizationId } = req.params;
   const masterUserID = req.adminId;
   const role = req.role;
@@ -597,6 +604,7 @@ exports.deleteOrganization = async (req, res) => {
 
       // Log the deletion
       await historyLogger(
+        History,
         PROGRAMS.LEAD_MANAGEMENT,
         "ORGANIZATION_DELETION",
         masterUserID,

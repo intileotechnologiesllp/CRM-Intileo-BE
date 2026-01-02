@@ -3,6 +3,7 @@ const { Op } = require("sequelize");
 const PROGRAMS = require("../../utils/programConstants"); // Import program constants
 
 exports.getAuditHistory = async (req, res) => {
+    const { auditHistory, } = req.models;
   try {
     // Extract query parameters for pagination, sorting, filtering, and search
     const {

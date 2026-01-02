@@ -1,5 +1,6 @@
 // Test endpoint for debugging person search
 exports.testPersonSearch = async (req, res) => {
+   const {  MasterUser, AuditTrail, History, LeadPerson : Person, CustomField, CustomFieldValue,  } = req.models;
   try {
     const { searchTerm = "john", adminId } = req.query;
     const userAdminId = adminId || req.adminId;
@@ -9,7 +10,6 @@ exports.testPersonSearch = async (req, res) => {
     console.log("Admin ID:", userAdminId);
 
     // Test 1: Check database connection
-    const Person = require("../models/leads/leadPersonModel");
     const { Op } = require("sequelize");
 
     // Test 2: Count total people
