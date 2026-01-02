@@ -93,7 +93,6 @@ exports.getUserLinks = async (req, res) => {
  */
 exports.getLinkById = async (req, res) => {
   try {
-
     const { id } = req.params;
 
     const link = await SchedulingLink.findOne({
@@ -133,7 +132,7 @@ exports.getLinkById = async (req, res) => {
     res.json({
       bookingUrl,
       owner: link.owner,
-      dates: JSON.parse(workingHours),
+      dates: JSON.parse(JSON.parse(link.workingHours)),
     });
   } catch (error) {
     console.error("Error fetching scheduling link:", error);
@@ -384,7 +383,7 @@ exports.bookMeeting = async (req, res) => {
 
 exports.bookGoogleMeet = async (req, res) => {
   try {
-    const { masterUserId, summary, description, start, end, email } = req.body;
+    const { masterUserId, summary, description, start, end, email,durationMinutes } = req.body;
     const user = await MasterUser.findByPk(masterUserId);
     if (!user || !user.googleOAuthToken) {
       return res.status(400).json({
@@ -392,25 +391,28 @@ exports.bookGoogleMeet = async (req, res) => {
       });
     }
 
-    oauth2Client.setCredentials({
+    await oauth2Client.setCredentials({
       refresh_token: user.googleOAuthToken,
     });
 
+    const startDateTime = moment.tz(start, timezone);
+    const endDateTime = startDateTime.clone().add(durationMinutes, "minutes");
     const calendar = google.calendar({
       version: "v3",
       auth: oauth2Client,
     });
     const event = {
-      summary: "Client Meeting",
-      description: "Meeting booked via scheduling link",
+      summary: summary,
+      description,
       start: {
-        dateTime: "2025-01-05T10:00:00+05:30",
-        timeZone: "Asia/Kolkata",
+        dateTime: startDateTime.toISOString(),
+        timeZone: timezone,
       },
       end: {
-        dateTime: "2025-01-05T10:30:00+05:30",
-        timeZone: "Asia/Kolkata",
+        dateTime: endDateTime.toISOString(),
+        timeZone: timezone,
       },
+      attendees: email.map((email) => ({ email })),
       conferenceData: {
         createRequest: {
           requestId: `meet-${Date.now()}`,
@@ -419,7 +421,6 @@ exports.bookGoogleMeet = async (req, res) => {
           },
         },
       },
-      attendees: [{ email }],
     };
 
     const response = await calendar.events.insert({
