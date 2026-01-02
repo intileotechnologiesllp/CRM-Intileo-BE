@@ -5,7 +5,7 @@ const UserCredential = require("../models/email/userCredentialModel"); // Adjust
 const Email = require("../models/email/emailModel");
 const Attachment = require("../models/email/attachmentModel");
 const nodemailer = require("nodemailer");
-const { Sequelize } = require("sequelize");
+const { Sequelize, Op } = require("sequelize");
 const { cleanupRecentSearches } = require("./recentSearchCleanup");
 
 //
@@ -284,5 +284,180 @@ cron.schedule("0 2 * * *", async () => {
     }
   } catch (error) {
     console.error("Error running recent search cleanup:", error);
+  }
+});
+
+// Campaign processing cron job - queues campaign jobs to RabbitMQ
+// Runs every minute to check for campaigns that need to be processed
+const Campaigns = require("../models/email/campaignsModel");
+
+async function queueCampaignJobs() {
+  const amqpUrl = process.env.RABBITMQ_URL || "amqp://localhost:5672";
+  let connection;
+  let channel;
+
+  try {
+    console.log("🕐 Running campaign cron job to queue campaign jobs...");
+    
+    connection = await amqp.connect(amqpUrl);
+    channel = await connection.createChannel();
+
+    // Get all active campaigns
+    const campaigns = await Campaigns.findAll({
+      attributes: ['campaignId', 'campaignName', 'sendingTime', 'createdBy', 'subject', 'emailContent', 'receivers', 'sender'],
+      raw: true
+    });
+
+    if (!campaigns || campaigns.length === 0) {
+      console.log("📭 No campaigns found to process.");
+      return;
+    }
+
+    const now = new Date();
+    let totalQueued = 0;
+
+    for (const campaign of campaigns) {
+      try {
+        // Parse sendingTime JSON
+        let sendingTime;
+        try {
+          sendingTime = typeof campaign.sendingTime === 'string' 
+            ? JSON.parse(campaign.sendingTime) 
+            : campaign.sendingTime;
+        } catch (parseError) {
+          console.error(`❌ Error parsing sendingTime for campaign ${campaign.campaignId}:`, parseError);
+          continue;
+        }
+
+        // Check if campaign should be processed now
+        const shouldProcess = checkIfCampaignShouldProcess(sendingTime, now);
+        
+        if (!shouldProcess) {
+          continue;
+        }
+
+        // Get recipients from campaign.receivers field (comma-separated emails)
+        const recipients = parseReceivers(campaign.receivers);
+
+        if (!recipients || recipients.length === 0) {
+          console.log(`⚠️ No recipients found for campaign ${campaign.campaignId}`);
+          continue;
+        }
+
+        // Create campaign-specific queue
+        const queueName = `CAMPAIGN_QUEUE_${campaign.campaignId}`;
+        await channel.assertQueue(queueName, { durable: true });
+
+        // Queue job with recipients (batch recipients in chunks if needed)
+        const BATCH_SIZE = 50; // Process 50 recipients per job
+        for (let i = 0; i < recipients.length; i += BATCH_SIZE) {
+          const batch = recipients.slice(i, i + BATCH_SIZE);
+          
+          const job = {
+            campaignId: campaign.campaignId,
+            jobId: `${campaign.campaignId}-${Date.now()}-${i}`,
+            recipients: batch,
+            timestamp: new Date().toISOString(),
+            retryCount: 0,
+            maxRetries: 3,
+            priority: 5
+          };
+
+          channel.sendToQueue(
+            queueName,
+            Buffer.from(JSON.stringify(job)),
+            { persistent: true }
+          );
+
+          totalQueued++;
+        }
+
+        console.log(`✅ Queued ${Math.ceil(recipients.length / BATCH_SIZE)} jobs for campaign ${campaign.campaignId} (${recipients.length} recipients)`);
+
+      } catch (campaignError) {
+        console.error(`❌ Error processing campaign ${campaign.campaignId}:`, campaignError.message);
+      }
+    }
+
+    console.log(`📊 Campaign cron job completed: ${totalQueued} jobs queued across ${campaigns.length} campaigns`);
+
+  } catch (error) {
+    console.error("❌ Error in campaign cron job:", error);
+  } finally {
+    if (channel) await channel.close();
+    if (connection) await connection.close();
+  }
+}
+
+// Check if campaign should be processed based on sendingTime
+function checkIfCampaignShouldProcess(sendingTime, now) {
+  if (!sendingTime) return false;
+
+  // If sendingTime has a specific date/time
+  if (sendingTime.dateTime) {
+    const scheduledTime = new Date(sendingTime.dateTime);
+    // Process if scheduled time has passed (within last 5 minutes to avoid duplicates)
+    const fiveMinutesAgo = new Date(now.getTime() - 5 * 60 * 1000);
+    return scheduledTime <= now && scheduledTime >= fiveMinutesAgo;
+  }
+
+  // If sendingTime has a schedule (e.g., daily at specific time)
+  if (sendingTime.schedule) {
+    const schedule = sendingTime.schedule;
+    const currentHour = now.getHours();
+    const currentMinute = now.getMinutes();
+    
+    // Check if current time matches schedule
+    if (schedule.hour !== undefined && schedule.hour !== currentHour) {
+      return false;
+    }
+    if (schedule.minute !== undefined && schedule.minute !== currentMinute) {
+      return false;
+    }
+    
+    // Check day of week if specified
+    if (schedule.daysOfWeek && schedule.daysOfWeek.length > 0) {
+      const currentDay = now.getDay(); // 0 = Sunday, 6 = Saturday
+      if (!schedule.daysOfWeek.includes(currentDay)) {
+        return false;
+      }
+    }
+    
+    return true;
+  }
+
+  // If sendingTime is "immediate" or similar
+  if (sendingTime.type === 'immediate') {
+    return true;
+  }
+
+  return false;
+}
+
+// Parse comma-separated receivers string into recipient objects
+function parseReceivers(receiversString) {
+  if (!receiversString || typeof receiversString !== 'string') {
+    return [];
+  }
+
+  // Split by comma and clean up each email
+  const emails = receiversString
+    .split(',')
+    .map(email => email.trim())
+    .filter(email => email.length > 0 && email.includes('@')); // Basic email validation
+
+  // Return array of recipient objects (email only, name can be added later if needed)
+  return emails.map(email => ({
+    email: email,
+    name: null // Name not available from comma-separated string
+  }));
+}
+
+// Schedule campaign cron job to run every minute
+cron.schedule("* * * * *", async () => {
+  try {
+    await queueCampaignJobs();
+  } catch (error) {
+    console.error("Error running campaign cron job:", error);
   }
 });
