@@ -7,6 +7,7 @@ const CLIENT_SECRET = process.env.CLIENT_SECRET; //"YOUR_CLIENT_SECRET";
 const REDIRECT_URI = "http://localhost:3056/api/drive/callback";
 
 exports.connectDrive = async (req, res) => {
+  const {UserGoogleToken} = req.models;
   const authUrl = getAuthUrl();
   await UserGoogleToken.create({
     userId: req.adminId, // assume JWT auth

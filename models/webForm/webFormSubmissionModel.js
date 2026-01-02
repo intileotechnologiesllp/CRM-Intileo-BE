@@ -1,7 +1,8 @@
 const { DataTypes } = require("sequelize");
 const sequelize = require("../../config/db");
 
-const WebFormSubmission = sequelize.define("WebFormSubmission", {
+const createWebFormSubmissionModel = (sequelizeInstance) => {
+const WebFormSubmission = sequelizeInstance.define("WebFormSubmission", {
   submissionId: {
     type: DataTypes.INTEGER,
     primaryKey: true,
@@ -188,6 +189,8 @@ const WebFormSubmission = sequelize.define("WebFormSubmission", {
     { fields: ["ipAddress"] },
     { fields: ["isSpam"] },
   ],
-});
+})
+return WebFormSubmission;
+};
 
-module.exports = WebFormSubmission;
+module.exports = createWebFormSubmissionModel;

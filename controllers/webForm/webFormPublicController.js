@@ -12,6 +12,7 @@ const { sanitizeFormData, isSpamDetected, checkRateLimit } = require("../../util
  * @route GET /api/public/webforms/:uniqueKey
  */
 exports.getPublicForm = async (req, res) => {
+  const {WebForm, WebFormField, WebFormSubmission, WebFormTracking, } = req.models;
   try {
     const { uniqueKey } = req.params;
 
@@ -80,6 +81,7 @@ exports.getPublicForm = async (req, res) => {
  * @route POST /api/public/webforms/:uniqueKey/submit
  */
 exports.submitForm = async (req, res) => {
+  const {WebForm, WebFormField, WebFormSubmission, WebFormTracking, } = req.models;
   try {
     const { uniqueKey } = req.params;
     const {
@@ -286,6 +288,7 @@ exports.submitForm = async (req, res) => {
  * @route POST /api/public/webforms/:uniqueKey/track
  */
 exports.trackFormEvent = async (req, res) => {
+  const {WebForm, WebFormField, WebFormSubmission, WebFormTracking, } = req.models;
   try {
     const { uniqueKey } = req.params;
     const {
@@ -370,6 +373,7 @@ exports.trackFormEvent = async (req, res) => {
  * @route PUT /api/webforms/submissions/:submissionId/read
  */
 exports.markAsRead = async (req, res) => {
+  const {WebForm, WebFormField, WebFormSubmission, WebFormTracking, } = req.models;
   try {
     const { submissionId } = req.params;
     const masterUserID = req.adminId;
@@ -413,6 +417,7 @@ exports.markAsRead = async (req, res) => {
  * @route PUT /api/webforms/submissions/:submissionId/status
  */
 exports.updateSubmissionStatus = async (req, res) => {
+  const {WebForm, WebFormField, WebFormSubmission, WebFormTracking, } = req.models;
   try {
     const { submissionId } = req.params;
     const { status, notes } = req.body;

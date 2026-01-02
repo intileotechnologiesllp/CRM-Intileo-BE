@@ -2,6 +2,7 @@
 const { mergeEntitiesSequelize } = require("./mergeServices");
 
 exports.mergeDealsHandler = async (req, res) => {
+  const {Lead, Deal, Activity, Email, MergeMap, TagMap} = req.models;
   try {
     const primaryId = Number(req.params.primaryId);
     const { secondaryIds, strategy, reason } = req.body;
@@ -12,7 +13,8 @@ exports.mergeDealsHandler = async (req, res) => {
       secondaryIds,
       strategy,
       reason,
-      mergedBy: req.user.id
+      mergedBy: req.user.id,
+      Lead, Deal, Activity, Email, MergeMap, TagMap
     });
 
     res.json({ success: true, ...result });
@@ -22,6 +24,7 @@ exports.mergeDealsHandler = async (req, res) => {
 }
 
 exports.mergeLeadsHandler = async (req, res) => {
+  const {Lead, Deal, Activity, Email, MergeMap, TagMap} = req.models;
   try {
     console.log("HERE STEP 0")
     const primaryId = Number(req.params.primaryId);
@@ -34,7 +37,8 @@ exports.mergeLeadsHandler = async (req, res) => {
       secondaryIds,
       strategy,
       reason,
-      mergedBy: req.adminId
+      mergedBy: req.adminId,
+      Lead, Deal, Activity, Email, MergeMap, TagMap
     });
 
     res.json({ success: true, ...result });

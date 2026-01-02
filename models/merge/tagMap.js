@@ -1,7 +1,7 @@
 const { DataTypes } = require("sequelize");
 
-const TagMapModel = (sequelize) => {
-  const TagMap = sequelize.define(
+const TagMapModel = (sequelizeInstance) => {
+  const TagMap = sequelizeInstance.define(
     "TagMap",
     {
       id: {
@@ -26,7 +26,7 @@ const TagMapModel = (sequelize) => {
       }
     },
     {
-      tableName: "tag_map",
+      tableName: "TagMaps",
       underscored: true,
       timestamps: true,
       updatedAt: false,

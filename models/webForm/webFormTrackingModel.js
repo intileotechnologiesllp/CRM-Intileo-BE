@@ -1,7 +1,8 @@
 const { DataTypes } = require("sequelize");
 const sequelize = require("../../config/db");
 
-const WebFormTracking = sequelize.define("WebFormTracking", {
+const createWebFormTrackingModel = (sequelizeInstance) => {
+const WebFormTracking = sequelizeInstance.define("WebFormTracking", {
   trackingId: {
     type: DataTypes.INTEGER,
     primaryKey: true,
@@ -151,7 +152,7 @@ const WebFormTracking = sequelize.define("WebFormTracking", {
     defaultValue: DataTypes.NOW,
   },
 }, {
-  tableName: "webFormTracking",
+  tableName: "WebFormTrackings",
   timestamps: false,
   indexes: [
     { fields: ["formId"] },
@@ -160,6 +161,8 @@ const WebFormTracking = sequelize.define("WebFormTracking", {
     { fields: ["visitorId"] },
     { fields: ["eventTimestamp"] },
   ],
-});
+})
+return WebFormTracking;
+};
 
-module.exports = WebFormTracking;
+module.exports = createWebFormTrackingModel;

@@ -2,7 +2,8 @@ const { DataTypes } = require("sequelize");
 const sequelize = require("../../config/db");
 const Attachment = require("../../models/email/attachmentModel");
 
-const EmailTemplate = sequelize.define(
+const createEmailTemplateModel = (sequelizeInstance) => {
+const EmailTemplate = sequelizeInstance.define(
   "EmailTemplate",
   {
     templateId: {
@@ -51,5 +52,7 @@ const EmailTemplate = sequelize.define(
     ],
   }
 );
+return EmailTemplate;
+}
 
-module.exports = EmailTemplate;
+module.exports = createEmailTemplateModel;

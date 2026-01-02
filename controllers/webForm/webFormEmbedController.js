@@ -11,6 +11,8 @@ const WebFormField = require("../../models/webForm/webFormFieldModel");
  * @route GET /api/public/webforms/embed/:uniqueKey.js
  */
 exports.getEmbedScript = async (req, res) => {
+  const {WebForm, WebFormField} = req.models;
+
   try {
     const { uniqueKey } = req.params;
 
@@ -369,6 +371,7 @@ exports.getEmbedScript = async (req, res) => {
  * @route GET /embed-form/:uniqueKey/render
  */
 exports.renderFormPage = async (req, res) => {
+  const {WebForm, WebFormField} = req.models;
   try {
     const { uniqueKey } = req.params;
 

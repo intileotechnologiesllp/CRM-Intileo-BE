@@ -23,6 +23,7 @@ const generateUniqueKey = () => {
  * @route POST /api/webforms
  */
 exports.createForm = async (req, res) => {
+  const {WebForm, WebFormField, WebFormSubmission, WebFormTracking, } = req.models;
   try {
     const {
       formName,
@@ -99,6 +100,7 @@ exports.createForm = async (req, res) => {
  * @route GET /api/webforms
  */
 exports.getAllForms = async (req, res) => {
+  const {WebForm, WebFormField, WebFormSubmission, WebFormTracking, } = req.models;
   try {
     const masterUserID = req.adminId;
     const { status, search, page = 1, limit = 10 } = req.query;
@@ -157,6 +159,7 @@ exports.getAllForms = async (req, res) => {
  * @route GET /api/webforms/:formId
  */
 exports.getFormById = async (req, res) => {
+  const {WebForm, WebFormField, WebFormSubmission, WebFormTracking, } = req.models;
   try {
     const { formId } = req.params;
     const masterUserID = req.adminId;
@@ -198,6 +201,7 @@ exports.getFormById = async (req, res) => {
  * @route PUT /api/webforms/:formId
  */
 exports.updateForm = async (req, res) => {
+  const {WebForm, WebFormField, WebFormSubmission, WebFormTracking, } = req.models;
   try {
     const { formId } = req.params;
     const masterUserID = req.adminId;
@@ -247,6 +251,7 @@ exports.updateForm = async (req, res) => {
  * @route DELETE /api/webforms/:formId
  */
 exports.deleteForm = async (req, res) => {
+  const {WebForm, WebFormField, WebFormSubmission, WebFormTracking, } = req.models;
   try {
     const { formId } = req.params;
     const masterUserID = req.adminId;
@@ -283,6 +288,7 @@ exports.deleteForm = async (req, res) => {
  * @route POST /api/webforms/:formId/fields
  */
 exports.addField = async (req, res) => {
+  const {WebForm, WebFormField, WebFormSubmission, WebFormTracking, } = req.models;
   try {
     const { formId } = req.params;
     const masterUserID = req.adminId;
@@ -330,6 +336,7 @@ exports.addField = async (req, res) => {
  * @route PUT /api/webforms/:formId/fields/:fieldId
  */
 exports.updateField = async (req, res) => {
+  const {WebForm, WebFormField, WebFormSubmission, WebFormTracking, } = req.models;
   try {
     const { formId, fieldId } = req.params;
     const masterUserID = req.adminId;
@@ -385,6 +392,7 @@ exports.updateField = async (req, res) => {
  * @route DELETE /api/webforms/:formId/fields/:fieldId
  */
 exports.deleteField = async (req, res) => {
+  const {WebForm, WebFormField, WebFormSubmission, WebFormTracking, } = req.models;
   try {
     const { formId, fieldId } = req.params;
     const masterUserID = req.adminId;
@@ -433,6 +441,7 @@ exports.deleteField = async (req, res) => {
  * @route PUT /api/webforms/:formId/fields/reorder
  */
 exports.reorderFields = async (req, res) => {
+  const {WebForm, WebFormField, WebFormSubmission, WebFormTracking, } = req.models;
   try {
     const { formId } = req.params;
     const { fieldOrders } = req.body; // [{ fieldId: 1, fieldOrder: 0 }, ...]
@@ -477,6 +486,7 @@ exports.reorderFields = async (req, res) => {
  * @route GET /api/webforms/:formId/submissions
  */
 exports.getSubmissions = async (req, res) => {
+  const {WebForm, WebFormField, WebFormSubmission, WebFormTracking, } = req.models;
   try {
     const { formId } = req.params;
     const masterUserID = req.adminId;
@@ -559,6 +569,7 @@ exports.getSubmissions = async (req, res) => {
  * @route GET /api/webforms/:formId/analytics
  */
 exports.getFormAnalytics = async (req, res) => {
+  const {WebForm, WebFormField, WebFormSubmission, WebFormTracking, } = req.models;
   try {
     const { formId } = req.params;
     const masterUserID = req.adminId;
@@ -663,6 +674,7 @@ exports.getFormAnalytics = async (req, res) => {
  * @route POST /api/webforms/:formId/duplicate
  */
 exports.duplicateForm = async (req, res) => {
+  const {WebForm, WebFormField, WebFormSubmission, WebFormTracking, } = req.models;
   try {
     const { formId } = req.params;
     const masterUserID = req.adminId;

@@ -437,9 +437,17 @@ const createUserInterfacePreferencesModel = require("./userInterfacePreferences.
 const createMasterUserModel = require("./master/masterUserModel.js");
 // const createLostReasonModel = require("./lostReason/lostReasonModal.js");
 
+const createStartupQuestionModel = require("./startupQuestionModel.js")
+const createAutomationModel = require("./automation/automation.js");
+const createEmailTemplateModel = require("./email/emailTemplateModel.js");
+const MergeMapModel = require("./merge/mergeMap.js");
+const TagMapModel = require("./merge/tagMap.js");
 
 
-
+const createWebFormFieldModel = require("./webForm/webFormFieldModel.js");
+const createWebFormSubmissionModel = require("./webForm/webFormSubmissionModel.js");
+const createWebFormTrackingModel = require("./webForm/webFormTrackingModel.js");
+const createWebFormModel = require("./webForm/webFormModel.js");
 
 module.exports = {
   createActivityColumnModel,
@@ -554,5 +562,15 @@ module.exports = {
   createCustomFieldValueModel,
   createPermissionSetModel,
   createRecentSearchModel,
-  createUserInterfacePreferencesModel
+  createUserInterfacePreferencesModel,
+
+  createStartupQuestionModel,
+  createAutomationModel,
+  createEmailTemplateModel,
+  MergeMapModel,
+  TagMapModel,
+  createWebFormFieldModel,
+  createWebFormSubmissionModel,
+  createWebFormTrackingModel,
+  createWebFormModel
 };

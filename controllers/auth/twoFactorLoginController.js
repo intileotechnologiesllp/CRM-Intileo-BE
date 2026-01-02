@@ -14,6 +14,7 @@ const GroupVisibility = require("../../models/admin/groupVisibilityModel");
  * Body: { userId, token, isBackupCode: false, sessionData: {...} }
  */
 exports.verify2FALogin = async (req, res) => {
+   const { MasterUser, AuditTrail, History, LoginHistory, RecentLoginHistory, GroupVisibility } = req.models;
   try {
     const { userId, token, isBackupCode = false, sessionData } = req.body;
 
@@ -51,6 +52,7 @@ exports.verify2FALogin = async (req, res) => {
         await user.save();
 
         await logAuditTrail(
+          AuditTrail,
           PROGRAMS.AUTHENTICATION,
           "2FA_BACKUP_CODE_USED",
           `Backup code used. ${result.remainingCodes.length} codes remaining`,
@@ -64,6 +66,7 @@ exports.verify2FALogin = async (req, res) => {
 
     if (!isValid) {
       await logAuditTrail(
+         AuditTrail,
         PROGRAMS.AUTHENTICATION,
         "2FA_LOGIN_FAILED",
         isBackupCode ? "Invalid backup code" : "Invalid TOTP token",
@@ -209,6 +212,7 @@ exports.verify2FALogin = async (req, res) => {
     const groupIds = formattedGroups.map(group => group.groupId);
 
     await logAuditTrail(
+       AuditTrail,
       PROGRAMS.AUTHENTICATION,
       "2FA_LOGIN_SUCCESS",
       backupCodeUsed ? "Login with backup code" : "Login with TOTP",

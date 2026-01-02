@@ -1,7 +1,7 @@
 const Admin = require("../models/adminModel");
 const bcrypt = require("bcrypt");
 
-exports.signIn = async (email, password) => {
+exports.signIn = async (email, password, Admin) => {
   const admin = await Admin.findOne({ where: { email } });
   if (!admin) throw new Error("Admin not found");
 
@@ -11,16 +11,16 @@ exports.signIn = async (email, password) => {
   return admin;
 };
 
-exports.createAdmin = async (email, password) => {
+exports.createAdmin = async (email, password, Admin) => {
   const hashedPassword = await bcrypt.hash(password, 10);
   return await Admin.create({ email, password: hashedPassword, loginType: "admin" });
 };
 
-exports.findAdminByEmail = async (email) => {
+exports.findAdminByEmail = async (email, Admin) => {
   return await Admin.findOne({ where: { email } });
 };
 
-exports.saveOtp = async (adminId, otp) => {
+exports.saveOtp = async (adminId, otp, Admin) => {
   const expirationTime = new Date(Date.now() + 10 * 60 * 1000); // OTP valid for 10 minutes
   await Admin.update(
     { otp, otpExpiration: expirationTime },

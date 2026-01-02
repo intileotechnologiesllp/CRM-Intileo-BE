@@ -1,6 +1,7 @@
 const { getClientDbConnection, getClientConfig } = require("./db");
 const bcrypt = require("bcrypt");
-const {createActivityColumnModel,
+const {
+  createActivityColumnModel,
   createActivityModel,
   createActivitySettingModel,
   createActivityTypeModel,
@@ -112,7 +113,23 @@ const {createActivityColumnModel,
   createCustomFieldValueModel,
   createPermissionSetModel,
   createRecentSearchModel,
-  createUserInterfacePreferencesModel } = require("../models");
+  createUserInterfacePreferencesModel,
+
+
+  createAutomationModel,
+  createEmailTemplateModel,
+  MergeMapModel,
+  TagMapModel,
+
+  createWebFormFieldModel,
+  createWebFormSubmissionModel,
+  createWebFormTrackingModel,
+  createWebFormModel,
+  createStartupQuestionModel
+
+
+} = require("../models");
+
 const { setupAssociations } = require("./associations");
 
 class DatabaseConnectionManager {
@@ -399,6 +416,33 @@ class DatabaseConnectionManager {
       case 'ProductColumn':
         model = createProductColumnModel(connection);
         break;
+      case 'Automation':
+        model = createAutomationModel(connection);
+        break;
+      case 'EmailTemplate':
+        model = createEmailTemplateModel(connection);
+        break;
+      case 'MergeMap':
+        model = MergeMapModel(connection);
+        break;
+      case 'TagMap':
+        model = TagMapModel(connection);
+        break;
+      case 'WebFormField':
+        model = createWebFormFieldModel(connection);
+        break;
+      case 'webFormSubmission':
+        model = createWebFormSubmissionModel(connection);
+        break;
+      case 'WebFormTracking':
+        model = createWebFormTrackingModel(connection);
+        break;
+      case 'WebForm':
+        model = createWebFormModel(connection);
+        break;
+      case 'StartupQuestion':
+        model = createStartupQuestionModel(connection);
+        break;
       default:
         throw new Error(`Unknown model: ${modelName}`);
     }
@@ -509,6 +553,15 @@ class DatabaseConnectionManager {
       ProductVariation: this.getModel(connection, 'ProductVariation'),
       DealProduct: this.getModel(connection, 'DealProduct'),
       ProductColumn: this.getModel(connection, 'ProductColumn'),
+      Automation: this.getModel(connection, 'Automation'),
+      EmailTemplate: this.getModel(connection, 'EmailTemplate'),
+      MergeMap: this.getModel(connection, 'MergeMap'),
+      TagMap: this.getModel(connection, 'TagMap'),
+      WebFormField: this.getModel(connection, 'WebFormField'),
+      WebFormSubmission: this.getModel(connection, 'WebFormSubmission'),
+      WebFormTracking: this.getModel(connection, 'WebFormTracking'),
+      WebForm: this.getModel(connection, 'WebForm'),
+      StartupQuestion: this.getModel(connection, 'StartupQuestion'),
     };
     
     // Set up associations
@@ -797,7 +850,32 @@ class DatabaseConnectionManager {
       await models.ProductColumn.sync({ alter: false, force: false });
       console.log("✅ ProductColumn table synced");
 
+      await models.Automation.sync({ alter: false, force: false });
+      console.log("✅ Automation table synced");
 
+      await models.EmailTemplate.sync({ alter: false, force: false });
+      console.log("✅ EmailTemplate table synced");
+
+      await models.MergeMap.sync({ alter: false, force: false });
+      console.log("✅ MergeMap table synced");
+
+      await models.TagMap.sync({ alter: false, force: false });
+      console.log("✅ TagMap table synced");
+
+      await models.WebFormField.sync({ alter: false, force: false });
+      console.log("✅ WebFormField table synced");
+
+      await models.WebFormSubmission.sync({ alter: false, force: false });
+      console.log("✅ WebFormSubmission table synced");
+
+      await models.WebFormTracking.sync({ alter: false, force: false });
+      console.log("✅ WebFormTracking table synced");
+
+      await models.WebForm.sync({ alter: false, force: false });
+      console.log("✅ WebForm table synced");
+
+      await models.StartupQuestion.sync({ alter: false, force: false });
+      console.log("✅ StartupQuestion table synced");
 
       console.log("✅ All models synced successfully");
       
@@ -906,7 +984,16 @@ class DatabaseConnectionManager {
       await models.ProductVariation.sync({ alter: false, force: false });
       await models.DealProduct.sync({ alter: false, force: false });
       await models.ProductColumn.sync({ alter: false, force: false });
-          
+      await models.Automation.sync({ alter: false, force: false });
+      await models.EmailTemplate.sync({ alter: false, force: false });
+      await models.MergeMap.sync({ alter: false, force: false });
+      await models.TagMap.sync({ alter: false, force: false });
+      await models.WebFormField.sync({ alter: false, force: false });
+      await models.WebFormSubmission.sync({ alter: false, force: false });
+      await models.WebFormTracking.sync({ alter: false, force: false });
+      await models.WebForm.sync({ alter: false, force: false });
+      await models.StartupQuestion.sync({ alter: false, force: false });
+
           await connection.query('SET FOREIGN_KEY_CHECKS = 1');
           
           console.log("✅ Models synced with foreign keys disabled/enabled");

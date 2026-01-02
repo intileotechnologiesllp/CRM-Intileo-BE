@@ -10,10 +10,10 @@ const {
 } = require("../../models/index.js");
 // const { sequelize } = require("../db/sequelize.js");
 // import { Deal, Lead, Note, Activity, Email, File, TagMap, MergeMap } from "../models/index.js";
-const MergeMap = MergeMapModel(sequelize);
-const TagMap = TagMapModel(sequelize);
+// const MergeMap = MergeMapModel(sequelize);
+// const TagMap = TagMapModel(sequelize);
 
-const RELATED_MODELS = [Activity, Email, File, TagMap, MergeMapModel];
+// const RELATED_MODELS = [Activity, Email, File, TagMap, MergeMapModel];
 
 function isEmpty(v) {
   return (
@@ -40,6 +40,7 @@ exports.mergeEntitiesSequelize = ({
   strategy = "FILL_EMPTY",
   reason = null,
   mergedBy,
+  Lead, Deal, Activity, Email, MergeMap, TagMap
 }) => {
   try {
     console.log("HERE STEP 1")

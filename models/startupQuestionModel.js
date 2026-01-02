@@ -2,7 +2,8 @@ const { DataTypes } = require("sequelize");
 const sequelize = require("../config/db");
 
 // jobTitle, useCrmBefore, companySize, industry, companyName, totalEmployees, focus
-const StartupQuestion = sequelize.define("StartupQuestion", {
+const createStartupQuestionModel = (sequelizeInstance) => {
+const StartupQuestion = sequelizeInstance.define("StartupQuestion", {
   id: {
     type: DataTypes.INTEGER,
     primaryKey: true,
@@ -11,7 +12,7 @@ const StartupQuestion = sequelize.define("StartupQuestion", {
   masterUserID: {
     type: DataTypes.INTEGER,
     allowNull: false,
-    references: { model: "masterusers", key: "masterUserID" },
+    references: { model: "MasterUsers", key: "masterUserID" },
     onDelete: "CASCADE",
   },
   jobTitle: {
@@ -43,6 +44,13 @@ const StartupQuestion = sequelize.define("StartupQuestion", {
     type: DataTypes.STRING,
     allowNull: false,
   },
-});
+},
+{
+  tableName: "StartupQuestions",
+  timestamps: true,
+}
+)
+return StartupQuestion;
+};
 
-module.exports = StartupQuestion;
+module.exports = createStartupQuestionModel;

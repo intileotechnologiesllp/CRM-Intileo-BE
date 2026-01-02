@@ -335,7 +335,7 @@ exports.getSyncConfig = async (req, res) => {
  * Start manual sync
  */
 exports.startSync = async (req, res) => {
-  const { ContactSyncConfig, ContactSyncHistory, ContactChangeLog } = req.models;
+  const { ContactSyncConfig, ContactSyncHistory, ContactChangeLog, LeadPerson, ContactSyncMapping } = req.models;
   try {
     const masterUserID = req.adminId;
 
@@ -354,7 +354,7 @@ exports.startSync = async (req, res) => {
 
     // Start sync in background (don't wait)
     contactSyncService
-      .performSync(masterUserID, syncConfig.syncConfigId)
+      .performSync(masterUserID, syncConfig.syncConfigId, ContactSyncConfig, ContactSyncHistory, ContactChangeLog, LeadPerson, ContactSyncMapping)
       .then((result) => {
         console.log("✅ Sync completed:", result);
       })

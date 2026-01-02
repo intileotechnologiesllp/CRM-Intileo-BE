@@ -1,4 +1,5 @@
 exports.saveStartUpQuestions = async (req, res) => {
+  const {StartupQuestion} = req.models;
   const {
     jobTitle,
     useCrmBefore,
@@ -37,6 +38,7 @@ exports.saveStartUpQuestions = async (req, res) => {
 };
 
 exports.getStartUpQuestions = async (req, res) =>{
+  const {StartupQuestion} = req.models;
     const userId = req.adminId;
 
     const questions = await StartupQuestion.findAll({

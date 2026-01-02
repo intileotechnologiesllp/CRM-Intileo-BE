@@ -14,7 +14,7 @@ class ContactSyncService {
   /**
    * Main sync function - orchestrates the full sync process
    */
-  async performSync(masterUserID, syncConfigId) {
+  async performSync(masterUserID, syncConfigId, ContactSyncConfig, ContactSyncHistory, ContactChangeLog, LeadPerson, ContactSyncMapping) {
     console.log(
       `🔄 [CONTACT SYNC] Starting sync for user ${masterUserID}, config ${syncConfigId}`
     );
@@ -56,7 +56,7 @@ class ContactSyncService {
       console.log(`📱 [CONTACT SYNC] Fetching contacts from both systems...`);
       const [googleContacts, crmContacts] = await Promise.all([
         googleContactsService.fetchAllContacts(),
-        this.fetchCRMContacts(masterUserID),
+        this.fetchCRMContacts(masterUserID, LeadPerson),
       ]);
 
       console.log(
@@ -69,7 +69,7 @@ class ContactSyncService {
       );
 
       // 6. Get existing mappings
-      const existingMappings = await this.getExistingMappings(masterUserID);
+      const existingMappings = await this.getExistingMappings(masterUserID, ContactSyncMapping);
 
       // 7. Perform sync based on mode
       let syncResult;
@@ -1154,9 +1154,9 @@ class ContactSyncService {
   /**
    * Fetch all CRM contacts for a user
    */
-  async fetchCRMContacts(masterUserID) {
+  async fetchCRMContacts(masterUserID, LeadPerson) {
     try {
-      const contacts = await Person.findAll({
+      const contacts = await LeadPerson.findAll({
         where: {
           masterUserID,
           // Optionally filter out deleted contacts
@@ -1175,7 +1175,7 @@ class ContactSyncService {
   /**
    * Get existing sync mappings
    */
-  async getExistingMappings(masterUserID) {
+  async getExistingMappings(masterUserID, ContactSyncMapping) {
     try {
       const mappings = await ContactSyncMapping.findAll({
         where: { masterUserID, isDeleted: false },

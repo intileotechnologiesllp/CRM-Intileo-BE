@@ -1,7 +1,8 @@
 const { DataTypes } = require("sequelize");
 const sequelize = require("../../config/db");
 
-const Automation = sequelize.define(
+const createAutomationModel = (sequelizeInstance) => {
+const Automation = sequelizeInstance.define(
   "Automation",
   {
     automationId: {
@@ -38,7 +39,7 @@ const Automation = sequelize.define(
     },
   },
   {
-    tableName: "automations",
+    tableName: "Automations",
     timestamps: true,
     indexes: [
       {
@@ -49,5 +50,7 @@ const Automation = sequelize.define(
     ],
   }
 );
+return Automation;
+}
 
-module.exports = Automation;
+module.exports = createAutomationModel;

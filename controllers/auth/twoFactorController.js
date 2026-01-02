@@ -10,6 +10,7 @@ const PROGRAMS = require("../../utils/programConstants");
  * POST /api/auth/2fa/setup
  */
 exports.setup2FA = async (req, res) => {
+  const { MasterUser, AuditTrail, History } = req.models;
   console.log(`🚀 [2FA Setup] FUNCTION ENTRY - setup2FA called`);
   console.log(`🚀 [2FA Setup] Request method: ${req.method}`);
   console.log(`🚀 [2FA Setup] Request path: ${req.path}`);
@@ -61,6 +62,7 @@ exports.setup2FA = async (req, res) => {
     console.log(`✅ [2FA Setup] Secret saved successfully to user record`);
 
     await logAuditTrail(
+      AuditTrail,
       PROGRAMS.AUTHENTICATION,
       "2FA_SETUP_INITIATED",
       "User initiated 2FA setup",
@@ -88,6 +90,7 @@ exports.setup2FA = async (req, res) => {
  * Body: { token: "123456" }
  */
 exports.verifyAndEnable2FA = async (req, res) => {
+  const { MasterUser, AuditTrail, History } = req.models;
   try {
     const userId = req.adminId;
     const { token } = req.body;
@@ -138,6 +141,7 @@ exports.verifyAndEnable2FA = async (req, res) => {
       console.log(`   - Token already used (replay attack protection)`);
       
       await logAuditTrail(
+        AuditTrail,
         PROGRAMS.AUTHENTICATION,
         "2FA_VERIFICATION_FAILED",
         "Invalid token provided during setup",
@@ -163,6 +167,7 @@ exports.verifyAndEnable2FA = async (req, res) => {
     console.log(`✅ [2FA Verify] 2FA enabled successfully for user ${userId}`);
 
     await logAuditTrail(
+      AuditTrail,
       PROGRAMS.AUTHENTICATION,
       "2FA_ENABLED",
       "2FA successfully enabled",
@@ -193,6 +198,7 @@ exports.verifyAndEnable2FA = async (req, res) => {
  * Body: { password: "current_password" }
  */
 exports.disable2FA = async (req, res) => {
+  const { MasterUser, AuditTrail, History } = req.models;
   try {
     const userId = req.adminId;
     const { password } = req.body;
@@ -214,6 +220,7 @@ exports.disable2FA = async (req, res) => {
     const isPasswordValid = await bcrypt.compare(password, user.password);
     if (!isPasswordValid) {
       await logAuditTrail(
+        AuditTrail,
         PROGRAMS.AUTHENTICATION,
         "2FA_DISABLE_FAILED",
         "Invalid password provided",
@@ -230,6 +237,7 @@ exports.disable2FA = async (req, res) => {
     await user.save();
 
     await logAuditTrail(
+      AuditTrail,
       PROGRAMS.AUTHENTICATION,
       "2FA_DISABLED",
       "2FA disabled by user",
@@ -248,6 +256,7 @@ exports.disable2FA = async (req, res) => {
  * GET /api/auth/2fa/status
  */
 exports.get2FAStatus = async (req, res) => {
+  const { MasterUser, AuditTrail, History, CompanySetting } = req.models;
   try {
     const userId = req.adminId;
     
@@ -256,7 +265,7 @@ exports.get2FAStatus = async (req, res) => {
       return res.status(404).json({ message: "User not found" });
     }
 
-    const companySettings = await CompanySettings.findOne();
+    const companySettings = await CompanySetting.findOne();
     const isMandatory = companySettings?.twoFactorMandatory || false;
     const gracePeriodDays = companySettings?.twoFactorGracePeriodDays || 7;
 
@@ -283,6 +292,7 @@ exports.get2FAStatus = async (req, res) => {
  * Body: { password: "current_password" }
  */
 exports.regenerateBackupCodes = async (req, res) => {
+  const { MasterUser, AuditTrail, History } = req.models;
   try {
     const userId = req.adminId;
     const { password } = req.body;
@@ -304,6 +314,7 @@ exports.regenerateBackupCodes = async (req, res) => {
     const isPasswordValid = await bcrypt.compare(password, user.password);
     if (!isPasswordValid) {
       await logAuditTrail(
+        AuditTrail,
         PROGRAMS.AUTHENTICATION,
         "2FA_BACKUP_REGENERATE_FAILED",
         "Invalid password",
@@ -320,6 +331,7 @@ exports.regenerateBackupCodes = async (req, res) => {
     await user.save();
 
     await logAuditTrail(
+      AuditTrail,
       PROGRAMS.AUTHENTICATION,
       "2FA_BACKUP_CODES_REGENERATED",
       "Backup codes regenerated (old codes invalidated)",
@@ -345,6 +357,7 @@ exports.regenerateBackupCodes = async (req, res) => {
  * GET /api/auth/2fa/backup-codes-info
  */
 exports.getBackupCodesInfo = async (req, res) => {
+  const { MasterUser, AuditTrail, History } = req.models;
   try {
     const userId = req.adminId;
     

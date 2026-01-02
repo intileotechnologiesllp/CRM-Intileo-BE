@@ -27,6 +27,7 @@ exports.startGoogleOAuth = async (req, res) => {
 
 // Handle Google OAuth callback and save token
 exports.handleGoogleOAuthCallback = async (req, res) => {
+  const {MasterUser} = req.models
   const code = req.query.code;
   let state = req.query.state;
   let email, masterUserID;
@@ -76,8 +77,10 @@ const { permissionSet } = require('../../models');
 const GroupVisibility = require('../../models/admin/groupVisibilityModel');
 // const path = require("path");
 
+
 // Create a Master User
 exports.createMasterUser = async (req, res) => {
+  const { MasterUser, AuditTrail, History, Program, MasterUserPrivileges, GroupVisibility } = req.models;
   const {
     name,
     email,
@@ -93,6 +96,7 @@ exports.createMasterUser = async (req, res) => {
   const { error } = masterUserSchema.validate(req.body);
   if (error) {
     await logAuditTrail(
+      AuditTrail,
       PROGRAMS.MASTER_USER_MANAGEMENT,
       "CREATE_MASTER_USER",
       req.role,
@@ -125,6 +129,7 @@ exports.createMasterUser = async (req, res) => {
       }
       
       await logAuditTrail(
+        AuditTrail,
         PROGRAMS.MASTER_USER_MANAGEMENT,
         "CREATE_MASTER_USER",
         req.role,
@@ -134,6 +139,62 @@ exports.createMasterUser = async (req, res) => {
       
       return res.status(400).json({ message });
     }
+
+     // Step 1: Call third-party API to create client
+        const apiKey = req.api_key; // API key from token (you'll need to set this in middleware)
+        
+        if (!apiKey) {
+          return res.status(400).json({ message: "API key not found in token" });
+        }
+    
+        // Prepare data for third-party API
+        const thirdPartyData = {
+          name: name,
+          email: email,
+          password: password,
+          phone: mobileNumber,
+          userType: userType === "admin" ? "ADMIN" : "USER", // Map to third-party's format
+          isActive: status !== "inactive" // Map status to isActive
+        };
+    
+        // Call third-party API
+        let thirdPartyResponse;
+        try {
+          thirdPartyResponse = await axios.post(
+            "http://localhost:3069/api/v1/public/clients/create-client",
+            thirdPartyData,
+            {
+              headers: {
+                "x-api-key": apiKey,
+                "Content-Type": "application/json"
+              }
+            }
+          );
+        } catch (thirdPartyError) {
+          console.error("Third-party API error:", thirdPartyError.response?.data || thirdPartyError.message);
+          
+          // Return appropriate error message
+          let errorMessage = "Failed to create client in third-party system";
+          if (thirdPartyError.response?.status === 429) {
+            errorMessage = "Rate limit exceeded. Please try again later.";
+          } else if (thirdPartyError.response?.data?.message) {
+            errorMessage = thirdPartyError.response.data.message;
+          }
+          
+          return res.status(thirdPartyError.response?.status || 500).json({ 
+            message: errorMessage 
+          });
+        }
+    
+        // Check if third-party API was successful
+        if (!thirdPartyResponse.data.success) {
+          return res.status(thirdPartyResponse.status || 400).json({
+            message: thirdPartyResponse.data.message || "Failed to create client in third-party system"
+          });
+        }
+    
+        // Extract data from third-party response
+        const thirdPartyClient = thirdPartyResponse.data.data;
 
     let resetToken = null; // Initialize reset token
     let resetTokenExpiry = null; // Initialize reset token expiry
@@ -211,6 +272,7 @@ exports.createMasterUser = async (req, res) => {
 
     // Log the creation in the audit trail
     await historyLogger(
+      History,
       PROGRAMS.MASTER_USER_MANAGEMENT,
       "CREATE_MASTER_USER",
       req.adminId,
@@ -243,6 +305,7 @@ exports.createMasterUser = async (req, res) => {
         mobileNumber: masterUser.mobileNumber,
         userType: masterUser.userType, // Include userType in the response
         status: masterUser.status, // Include status in the response
+        thirdPartyClientId: masterUser.thirdPartyClientId,
         ...(userType !== "admin" && { designation: masterUser.designation }), // Include designation only if userType is not "admin"
         ...(userType !== "admin" && { department: masterUser.department }), // Include department only if userType is not "admin"
       },
@@ -252,6 +315,7 @@ exports.createMasterUser = async (req, res) => {
 
     // Log the error in the audit trail
     await logAuditTrail(
+      AuditTrail,
       PROGRAMS.MASTER_USER_MANAGEMENT,
       "CREATE_MASTER_USER",
       req.role || null,
@@ -265,6 +329,7 @@ exports.createMasterUser = async (req, res) => {
 
 // Get All Master Users
 exports.getMasterUsers = async (req, res) => {
+  const { MasterUser, AuditTrail, History, Program, MasterUserPrivileges, GroupVisibility, LoginHistory } = req.models;
   const {
     page = 1,
     limit = 100,
@@ -275,8 +340,6 @@ exports.getMasterUsers = async (req, res) => {
   } = req.query;
 
   try {
-    // Import LoginHistory model
-    const LoginHistory = require("../../models/reports/loginHistoryModel");
 
     // Calculate offset for pagination
     const offset = (page - 1) * limit;
@@ -465,6 +528,7 @@ exports.getMasterUsers = async (req, res) => {
 };
 
 exports.updateMasterGroupId = async (req, res) =>{
+  const { MasterUser } = req.models;
   try{
     const { userId, newGroupId } = req.body;
     await MasterUser.update(
@@ -480,6 +544,7 @@ exports.updateMasterGroupId = async (req, res) =>{
 
 // Delete a Master User
 exports.deleteMasterUser = async (req, res) => {
+  const { MasterUser, AuditTrail, History } = req.models;
   const { id } = req.params;
 
   try {
@@ -489,6 +554,7 @@ exports.deleteMasterUser = async (req, res) => {
     const masterUser = await MasterUser.findByPk(id);
     if (!masterUser) {
       await logAuditTrail(
+        AuditTrail,
         PROGRAMS.MASTER_USER_MANAGEMENT,
         "DELETE_MASTER_USER",
         req.role,
@@ -503,6 +569,7 @@ exports.deleteMasterUser = async (req, res) => {
     await masterUser.destroy();
 
     await historyLogger(
+      History,
       PROGRAMS.MASTER_USER_MANAGEMENT,
       "DELETE_MASTER_USER",
       masterUser.creatorId,
@@ -521,6 +588,7 @@ exports.deleteMasterUser = async (req, res) => {
 
 // Reset Password
 exports.resetPassword = async (req, res) => {
+  const { MasterUser, AuditTrail, History } = req.models;
   const { token, newPassword } = req.body;
 
   try {
@@ -563,6 +631,7 @@ exports.resetPassword = async (req, res) => {
 
 // Handle Reset Password Link
 exports.handleResetLink = async (req, res) => {
+  const { MasterUser, AuditTrail, History } = req.models;
   const { token } = req.query; // Extract the token from the query parameters
 
   try {
@@ -600,6 +669,7 @@ exports.handleResetLink = async (req, res) => {
 
 // Resend Reset Link
 exports.resendResetLink = async (req, res) => {
+  const { MasterUser, AuditTrail, History } = req.models;
   const { token } = req.query; // Extract the token from the query parameters
 
   try {
@@ -655,6 +725,7 @@ exports.resendResetLink = async (req, res) => {
 
 // Toggle Master User Status
 exports.toggleMasterUserStatus = async (req, res) => {
+  const { MasterUser, AuditTrail, History } = req.models;
   const { masterUserID } = req.params; // Master User ID from the request parameters
   const { isActive } = req.body; // New status (true for active, false for inactive)
 
@@ -663,6 +734,7 @@ exports.toggleMasterUserStatus = async (req, res) => {
     const masterUser = await MasterUser.findByPk(masterUserID);
     if (!masterUser) {
       await logAuditTrail(
+        AuditTrail,
         PROGRAMS.MASTER_USER_MANAGEMENT,
         "TOGGLE_MASTER_USER_STATUS",
         req.role,
@@ -676,6 +748,7 @@ exports.toggleMasterUserStatus = async (req, res) => {
     await masterUser.update({ isActive });
 
     await historyLogger(
+      History,
       PROGRAMS.MASTER_USER_MANAGEMENT,
       "TOGGLE_MASTER_USER_STATUS",
       masterUser.creatorId,
@@ -693,6 +766,7 @@ exports.toggleMasterUserStatus = async (req, res) => {
     });
   } catch (error) {
     await logAuditTrail(
+      AuditTrail,
       PROGRAMS.MASTER_USER_MANAGEMENT,
       "TOGGLE_MASTER_USER_STATUS",
       req.role,
@@ -705,6 +779,7 @@ exports.toggleMasterUserStatus = async (req, res) => {
 };
 
 exports.updateMasterUser = async (req, res) => {
+  const { MasterUser, AuditTrail, History } = req.models;
   const { masterUserID } = req.params; // Master User ID from the request parameters
   const { name, email, mobileNumber, designation, department, status } =
     req.body; // Fields to update
@@ -714,6 +789,7 @@ exports.updateMasterUser = async (req, res) => {
     const masterUser = await MasterUser.findByPk(masterUserID);
     if (!masterUser) {
       await logAuditTrail(
+        AuditTrail,
         PROGRAMS.MASTER_USER_MANAGEMENT,
         "UPDATE_MASTER_USER",
         req.role,
@@ -757,6 +833,7 @@ exports.updateMasterUser = async (req, res) => {
 
     // Log the update in the audit trail
     await historyLogger(
+      History,
       PROGRAMS.MASTER_USER_MANAGEMENT,
       "UPDATE_MASTER_USER",
       masterUser.creatorId,
@@ -773,6 +850,7 @@ exports.updateMasterUser = async (req, res) => {
   } catch (error) {
     console.error("Error updating master user:", error);
     await logAuditTrail(
+      AuditTrail,
       PROGRAMS.MASTER_USER_MANAGEMENT,
       "UPDATE_MASTER_USER",
       req.role,
@@ -784,6 +862,7 @@ exports.updateMasterUser = async (req, res) => {
 };
 // Get Profile of Current Master User
 exports.getProfile = async (req, res) => {
+  const { MasterUser, AuditTrail, History } = req.models;
   const masterUserID = req.adminId; // Assuming adminId is set in middleware
 
   try {
@@ -843,7 +922,9 @@ exports.getProfile = async (req, res) => {
       .json({ message: "Failed to fetch profile.", error: error.message });
   }
 };
+
 exports.updateProfile = async (req, res) => {
+  const { MasterUser, AuditTrail, History } = req.models;
   const masterUserID = req.adminId;
   const {
     name,
@@ -895,6 +976,7 @@ exports.updateProfile = async (req, res) => {
 
 // Set Permission Sets for Master User
 exports.setMasterUserPermissions = async (req, res) => {
+  const { MasterUser, AuditTrail, History } = req.models;
   // const masterUserID = req.adminId; // Get from authenticated user context
   const { permissionSetId, masterUserID, globalPermissionSetId, groupId } = req.body;
 
@@ -930,6 +1012,7 @@ exports.setMasterUserPermissions = async (req, res) => {
 
     if (!masterUser) {
       await logAuditTrail(
+        AuditTrail,
         PROGRAMS.MASTER_USER_MANAGEMENT,
         "SET_MASTER_USER_PERMISSIONS",
         req.role,
@@ -995,6 +1078,7 @@ exports.setMasterUserPermissions = async (req, res) => {
 
     // Log the update in audit trail
     await historyLogger(
+      History,
       PROGRAMS.MASTER_USER_MANAGEMENT,
       "SET_MASTER_USER_PERMISSIONS",
       masterUser.creatorId,
@@ -1067,6 +1151,7 @@ exports.setMasterUserPermissions = async (req, res) => {
     console.error("Error setting master user permissions:", error);
     
     await logAuditTrail(
+      AuditTrail,
       PROGRAMS.MASTER_USER_MANAGEMENT,
       "SET_MASTER_USER_PERMISSIONS",
       req.role,
@@ -1089,6 +1174,7 @@ exports.setMasterUserPermissions = async (req, res) => {
 
 // Debug helper: List all master users with their IDs (for debugging purposes)
 exports.listMasterUserIds = async (req, res) => {
+  const { MasterUser, AuditTrail, History } = req.models;
   try {
     const users = await MasterUser.findAll({
       attributes: [

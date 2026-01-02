@@ -1,7 +1,7 @@
 const { DataTypes } = require("sequelize");
 
-const MergeMapModel = (sequelize) => {
-  const MergeMap = sequelize.define(
+const MergeMapModel = (sequelizeInstance) => {
+  const MergeMap = sequelizeInstance.define(
     "MergeMap",
     {
       id: {
@@ -36,7 +36,7 @@ const MergeMapModel = (sequelize) => {
       }
     },
     {
-      tableName: "merge_map",
+      tableName: "MergeMaps",
       underscored: true,     // entity_type instead of entityType, etc.
       timestamps: true,      // adds created_at + updated_at
       updatedAt: false,      // keep only created_at (optional)

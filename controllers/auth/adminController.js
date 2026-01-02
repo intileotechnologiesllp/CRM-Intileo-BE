@@ -16,40 +16,44 @@ const { google } = require("googleapis")
 const DatabaseConnectionManager = require("../../config/dbConnectionManager.js");
 
 exports.signIn = async (req, res) => {
+  const { Admin, MasterUser, AuditTrail, History, MiscSetting, GroupVisibility, LoginHistory, RecentLoginHistory, } = req.models;
+  const { email, password, systemInfo, device, longitude, latitude, ipAddress } = req.body;
 
-  const { email, password,systemInfo,device ,longitude, latitude, ipAddress } = req.body;
-
-  const locationInfo = systemInfo?.approximateLocation
   try {
-    // Check if the user exists
-    const user = await MasterUser.findOne({ where: { email } });
+    // Step 1: Verify user in client database
+    const verificationResult = await DatabaseConnectionManager.verifyUserInDatabase(email, password);
+    const { user, creator, clientConfig, planDetails } = verificationResult;
 
-    if (!user) {
+    // Check if user is active
+    if (!user.isActive) {
       await logAuditTrail(
-        PROGRAMS.AUTHENTICATION,
-        "SIGN_IN",
-        "Invalid email",
-        null
-      );
-      return res.status(404).json({ message: "User not found" });
-    }
-
-    // Verify the password
-    const isPasswordValid = await bcrypt.compare(password, user.password);
-    if (!isPasswordValid) {
-      await logAuditTrail(
+        AuditTrail,
         PROGRAMS.AUTHENTICATION,
         "SIGN_IN",
         user.loginType,
-        "Invalid password",
+        "User account is deactivated",
         user.masterUserID
       );
-      return res.status(401).json({ statusCode: 401, message: "Invalid password" });
+      return res.status(403).json({
+        success: false,
+        message: "User account is deactivated"
+      });
     }
 
-    // Check if 2FA is enabled
+    // Check if client is active
+    if (!clientConfig.isActive) {
+      return res.status(403).json({
+        success: false,
+        message: "Client account is deactivated"
+      });
+    }
+
+    // Step 2: Check if 2FA is enabled (from first function)
+    const locationInfo = systemInfo?.approximateLocation;
+    
     if (user.twoFactorEnabled) {
       await logAuditTrail(
+        AuditTrail,
         PROGRAMS.AUTHENTICATION,
         "SIGN_IN_2FA_REQUIRED",
         "Password verified, awaiting 2FA",
@@ -57,6 +61,7 @@ exports.signIn = async (req, res) => {
       );
       
       return res.status(200).json({
+        success: true,
         message: "2FA verification required",
         requiresTwoFactor: true,
         userId: user.masterUserID,
@@ -70,21 +75,20 @@ exports.signIn = async (req, res) => {
         }
       });
     }
-    // Get the current UTC time
-    const loginTimeUTC = new Date();
 
-    // Convert login time to IST
+    // Step 3: Login history and session tracking (from first function)
+    const loginTimeUTC = new Date();
     const loginTimeIST = moment(loginTimeUTC)
       .tz("Asia/Kolkata")
       .format("YYYY-MM-DD HH:mm:ss");
 
-    // Fetch the latest login history for the user
+    // Fetch latest login history for the user
     const latestLoginHistory = await LoginHistory.findOne({
       where: { userId: user.masterUserID },
       order: [["loginTime", "DESC"]],
     });
 
-    // Fetch the previous totalSessionDuration
+    // Calculate total session duration
     let previousTotalDurationInSeconds = 0;
     if (latestLoginHistory && latestLoginHistory.totalSessionDuration) {
       const [hours, minutes] = latestLoginHistory.totalSessionDuration
@@ -93,23 +97,16 @@ exports.signIn = async (req, res) => {
         .split(" ")
         .map(Number);
 
-      previousTotalDurationInSeconds =
-        (hours || 0) * 3600 + (minutes || 0) * 60;
+      previousTotalDurationInSeconds = (hours || 0) * 3600 + (minutes || 0) * 60;
     }
 
-    // Add the current session's duration (default to 0 for a new session)
-    const currentSessionDurationInSeconds = 0; // No logout yet for the new session
-    const totalSessionDurationInSeconds =
-      previousTotalDurationInSeconds + currentSessionDurationInSeconds;
-
-    // Convert total session duration to hours and minutes
+    const currentSessionDurationInSeconds = 0; // No logout yet for new session
+    const totalSessionDurationInSeconds = previousTotalDurationInSeconds + currentSessionDurationInSeconds;
     const totalHours = Math.floor(totalSessionDurationInSeconds / 3600);
-    const totalMinutes = Math.floor(
-      (totalSessionDurationInSeconds % 3600) / 60
-    );
+    const totalMinutes = Math.floor((totalSessionDurationInSeconds % 3600) / 60);
     const totalSessionDuration = `${totalHours} hours ${totalMinutes} minutes`;
 
-    // Save the new login history
+    // Save new login history
     const newSession = await LoginHistory.create({
       userId: user.masterUserID,
       loginType: user.loginType,
@@ -118,35 +115,17 @@ exports.signIn = async (req, res) => {
       latitude: locationInfo?.latitude || null,
       loginTime: loginTimeIST,
       username: user.name,
-      totalSessionDuration, // Save updated totalSessionDuration
+      totalSessionDuration,
       isActive: true,
       device: device,
       location: `${locationInfo?.city}, ${locationInfo?.country}` || null
     });
 
-    // Generate JWT token with sessionId for device management
-    const token = jwt.sign(
-      {
-        id: user.masterUserID,
-        email: user.email,
-        loginType: user.loginType,
-        sessionId: newSession.id, // Include session ID for tracking
-        clientId: clientConfig.id,
-        dbName: clientConfig.db_name,
-        clientName: clientConfig.name,
-        organizationName: clientConfig.organizationName,
-        api_key : clientConfig.api_key
-      },
-      process.env.JWT_SECRET,
-      { expiresIn: "30d" }
-    );
-
-    // Delete any existing records for the user in RecentLoginHistory
+    // Update RecentLoginHistory
     await RecentLoginHistory.destroy({
       where: { userId: user.masterUserID },
     });
 
-    // Add the most recent login data to RecentLoginHistory
     await RecentLoginHistory.create({
       userId: user.masterUserID,
       loginType: user.loginType,
@@ -156,10 +135,9 @@ exports.signIn = async (req, res) => {
       loginTime: loginTimeIST,
       username: user.name,
       totalSessionDuration,
-       // Save updated totalSessionDuration
     });
 
-    // Fetch user's groups
+    // Step 4: Fetch user's groups (from first function)
     const allGroups = await GroupVisibility.findAll({
       where: { isActive: true },
       include: [{
@@ -169,12 +147,10 @@ exports.signIn = async (req, res) => {
       }]
     });
 
-    // Filter groups where the user exists in the group's user list
     const userGroups = allGroups.filter(group => {
       const memberIdsRaw = group.memberIds;
       let groupUserIds = [];
 
-      // memberIds may be stored as a comma-separated string or an array
       if (Array.isArray(memberIdsRaw)) {
         groupUserIds = memberIdsRaw.map(id => parseInt(id, 10)).filter(id => !isNaN(id));
       } else if (typeof memberIdsRaw === 'string' && memberIdsRaw.trim() !== '') {
@@ -184,7 +160,6 @@ exports.signIn = async (req, res) => {
       return groupUserIds.includes(parseInt(user.masterUserID, 10));
     });
 
-    // Format the groups
     const formattedGroups = userGroups.map(group => ({
       groupId: group.groupId,
       groupName: group.groupName,
@@ -196,7 +171,7 @@ exports.signIn = async (req, res) => {
       deal: group.deal,
       person: group.person,
       Organization: group.Organization,
-      group: group.group, // Array of user IDs
+      group: group.group,
       createdBy: group.createdBy,
       creator: group.creator ? {
         masterUserID: group.creator.masterUserID,
@@ -207,30 +182,56 @@ exports.signIn = async (req, res) => {
       updatedAt: group.updatedAt
     }));
 
-    // Extract just the group IDs for localStorage
     const groupIds = formattedGroups.map(group => group.groupId);
 
-    // Return the response with totalSessionDuration and user groups
-    res.status(200).json({
+    // Step 5: Generate JWT token (combined from both)
+    const token = jwt.sign(
+      {
+        id: user.masterUserID,
+        email: user.email,
+        loginType: user.loginType,
+        sessionId: newSession.id, // Include session ID for tracking
+        clientId: clientConfig.id,
+        dbName: clientConfig.db_name,
+        clientName: clientConfig.name,
+        organizationName: clientConfig.organizationName,
+        api_key: clientConfig.api_key,
+        planId: clientConfig.planId,
+        userType: user.userType
+      },
+      process.env.JWT_SECRET,
+      { expiresIn: "30d" }
+    );
+
+    // Step 6: Prepare response
+    const response = {
+      success: true,
       statusCode: 200,
-      message: `${
-        user.loginType === "admin" ? "Admin" : "General User"
-      } sign-in successful`,
+      message: `${user.loginType === "admin" ? "Admin" : "General User"} sign-in successful`,
       token,
       totalSessionDuration,
-      userGroups: formattedGroups, // Full group objects
-      groupIds: groupIds, // Just the IDs for localStorage
+      userGroups: formattedGroups,
+      groupIds: groupIds,
       user: {
         id: user.masterUserID,
         email: user.email,
         name: user.name,
-        loginType: user.loginType
+        loginType: user.loginType,
+        userType: user.userType,
+        twoFactorEnabled: user.twoFactorEnabled
       },
       clientInfo: {
         clientId: clientConfig.id,
         clientName: clientConfig.name,
         organizationName: clientConfig.organizationName,
-        dbName: clientConfig.db_name
+        dbName: clientConfig.db_name,
+        isActive: clientConfig.isActive,
+        paymentDone: clientConfig.paymentDone,
+        isTrialExpired: clientConfig.isTrialExpired,
+        trialPeriodDays: clientConfig.trialPeriodDays,
+        startDate: clientConfig.startDate,
+        ActualStartDate: clientConfig.ActualStartDate,
+        ActualEndDate: clientConfig.ActualEndDate
       },
       creator: {
         id: creator.masterUserID,
@@ -238,26 +239,85 @@ exports.signIn = async (req, res) => {
         name: creator.name,
         userType: creator.userType
       },
-    });
+    };
+
+    // Add plan details if available
+    if (planDetails) {
+      response.planDetails = {
+        id: planDetails.id,
+        name: planDetails.name,
+        code: planDetails.code,
+        description: planDetails.description,
+        currency: planDetails.currency,
+        unitAmount: planDetails.unitAmount,
+        billingInterval: planDetails.billingInterval,
+        trialPeriodDays: planDetails.trialPeriodDays,
+        isActive: planDetails.isActive,
+        features: planDetails.features
+      };
+    }
+
+    // Log successful sign-in
+    await logAuditTrail(
+      AuditTrail,
+      PROGRAMS.AUTHENTICATION,
+      "SIGN_IN",
+      user.loginType,
+      "Sign-in successful",
+      user.masterUserID
+    );
+
+    res.status(200).json(response);
+
   } catch (error) {
     console.error("Error during sign-in:", error);
 
+    // Enhanced error handling
+    let statusCode = 500;
+    let message = "Internal server error";
+    let errorType = "unknown";
+
+    if (error.message.includes("Client not found")) {
+      statusCode = 404;
+      message = "Client not found";
+      errorType = "CLIENT_NOT_FOUND";
+    } else if (error.message.includes("User not found in client database")) {
+      statusCode = 404;
+      message = "User not found. Please use /connect-db API first.";
+      errorType = "USER_NOT_FOUND";
+    } else if (error.message.includes("Invalid password")) {
+      statusCode = 401;
+      message = "Invalid password";
+      errorType = "INVALID_PASSWORD";
+    } else if (error.message.includes("Database connection")) {
+      statusCode = 503;
+      message = "Database connection error";
+      errorType = "DB_CONNECTION_ERROR";
+    }
+
     await logAuditTrail(
+      AuditTrail,
       PROGRAMS.AUTHENTICATION,
       "SIGN_IN",
-      "unknown",
-      error.message || "Internal server error"
+      errorType,
+      error.message || message
     );
 
-    res.status(500).json({ statusCode: 500, message: "Internal server error" });
+    res.status(statusCode).json({
+      success: false,
+      statusCode,
+      message,
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
   }
 };
 
 exports.createAdmin = async (req, res) => {
+  const { Admin } = req.models;
   const { email, password } = req.body;
 
   try {
-    const admin = await adminService.createAdmin(email, password);
+    const admin = await adminService.createAdmin(email, password, Admin);
     res.status(201).json({ message: "Admin created successfully", admin });
   } catch (error) {
     console.error("Error creating admin:", error);
@@ -266,6 +326,7 @@ exports.createAdmin = async (req, res) => {
 };
 
 exports.forgotPassword = async (req, res) => {
+  const { Admin, MasterUser, AuditTrail } = req.models;
   const { email } = req.body;
 
   try {
@@ -279,6 +340,7 @@ exports.forgotPassword = async (req, res) => {
 
     if (!user) {
       await logAuditTrail(
+        AuditTrail,
         PROGRAMS.FORGOT_PASSWORD,
         "forgot_password",
         null,
@@ -318,6 +380,7 @@ exports.forgotPassword = async (req, res) => {
   } catch (error) {
     console.error("Error during forgot password:", error);
     await logAuditTrail(
+      AuditTrail,
       PROGRAMS.FORGOT_PASSWORD,
       "forgot_password",
       null,
@@ -328,6 +391,7 @@ exports.forgotPassword = async (req, res) => {
 };
 
 exports.verifyOtp = async (req, res) => {
+  const { Admin, MasterUser, AuditTrail } = req.models;
   const { email, otp } = req.body;
 
   try {
@@ -341,6 +405,7 @@ exports.verifyOtp = async (req, res) => {
 
     if (!user) {
       await logAuditTrail(
+        AuditTrail,
         PROGRAMS.VERIFY_OTP,
         "VERIFY_OTP",
         null,
@@ -352,6 +417,7 @@ exports.verifyOtp = async (req, res) => {
     // Check if OTP is valid
     if (user.otp !== otp || new Date() > user.otpExpiration) {
       await logAuditTrail(
+        AuditTrail,
         PROGRAMS.VERIFY_OTP,
         "VERIFY_OTP",
         loginType,
@@ -365,6 +431,7 @@ exports.verifyOtp = async (req, res) => {
   } catch (error) {
     console.error("Error during OTP verification:", error);
     await logAuditTrail(
+      AuditTrail,
       PROGRAMS.VERIFY_OTP,
       "VERIFY_OTP",
       "unknown",
@@ -375,6 +442,7 @@ exports.verifyOtp = async (req, res) => {
 };
 
 exports.resetPassword = async (req, res) => {
+  const { Admin, MasterUser, AuditTrail } = req.models;
   const { email, newPassword } = req.body;
 
   try {
@@ -388,6 +456,7 @@ exports.resetPassword = async (req, res) => {
 
     if (!user) {
       await logAuditTrail(
+        AuditTrail,
         PROGRAMS.RESET_PASSWORD,
         "RESET_PASSWORD",
         null,
@@ -410,6 +479,7 @@ exports.resetPassword = async (req, res) => {
   } catch (error) {
     console.error("Error during password reset:", error);
     await logAuditTrail(
+      AuditTrail,
       PROGRAMS.RESET_PASSWORD,
       "RESET_PASSWORD",
       loginType || "unknown",
@@ -420,6 +490,7 @@ exports.resetPassword = async (req, res) => {
 };
 
 exports.logout = async (req, res) => {
+   const { Admin, MasterUser, AuditTrail, LoginHistory, RecentLoginHistory } = req.models;
   try {
     // Extract userId (adminId) and sessionId from the middleware
     const userId = req.adminId;
@@ -528,6 +599,7 @@ exports.logout = async (req, res) => {
 };
 
 exports.getLoginHistory = async (req, res) => {
+  const {  LoginHistory } = req.models;
   const { userId } = req.params; // Get userId from query parameters
 
   try {
@@ -550,7 +622,9 @@ exports.getLoginHistory = async (req, res) => {
     res.status(500).json({ message: "Internal server error" });
   }
 };
+
 exports.getAllLoginHistory = async (req, res) => {
+  const {  LoginHistory } = req.models;
   const { userId } = req.params; // Get userId from query parameters
 
   try {
@@ -570,6 +644,7 @@ exports.getAllLoginHistory = async (req, res) => {
 };
 
 exports.getRecentLoginHistory = async (req, res) => {
+  const {  RecentLoginHistory } = req.models;
   const { userId } = req.query; // Get userId from query parameters
 
   try {
@@ -593,12 +668,11 @@ exports.getRecentLoginHistory = async (req, res) => {
   }
 };
 
-
-
 // Get current settings
 exports.getMiscSettings = async (req, res) => {
+  const {  MiscSetting } = req.models;
   try {
-    const settings = await MiscSettings.findOne({ where: {}, order: [["id", "DESC"]] });
+    const settings = await MiscSetting.findOne({ where: {}, order: [["id", "DESC"]] });
     res.status(200).json({ settings });
   } catch (error) {
     res.status(500).json({ message: "Failed to fetch settings", error: error.message });
@@ -607,6 +681,7 @@ exports.getMiscSettings = async (req, res) => {
 
 // Update settings (admin only)
 exports.updateMiscSettings = async (req, res) => {
+  const {  MiscSetting } = req.models;
   const { maxImageSizeMB, allowedImageTypes } = req.body;
 
   // Validation for maxImageSizeMB (required)
@@ -623,7 +698,7 @@ exports.updateMiscSettings = async (req, res) => {
   }
 
   try {
-    let settings = await MiscSettings.findOne({ order: [["id", "DESC"]] });
+    let settings = await MiscSetting.findOne({ order: [["id", "DESC"]] });
     if (settings) {
       const updateData = { maxImageSizeMB };
       if (allowedImageTypes !== undefined) {
@@ -632,7 +707,7 @@ exports.updateMiscSettings = async (req, res) => {
       await settings.update(updateData);
     } else {
       // If creating new, use default if not provided
-      await MiscSettings.create({
+      await MiscSetting.create({
         maxImageSizeMB,
         allowedImageTypes: allowedImageTypes !== undefined ? allowedImageTypes : "jpg,jpeg,png,gif",
       });
@@ -650,6 +725,7 @@ exports.updateMiscSettings = async (req, res) => {
  * @access Private (requires authentication)
  */
 exports.changePassword = async (req, res) => {
+  const {Admin, MasterUser, AuditTrail, LoginHistory} = req.models
   try {
     const { currentPassword, newPassword, confirmPassword, logOutAllDevices = false } = req.body;
     const userId = req.adminId || req.user?.id; // Get user ID from authentication middleware
@@ -711,6 +787,7 @@ exports.changePassword = async (req, res) => {
     const user = await MasterUser.findByPk(userId);
     if (!user) {
       await logAuditTrail(
+        AuditTrail,
         PROGRAMS.AUTHENTICATION,
         "PASSWORD_CHANGE",
         "FAILED",
@@ -724,6 +801,7 @@ exports.changePassword = async (req, res) => {
     const isCurrentPasswordValid = await bcrypt.compare(currentPassword, user.password);
     if (!isCurrentPasswordValid) {
       await logAuditTrail(
+        AuditTrail,
         PROGRAMS.AUTHENTICATION,
         "PASSWORD_CHANGE",
         "FAILED",
@@ -752,6 +830,7 @@ exports.changePassword = async (req, res) => {
 
     // Log successful password change with detailed information
     await logAuditTrail(
+      AuditTrail,
       PROGRAMS.AUTHENTICATION,
       "PASSWORD_CHANGE",
       "SUCCESS",
@@ -805,6 +884,7 @@ exports.changePassword = async (req, res) => {
     
     // Log error in audit trail
     await logAuditTrail(
+      AuditTrail,
       PROGRAMS.AUTHENTICATION,
       "PASSWORD_CHANGE",
       "ERROR",
@@ -826,6 +906,7 @@ exports.changePassword = async (req, res) => {
  * @access Private (requires authentication)
  */
 exports.validatePassword = async (req, res) => {
+  const {Admin, MasterUser, AuditTrail} = req.models
   try {
     const { password } = req.body;
 
@@ -882,6 +963,7 @@ exports.validatePassword = async (req, res) => {
  * @access Private (requires authentication)
  */
 exports.getPasswordHistory = async (req, res) => {
+  const {LoginHistory} = req.models
   try {
     const userId = req.adminId || req.user?.id;
     const { page = 1, limit = 10 } = req.query;
@@ -931,6 +1013,7 @@ exports.getPasswordHistory = async (req, res) => {
 
 // Google OAuth Login - Initiate
 exports.googleAuthLogin = async (req, res) => {
+   const {LoginHistory} = req.models
   try {
     const oauth2Client = new google.auth.OAuth2(
       process.env.GOOGLE_CLIENT_ID,
@@ -965,6 +1048,7 @@ exports.googleAuthLogin = async (req, res) => {
 
 // Google OAuth Login - Callback
 exports.googleAuthCallback = async (req, res) => {
+   const {LoginHistory, MasterUser, AuditTrail, RecentLoginHistory} = req.models
   // Google sends code as query parameter, but frontend can send as body
   const code = req.query.code || (req.body && req.body.code);
   const systemInfo = req.body && req.body.systemInfo;
@@ -1025,6 +1109,7 @@ exports.googleAuthCallback = async (req, res) => {
       });
 
       await logAuditTrail(
+        AuditTrail,
         PROGRAMS.AUTHENTICATION,
         "SIGN_IN",
         "google",
@@ -1036,6 +1121,7 @@ exports.googleAuthCallback = async (req, res) => {
     // Check if user is active
     if (!user.isActive) {
       await logAuditTrail(
+        AuditTrail,
         PROGRAMS.AUTHENTICATION,
         "SIGN_IN",
         "google",
@@ -1137,6 +1223,7 @@ exports.googleAuthCallback = async (req, res) => {
     );
 
     await logAuditTrail(
+      AuditTrail,
       PROGRAMS.AUTHENTICATION,
       "SIGN_IN",
       "google",
@@ -1172,6 +1259,7 @@ exports.googleAuthCallback = async (req, res) => {
     console.error("Error in Google OAuth callback:", error);
     
     await logAuditTrail(
+      AuditTrail,
       PROGRAMS.AUTHENTICATION,
       "SIGN_IN",
       "google",

@@ -3341,7 +3341,8 @@ exports.fetchRecentEmail = async (adminId, options = {}) => {
           try {
             const savedAttachments = await saveAttachments(
               filteredAttachments,
-              savedEmail.emailID
+              savedEmail.emailID,
+              Attachment
             );
             attachments.push(...savedAttachments);
             console.log(

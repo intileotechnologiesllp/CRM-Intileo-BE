@@ -1,7 +1,8 @@
 const { DataTypes } = require("sequelize");
 const sequelize = require("../../config/db");
 
-const WebFormField = sequelize.define("WebFormField", {
+const createWebFormFieldModel = (sequelizeInstance) => {
+const WebFormField = sequelizeInstance.define("WebFormField", {
   fieldId: {
     type: DataTypes.INTEGER,
     primaryKey: true,
@@ -142,13 +143,17 @@ const WebFormField = sequelize.define("WebFormField", {
     type: DataTypes.DATE,
     defaultValue: DataTypes.NOW,
   },
-}, {
-  tableName: "webFormFields",
+}, 
+{
+  tableName: "WebFormFields",
   timestamps: true,
   indexes: [
     { fields: ["formId"] },
     { fields: ["fieldOrder"] },
   ],
-});
+}
+);
+return WebFormField;
+}
 
-module.exports = WebFormField;
+module.exports = createWebFormFieldModel;

@@ -1,6 +1,7 @@
 const { Automation } = require("../../models");
 
 exports.createAutomation = async (req, res) => {
+  const {Automation} = req.models;
   const { automationJson } = req.body; // e.g., { orderedIds: [3, 1, 2, 4], entityType: "deal" }
   try {
     if (!automationJson) {
@@ -22,6 +23,7 @@ exports.createAutomation = async (req, res) => {
 };
 
 exports.editAutomation = async (req, res) => {
+  const {Automation} = req.models;
   const { automationJson } = req.body; // e.g., { orderedIds: [3, 1, 2, 4], entityType: "deal" }
   try {
     if (!automationJson) {
@@ -50,6 +52,7 @@ exports.editAutomation = async (req, res) => {
 };
 
 exports.getAutomations = async (req, res) => {
+  const {Automation} = req.models;
   try {
     const { status } = req.query;
 
@@ -71,6 +74,7 @@ exports.getAutomations = async (req, res) => {
 };
 
 exports.deleteAutomations = async (req, res) => {
+  const {Automation} = req.models;
   try {
     const { id } = req.params;
     const automations = await Automation.destroy({
