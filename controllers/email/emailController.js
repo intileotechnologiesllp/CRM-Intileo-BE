@@ -12135,7 +12135,14 @@ exports.getCampaignTemplateById = async (req, res) => {
 exports.updateTemplate = async (req, res) => {
   try {
     const { id } = req.params;
-    const { templateName, subject, body } = req.body;
+    const { templateName, subject, body, html } = req.body;
+
+    if (!id) {
+      return res.status(400).json({
+        success: false,
+        message: "Template ID is required",
+      });
+    }
 
     const template = await EmailTemplate.findByPk(id);
 
@@ -12146,18 +12153,34 @@ exports.updateTemplate = async (req, res) => {
       });
     }
 
-    await template.update({
-      templateName,
-      subject,
-      body,
-    });
+    const updatePayload = {};
 
-    res.json({
+    if (templateName !== undefined) updatePayload.templateName = templateName;
+    if (subject !== undefined) updatePayload.subject = subject;
+
+    // Store body safely (string or JSON)
+    if (body !== undefined) {
+      updatePayload.body =
+        typeof body === "object" ? JSON.stringify(body) : body;
+    }
+
+    // Store raw HTML
+    if (html !== undefined) updatePayload.html = html;
+
+    await template.update(updatePayload);
+
+    return res.status(200).json({
       success: true,
+      message: "Template updated successfully",
       data: template,
     });
   } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
+    console.error("Update Template Error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to update template",
+      error: error.message,
+    });
   }
 };
 
