@@ -707,13 +707,15 @@ exports.addProductToDeal = async (req, res) => {
       unitPrice,
     });
 
-    // Validate required fields
-    if (!dealId || !productId || !quantity || !unitPrice) {
+    // Validate required fields - check for both missing and empty string values
+    if (!dealId || dealId.trim() === "" || !productId || productId.trim() === "" || !quantity || !unitPrice) {
       console.log("❌ Missing required fields");
       return res.status(400).json({
+        statusCode: 400,
         status: "error",
         message:
           "Missing required fields: dealId, productId, quantity, unitPrice",
+        receivedValues: { dealId, productId, quantity, unitPrice }
       });
     }
 
@@ -793,6 +795,7 @@ exports.addProductToDeal = async (req, res) => {
     console.log("✅ Returning created deal product");
 
     res.status(201).json({
+      statusCode: 201,
       status: "success",
       message: "Product added to deal successfully",
       data: createdDealProduct,
@@ -801,6 +804,7 @@ exports.addProductToDeal = async (req, res) => {
     console.error("❌ Error adding product to deal:", error);
     console.error("❌ Error stack:", error.stack);
     res.status(500).json({
+      statusCode: 500,
       status: "error",
       message: "Failed to add product to deal",
       error: error.message,
