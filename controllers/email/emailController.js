@@ -11944,7 +11944,7 @@ exports.createEmailCampaignTemplate = async (req, res) => {
     const template = await EmailTemplate.create({
       templateName,
       subject,
-      body,
+      body: JSON.stringify(body),
       html,
       createdBy,
     });
