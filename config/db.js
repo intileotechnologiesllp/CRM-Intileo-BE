@@ -5,10 +5,10 @@ const { Sequelize } = require("sequelize");
 const centralSequelize = new Sequelize(
   process.env.CENTRAL_DB_NAME || "crm_central", 
   process.env.CENTRAL_DB_USER || "root", 
-  process.env.CENTRAL_DB_PASSWORD || "admin@123", 
+  process.env.CENTRAL_DB_PASSWORD || "Intileo@123", 
   {
-    host: process.env.CENTRAL_DB_HOST || "20.197.7.219",
-    port: process.env.CENTRAL_DB_PORT || 3307,
+    host: process.env.CENTRAL_DB_HOST || "213.136.77.55",
+    port: process.env.CENTRAL_DB_PORT || 3308,
     dialect: "mysql", 
     logging: false,
     define: {
