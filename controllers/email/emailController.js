@@ -10354,6 +10354,7 @@ exports.bulkSaleInboxLabelOperation = async (req, res) => {
 
 // 🚀 IMAP IDLE INTEGRATION - Real-time Email Synchronization
 const imapIdleManager = require('../../services/imapIdleManager');
+const EmailTemplate = require("../../models/email/emailTemplateModel");
 
 /**
  * 📧 Enhanced getEmails with Real-time IMAP IDLE Synchronization
@@ -11935,15 +11936,16 @@ exports.getDetailedConnectionStatus = async (req, res) => {
 /**
  * CREATE
  */
-exports.createTemplate = async (req, res) => {
+exports.createEmailCampaignTemplate = async (req, res) => {
   try {
-    const { templateName, subject, body } = req.body;
-    const createdBy = req.user.id; // from auth middleware
+    const { templateName, subject, body, html } = req.body;
+    const createdBy = req.adminId; // from auth middleware
 
     const template = await EmailTemplate.create({
       templateName,
       subject,
       body,
+      html,
       createdBy,
     });
 
@@ -11974,7 +11976,7 @@ exports.getAllTemplates = async (req, res) => {
 /**
  * READ BY ID
  */
-exports.getTemplateById = async (req, res) => {
+exports.getCampaignTemplateById = async (req, res) => {
   try {
     const { id } = req.params;
 
@@ -12028,7 +12030,7 @@ exports.updateTemplate = async (req, res) => {
 /**
  * DELETE
  */
-exports.deleteTemplate = async (req, res) => {
+exports.deleteCampaignTemplate = async (req, res) => {
   try {
     const { id } = req.params;
 
