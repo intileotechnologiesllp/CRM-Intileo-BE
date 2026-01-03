@@ -1,11 +1,11 @@
-const DASHBOARD = require("../../../models/insight/dashboardModel");
-const Report = require("../../../models/insight/reportModel");
-const Deal = require("../../../models/deals/dealsModels");
-const Lead = require("../../../models/leads/leadsModel");
-const Organization = require("../../../models/leads/leadOrganizationModel");
-const Person = require("../../../models/leads/leadPersonModel");
-const MasterUser = require("../../../models/master/masterUserModel");
-const ReportFolder = require("../../../models/insight/reportFolderModel");
+const DASHBOARD = require("../../models/insight/dashboardModel");
+const Report = require("../../models/insight/reportModel");
+const Deal = require("../../models/deals/dealsModels");
+const Lead = require("../../models/leads/leadsModel");
+const Organization = require("../../models/leads/leadOrganizationModel");
+const Person = require("../../models/leads/leadPersonModel");
+const MasterUser = require("../../models/master/masterUserModel");
+const ReportFolder = require("../../models/insight/reportFolderModel");
 const { Op, Sequelize } = require("sequelize");
 
 exports.createLeadPerformReport = async (req, res) => {

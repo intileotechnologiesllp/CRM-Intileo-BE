@@ -1,31 +1,31 @@
-const DASHBOARD = require("../../../models/insight/dashboardModel");
-const Report = require("../../../models/insight/reportModel");
-const Deal = require("../../../models/deals/dealsModels");
-const Lead = require("../../../models/leads/leadsModel");
-const Organization = require("../../../models/leads/leadOrganizationModel");
-const Person = require("../../../models/leads/leadPersonModel");
-const MasterUser = require("../../../models/master/masterUserModel");
-const Activity = require("../../../models/activity/activityModel");
-const ReportFolder = require("../../../models/insight/reportFolderModel");
-const Email = require("../../../models/email/emailModel")
+const DASHBOARD = require("../../models/insight/dashboardModel");
+const Report = require("../../models/insight/reportModel");
+const Deal = require("../../models/deals/dealsModels");
+const Lead = require("../../models/leads/leadsModel");
+const Organization = require("../../models/leads/leadOrganizationModel");
+const Person = require("../../models/leads/leadPersonModel");
+const MasterUser = require("../../models/master/masterUserModel");
+const Activity = require("../../models/activity/activityModel");
+const ReportFolder = require("../../models/insight/reportFolderModel");
+const Email = require("../../models/email/emailModel")
 const { Op, Sequelize } = require("sequelize");
-const { Pipeline } = require("../../../models");
-const { PipelineStage } = require("../../../models");
+const { Pipeline } = require("../../models");
+const { PipelineStage } = require("../../models");
 const {
   getLeadConditionObject,
-} = require("../../../utils/conditionObject/lead");
+} = require("../../utils/conditionObject/lead");
 const {
   getActivityConditionObject,
-} = require("../../../utils/conditionObject/activity");
+} = require("../../utils/conditionObject/activity");
 const {
   getDealConditionObject,
-} = require("../../../utils/conditionObject/deal");
+} = require("../../utils/conditionObject/deal");
 const {
   getPersonConditionObject,
-} = require("../../../utils/conditionObject/createPerson");
-const LeadPerson = require("../../../models/leads/leadPersonModel");
-const { Goal, Dashboard } = require("../../../models");
-const { groupActivitiesWithStats } = require("../../../utils/conditionObject/dateGrouping");
+} = require("../../utils/conditionObject/createPerson");
+const LeadPerson = require("../../models/leads/leadPersonModel");
+const { Goal, Dashboard } = require("../../models");
+const { groupActivitiesWithStats } = require("../../utils/conditionObject/dateGrouping");
 
 exports.createActivityReport = async (req, res) => {
   const { Report, MasterUser, Activity,  LeadPerson, Deal, Lead, LeadOrganization } = req.models;

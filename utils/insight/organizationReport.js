@@ -1,14 +1,15 @@
-const DASHBOARD = require("../../../models/insight/dashboardModel");
-const Report = require("../../../models/insight/reportModel");
-const Deal = require("../../../models/deals/dealsModels");
-const Lead = require("../../../models/leads/leadsModel");
-const Organization = require("../../../models/leads/leadOrganizationModel");
-const Person = require("../../../models/leads/leadPersonModel");
-const MasterUser = require("../../../models/master/masterUserModel");
-const Activity = require("../../../models/activity/activityModel");
-const ReportFolder = require("../../../models/insight/reportFolderModel");
+const DASHBOARD = require("../../models/insight/dashboardModel");
+const Report = require("../../models/insight/reportModel");
+const Deal = require("../../models/deals/dealsModels");
+const Lead = require("../../models/leads/leadsModel");
+const Organization = require("../../models/leads/leadOrganizationModel");
+const Person = require("../../models/leads/leadPersonModel");
+const MasterUser = require("../../models/master/masterUserModel");
+const Activity = require("../../models/activity/activityModel");
+const ReportFolder = require("../../models/insight/reportFolderModel");
 const { Op, Sequelize } = require("sequelize");
-const LeadPerson = require("../../../models/leads/leadPersonModel");
+const LeadPerson = require("../../models/leads/leadPersonModel");
+
 
 exports.createOrganizationReport = async (req, res) => {
   const { Report, MasterUser, LeadPerson, Lead, LeadOrganization } = req.models;
