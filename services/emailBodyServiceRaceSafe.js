@@ -29,9 +29,8 @@ const PROVIDER_CONFIG = {
  * @param {string} provider - Email provider (gmail, yandex, etc.)
  * @returns {Object} Result with body content
  */
-exports.fetchEmailBodyOnDemandSafe = async (emailID, masterUserID, provider = 'gmail') => {
+exports.fetchEmailBodyOnDemandSafe = async (emailID, masterUserID, provider = 'gmail',) => {
   let connection = null;
-  
   try {
     console.log(`[fetchEmailBodyOnDemandSafe] 🚀 Starting for emailID: ${emailID}, masterUserID: ${masterUserID}`);
     

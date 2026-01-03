@@ -2,7 +2,7 @@ const { Op } = require("sequelize");
 const LeadOrganization = require("../../models/leads/leadOrganizationModel");
 const { Person } = require("../../models");
 
-exports.getDealConditionObject = (column, operator, value, includeModels = []) => {
+exports.getDealConditionObject = (column, operator, value, includeModels = [], Activity, LeadPerson, Deal, Lead, LeadOrganization, MasterUser,) => {
   let conditionValue = value;
 
   // Check if column contains a dot (indicating a related table field)
@@ -47,7 +47,7 @@ exports.getDealConditionObject = (column, operator, value, includeModels = []) =
     // For related tables, use the proper Sequelize syntax
     if (tableAlias !== "Deal") {
       // Add the required include model
-      addIncludeModel(tableAlias, includeModels);
+      addIncludeModel(tableAlias, includeModels, Activity, LeadPerson, Deal, Lead, LeadOrganization, MasterUser,);
 
       // Return the condition with proper nested syntax
       if (operator === "between" || operator === "=" || operator === "is") {
@@ -108,7 +108,7 @@ exports.getDealConditionObject = (column, operator, value, includeModels = []) =
 
       // For related tables
       if (hasRelation) {
-        addIncludeModel(tableAlias, includeModels);
+        addIncludeModel(tableAlias, includeModels, Activity, LeadPerson, Deal, Lead, LeadOrganization, MasterUser,);
         return {
           [`$${tableAlias}.${fieldName}$`]: {
             [Op.between]: [startOfDay, endOfDay],
@@ -132,7 +132,7 @@ exports.getDealConditionObject = (column, operator, value, includeModels = []) =
 
       // For related tables
       if (hasRelation) {
-        addIncludeModel(tableAlias, includeModels);
+        addIncludeModel(tableAlias, includeModels, Activity, LeadPerson, Deal, Lead, LeadOrganization, MasterUser,);
         return {
           [`$${tableAlias}.${fieldName}$`]: {
             [Op.notBetween]: [startOfDay, endOfDay],
@@ -158,7 +158,7 @@ exports.getDealConditionObject = (column, operator, value, includeModels = []) =
 
   // Handle related table joins
   if (hasRelation) {
-    addIncludeModel(tableAlias, includeModels);
+    addIncludeModel(tableAlias, includeModels, Activity, LeadPerson, Deal, Lead, LeadOrganization, MasterUser,);
 
     const op = getSequelizeOperator(operator);
 
@@ -200,7 +200,7 @@ exports.getDealConditionObject = (column, operator, value, includeModels = []) =
 };
 
 // Helper function to add include models
-function addIncludeModel(tableAlias, includeModels) {
+function addIncludeModel(tableAlias, includeModels, Activity, LeadPerson, Deal, Lead, LeadOrganization, MasterUser,) {
   let modelConfig;
 
   switch (tableAlias) {
@@ -214,7 +214,7 @@ function addIncludeModel(tableAlias, includeModels) {
       break;
     case "Person":
       modelConfig = {
-        model: Person,
+        model: LeadPerson,
         as: "Person",
         required: false,
         attributes: [],
