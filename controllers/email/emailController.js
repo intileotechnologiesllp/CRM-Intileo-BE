@@ -12001,7 +12001,7 @@ exports.getCampaignTemplateById = async (req, res) => {
 exports.updateTemplate = async (req, res) => {
   try {
     const { id } = req.params;
-    const { templateName, subject, body } = req.body;
+    const { templateName, subject, body, html } = req.body;
 
     const template = await EmailTemplate.findByPk(id);
 
@@ -12015,7 +12015,8 @@ exports.updateTemplate = async (req, res) => {
     await template.update({
       templateName,
       subject,
-      body,
+      body: JSON.stringify(body),
+      html
     });
 
     res.json({
