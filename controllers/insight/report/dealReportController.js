@@ -3196,6 +3196,7 @@ exports.saveDealPerformReport = async (req, res) => {
 };
 
 exports.getDealPerformReportSummary = async (req, res) => {
+  const { Report, MasterUser, Activity,  LeadPerson, Deal, Lead, LeadOrganization, Dashboard } = req.models;
   try {
     const {
       reportId,
@@ -3269,7 +3270,8 @@ exports.getDealPerformReportSummary = async (req, res) => {
             cond.column,
             cond.operator,
             cond.value,
-            filterIncludeModels
+            filterIncludeModels,
+            Lead, Deal, LeadOrganization, LeadPerson
           );
         });
 
@@ -3383,7 +3385,8 @@ exports.getDealPerformReportSummary = async (req, res) => {
         segmentedBy,
         filters,
         page,
-        limit
+        limit,
+        MasterUser, Activity,  LeadPerson, Deal, Lead, LeadOrganization
       );
       reportData = reportResult.data;
 
@@ -3469,7 +3472,8 @@ exports.getDealPerformReportSummary = async (req, res) => {
         existingSegmentedBy,
         existingfilters,
         page,
-        limit
+        limit,
+        MasterUser, Activity,  LeadPerson, Deal, Lead, LeadOrganization
       );
       reportData = reportResult.data;
 

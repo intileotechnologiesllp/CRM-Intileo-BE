@@ -2000,7 +2000,7 @@ function getSequelizeOperator(operator) {
 }
 
 exports.createActivityReportDrillDown = async (req, res) => {
-  const { Report, MasterUser, Activity,  LeadPerson, Deal, Lead, LeadOrganization, PipelineStage, Email } = req.models;
+  const { Report,  Activity,  LeadPerson, Deal, Lead, LeadOrganization , MasterUser, Dashboard, PipelineStage, Email } = req.models;
   try {
     const {
       xaxis,
@@ -2266,7 +2266,7 @@ async function generateActivityPerformanceDataForDrillDown(
   entity,
   isDate,
   masterUserId,
-  Activity, LeadPerson, Deal, Lead, LeadOrganization, MasterUser, Dashboard, PipelineStage, Email
+  Activity, LeadPerson, Deal, Lead, LeadOrganization, MasterUser, Dashboard, PipelineStage, Email, Goal
 ) {
   let includeModels = [];
   const baseWhere = {};
@@ -2299,7 +2299,8 @@ async function generateActivityPerformanceDataForDrillDown(
           cond.column,
           cond.operator,
           cond.value,
-          filterIncludeModels
+          filterIncludeModels,
+          Activity, LeadPerson, Deal, Lead, LeadOrganization, MasterUser,
         );
       });
 
@@ -2498,7 +2499,7 @@ async function generateDealProgressDrillDownForActivity(
   page = 1,
   limit = 50,
   masterUserId,
-  Activity, LeadPerson, Deal, Lead, LeadOrganization, MasterUser, Dashboard, PipelineStage, Email
+  Activity, LeadPerson, Deal, Lead, LeadOrganization, MasterUser, Dashboard, Pipeline, PipelineStage, Email
 
 ) {
   const baseWhere = {};
@@ -2530,7 +2531,7 @@ async function generateDealProgressDrillDownForActivity(
 
     if (validConditions.length > 0) {
       const conditions = validConditions.map((cond) => {
-        return getDealConditionObject(cond.column, cond.operator, cond.value, []);
+        return getDealConditionObject(cond.column, cond.operator, cond.value, [], Activity, LeadPerson, Deal, Lead, LeadOrganization, MasterUser,);
       });
 
       let combinedCondition = conditions[0];

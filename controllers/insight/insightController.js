@@ -1087,7 +1087,7 @@ exports.createReport = async (req, res) => {
 };
 
 exports.getReportsForDashboard = async (req, res) => {
-  const {Dashboard, Goal, Report} = req.models;
+  const {Dashboard, Goal, Report, Lead, Deal, Activity} = req.models;
   try {
     const { dashboardId } = req.params;
     const ownerId = req.adminId;
@@ -1118,7 +1118,7 @@ exports.getReportsForDashboard = async (req, res) => {
     // Generate report data for each report
     const reportsWithData = await Promise.all(
       reports.map(async (report) => {
-        const reportData = await generateReportData(report, ownerId);
+        const reportData = await generateReportData(report, ownerId, Lead, Deal, Activity);
         return {
           ...report.toJSON(),
           data: reportData,
@@ -1230,7 +1230,7 @@ exports.deleteReport = async (req, res) => {
 };
 
 exports.getReportData = async (req, res) => {
-  const {Dashboard, Goal, Report} = req.models;
+  const {Dashboard, Goal, Report, Lead, Deal, Activity} = req.models;
   try {
     const { reportId } = req.params;
     const ownerId = req.adminId;
@@ -1253,7 +1253,7 @@ exports.getReportData = async (req, res) => {
       });
     }
 
-    const reportData = await generateReportData(report, ownerId);
+    const reportData = await generateReportData(report, ownerId, Lead, Deal, Activity);
 
     res.status(200).json({
       success: true,
@@ -5920,7 +5920,7 @@ async function processGoalData(goal, ownerId, periodFilter, startDateFilter = nu
 
 // =============== HELPER FUNCTIONS ===============
 
-async function generateReportData(report, ownerId) {
+async function generateReportData(report, ownerId, Lead, Deal, Activity) {
   try {
     const { entity, type, config } = report;
     const period = config.period || "this_month";
@@ -5931,11 +5931,11 @@ async function generateReportData(report, ownerId) {
     let data = {};
 
     if (entity === "Deal") {
-      data = await generateDealReportData(type, config, dateRange, ownerId);
+      data = await generateDealReportData(type, config, dateRange, ownerId, Lead, Deal, Activity);
     } else if (entity === "Lead") {
-      data = await generateLeadReportData(type, config, dateRange, ownerId);
+      data = await generateLeadReportData(type, config, dateRange, ownerId, Lead, Deal, Activity);
     } else if (entity === "Activity") {
-      data = await generateActivityReportData(type, config, dateRange, ownerId);
+      data = await generateActivityReportData(type, config, dateRange, ownerId, Lead, Deal, Activity);
     }
 
     return {
@@ -5953,7 +5953,7 @@ async function generateReportData(report, ownerId) {
   }
 }
 
-async function generateDealReportData(type, config, dateRange, ownerId) {
+async function generateDealReportData(type, config, dateRange, ownerId, Lead, Deal, Activity) {
   const whereClause = {
     createdAt: {
       [Op.between]: [dateRange.start, dateRange.end],
@@ -6055,7 +6055,7 @@ async function generateDealReportData(type, config, dateRange, ownerId) {
   }
 }
 
-async function generateLeadReportData(type, config, dateRange, ownerId) {
+async function generateLeadReportData(type, config, dateRange, ownerId, Lead, Deal, Activity) {
   const whereClause = {
     createdAt: {
       [Op.between]: [dateRange.start, dateRange.end],
@@ -6093,7 +6093,7 @@ async function generateLeadReportData(type, config, dateRange, ownerId) {
   };
 }
 
-async function generateActivityReportData(type, config, dateRange, ownerId) {
+async function generateActivityReportData(type, config, dateRange, ownerId, Lead, Deal, Activity) {
   const whereClause = {
     createdAt: {
       [Op.between]: [dateRange.start, dateRange.end],
@@ -6136,579 +6136,579 @@ async function generateActivityReportData(type, config, dateRange, ownerId) {
 }
 
 // Helper function to generate breakdown data for goals (used in getGoalsForDashboard)
-async function generateGoalBreakdownData(
-  goal,
-  ownerId,
-  periodFilter = "goal_duration"
-) {
-  const {
-    entity,
-    goalType,
-    assignee,
-    assignId,
-    pipeline,
-    pipelineStage,
-    startDate,
-    endDate,
-    trackingMetric,
-    activityType,
-  } = goal;
+// async function generateGoalBreakdownData(
+//   goal,
+//   ownerId,
+//   periodFilter = "goal_duration"
+// ) {
+//   const {
+//     entity,
+//     goalType,
+//     assignee,
+//     assignId,
+//     pipeline,
+//     pipelineStage,
+//     startDate,
+//     endDate,
+//     trackingMetric,
+//     activityType,
+//   } = goal;
 
-  // Helper function to get date range for period filters
-  function getPeriodRange(filter) {
-    const now = new Date();
-    let start, end;
-    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+//   // Helper function to get date range for period filters
+//   function getPeriodRange(filter) {
+//     const now = new Date();
+//     let start, end;
+//     const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
 
-    switch ((filter || "").toLowerCase()) {
-      case "yesterday":
-        start = new Date(today);
-        start.setDate(start.getDate() - 1);
-        end = new Date(today);
-        end.setDate(end.getDate() - 1);
-        end.setHours(23, 59, 59, 999);
-        break;
-      case "today":
-        start = new Date(today);
-        end = new Date(today);
-        end.setHours(23, 59, 59, 999);
-        break;
-      case "this_week":
-        start = new Date(today);
-        start.setDate(start.getDate() - start.getDay());
-        end = new Date(start);
-        end.setDate(start.getDate() + 6);
-        end.setHours(23, 59, 59, 999);
-        break;
-      case "last_week":
-        start = new Date(today);
-        start.setDate(start.getDate() - start.getDay() - 7);
-        end = new Date(start);
-        end.setDate(start.getDate() + 6);
-        end.setHours(23, 59, 59, 999);
-        break;
-      case "this_month":
-        start = new Date(now.getFullYear(), now.getMonth(), 1);
-        end = new Date(
-          now.getFullYear(),
-          now.getMonth() + 1,
-          0,
-          23,
-          59,
-          59,
-          999
-        );
-        break;
-      case "last_month":
-        start = new Date(now.getFullYear(), now.getMonth() - 1, 1);
-        end = new Date(now.getFullYear(), now.getMonth(), 0, 23, 59, 59, 999);
-        break;
-      case "this_year":
-        start = new Date(now.getFullYear(), 0, 1);
-        end = new Date(now.getFullYear(), 11, 31, 23, 59, 59, 999);
-        break;
-      case "last_year":
-        start = new Date(now.getFullYear() - 1, 0, 1);
-        end = new Date(now.getFullYear() - 1, 11, 31, 23, 59, 59, 999);
-        break;
-      case "goal_duration":
-      default:
-        // Use goal's startDate and endDate (or current date if indefinite)
-        start = startDate;
-        end = endDate || now;
-    }
-    return { start, end };
-  }
+//     switch ((filter || "").toLowerCase()) {
+//       case "yesterday":
+//         start = new Date(today);
+//         start.setDate(start.getDate() - 1);
+//         end = new Date(today);
+//         end.setDate(end.getDate() - 1);
+//         end.setHours(23, 59, 59, 999);
+//         break;
+//       case "today":
+//         start = new Date(today);
+//         end = new Date(today);
+//         end.setHours(23, 59, 59, 999);
+//         break;
+//       case "this_week":
+//         start = new Date(today);
+//         start.setDate(start.getDate() - start.getDay());
+//         end = new Date(start);
+//         end.setDate(start.getDate() + 6);
+//         end.setHours(23, 59, 59, 999);
+//         break;
+//       case "last_week":
+//         start = new Date(today);
+//         start.setDate(start.getDate() - start.getDay() - 7);
+//         end = new Date(start);
+//         end.setDate(start.getDate() + 6);
+//         end.setHours(23, 59, 59, 999);
+//         break;
+//       case "this_month":
+//         start = new Date(now.getFullYear(), now.getMonth(), 1);
+//         end = new Date(
+//           now.getFullYear(),
+//           now.getMonth() + 1,
+//           0,
+//           23,
+//           59,
+//           59,
+//           999
+//         );
+//         break;
+//       case "last_month":
+//         start = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+//         end = new Date(now.getFullYear(), now.getMonth(), 0, 23, 59, 59, 999);
+//         break;
+//       case "this_year":
+//         start = new Date(now.getFullYear(), 0, 1);
+//         end = new Date(now.getFullYear(), 11, 31, 23, 59, 59, 999);
+//         break;
+//       case "last_year":
+//         start = new Date(now.getFullYear() - 1, 0, 1);
+//         end = new Date(now.getFullYear() - 1, 11, 31, 23, 59, 59, 999);
+//         break;
+//       case "goal_duration":
+//       default:
+//         // Use goal's startDate and endDate (or current date if indefinite)
+//         start = startDate;
+//         end = endDate || now;
+//     }
+//     return { start, end };
+//   }
 
-  // Build where clause based on goal criteria and period filter
-  let start, end;
-  try {
-    ({ start, end } = getPeriodRange(periodFilter));
-    // If start or end is invalid, fallback to goal duration
-    if (
-      !start ||
-      !end ||
-      isNaN(new Date(start).getTime()) ||
-      isNaN(new Date(end).getTime())
-    ) {
-      start = startDate;
-      end = endDate || new Date();
-    }
-  } catch (e) {
-    // Fallback to goal duration if getPeriodRange fails
-    start = startDate;
-    end = endDate || new Date();
-  }
+//   // Build where clause based on goal criteria and period filter
+//   let start, end;
+//   try {
+//     ({ start, end } = getPeriodRange(periodFilter));
+//     // If start or end is invalid, fallback to goal duration
+//     if (
+//       !start ||
+//       !end ||
+//       isNaN(new Date(start).getTime()) ||
+//       isNaN(new Date(end).getTime())
+//     ) {
+//       start = startDate;
+//       end = endDate || new Date();
+//     }
+//   } catch (e) {
+//     // Fallback to goal duration if getPeriodRange fails
+//     start = startDate;
+//     end = endDate || new Date();
+//   }
 
-  const whereClause = {
-    createdAt: {
-      [Op.between]: [start, end],
-    },
-  };
+//   const whereClause = {
+//     createdAt: {
+//       [Op.between]: [start, end],
+//     },
+//   };
 
-  // Add assignee filter based on assignId and assignee values
-  if (assignId && assignId !== "everyone") {
-    // Specific user assigned
-    whereClause.masterUserID = assignId;
-  } else if (
-    assignee &&
-    assignee !== "All" &&
-    assignee !== "Company (everyone)" &&
-    assignee !== "everyone"
-  ) {
-    // Legacy assignee field (for backward compatibility)
-    whereClause.masterUserID = assignee;
-  }
+//   // Add assignee filter based on assignId and assignee values
+//   if (assignId && assignId !== "everyone") {
+//     // Specific user assigned
+//     whereClause.masterUserID = assignId;
+//   } else if (
+//     assignee &&
+//     assignee !== "All" &&
+//     assignee !== "Company (everyone)" &&
+//     assignee !== "everyone"
+//   ) {
+//     // Legacy assignee field (for backward compatibility)
+//     whereClause.masterUserID = assignee;
+//   }
 
-  // Add pipeline filter if specified
-  if (pipeline && entity === "Deal") {
-    if (pipeline.includes(",")) {
-      // Multiple pipelines (comma-separated)
-      const pipelines = pipeline
-        .split(",")
-        .map((p) => p.trim())
-        .filter((p) => p !== "");
-      whereClause.pipeline = {
-        [Op.in]: pipelines,
-      };
-    } else {
-      // Single pipeline
-      whereClause.pipeline = pipeline;
-    }
-  }
+//   // Add pipeline filter if specified
+//   if (pipeline && entity === "Deal") {
+//     if (pipeline.includes(",")) {
+//       // Multiple pipelines (comma-separated)
+//       const pipelines = pipeline
+//         .split(",")
+//         .map((p) => p.trim())
+//         .filter((p) => p !== "");
+//       whereClause.pipeline = {
+//         [Op.in]: pipelines,
+//       };
+//     } else {
+//       // Single pipeline
+//       whereClause.pipeline = pipeline;
+//     }
+//   }
 
-  let breakdown = [];
-  let summary = {};
+//   let breakdown = [];
+//   let summary = {};
 
-  try {
-    if (entity === "Deal") {
-      // Handle different goal types with specific logic
-      if (goalType === "Progressed") {
-        // Use DealStageHistory for accurate stage progression tracking
-        if (pipelineStage) {
-          // Only filter by columns that exist in DealStageHistory
-          const stageHistoryWhereClause = {
-            newStage: pipelineStage,
-            updatedAt: {
-              [Op.between]: [start, end],
-            },
-          };
+//   try {
+//     if (entity === "Deal") {
+//       // Handle different goal types with specific logic
+//       if (goalType === "Progressed") {
+//         // Use DealStageHistory for accurate stage progression tracking
+//         if (pipelineStage) {
+//           // Only filter by columns that exist in DealStageHistory
+//           const stageHistoryWhereClause = {
+//             newStage: pipelineStage,
+//             updatedAt: {
+//               [Op.between]: [start, end],
+//             },
+//           };
 
-          // Build Deal include where clause for pipeline and assignee
-          const dealWhere = {};
-          if (pipeline) {
-            if (pipeline.includes(",")) {
-              const pipelines = pipeline
-                .split(",")
-                .map((p) => p.trim())
-                .filter((p) => p !== "");
-              dealWhere.pipeline = { [Op.in]: pipelines };
-            } else {
-              dealWhere.pipeline = pipeline;
-            }
-          }
-          if (assignId && assignId !== "everyone") {
-            dealWhere.masterUserID = assignId;
-          } else if (
-            assignee &&
-            assignee !== "All" &&
-            assignee !== "Company (everyone)" &&
-            assignee !== "everyone"
-          ) {
-            dealWhere.masterUserID = assignee;
-          }
+//           // Build Deal include where clause for pipeline and assignee
+//           const dealWhere = {};
+//           if (pipeline) {
+//             if (pipeline.includes(",")) {
+//               const pipelines = pipeline
+//                 .split(",")
+//                 .map((p) => p.trim())
+//                 .filter((p) => p !== "");
+//               dealWhere.pipeline = { [Op.in]: pipelines };
+//             } else {
+//               dealWhere.pipeline = pipeline;
+//             }
+//           }
+//           if (assignId && assignId !== "everyone") {
+//             dealWhere.masterUserID = assignId;
+//           } else if (
+//             assignee &&
+//             assignee !== "All" &&
+//             assignee !== "Company (everyone)" &&
+//             assignee !== "everyone"
+//           ) {
+//             dealWhere.masterUserID = assignee;
+//           }
 
-          const includeClause = [
-            {
-              model: Deal,
-              where: Object.keys(dealWhere).length > 0 ? dealWhere : undefined,
-              required: true,
-            },
-          ];
+//           const includeClause = [
+//             {
+//               model: Deal,
+//               where: Object.keys(dealWhere).length > 0 ? dealWhere : undefined,
+//               required: true,
+//             },
+//           ];
 
-          const stageEntries = await DealStageHistory.findAll({
-            where: stageHistoryWhereClause,
-            include: includeClause,
-            attributes: [
-              "dealId",
-              "oldStage",
-              "newStage",
-              "updatedAt",
-              "dealValue",
-            ],
-            order: [["updatedAt", "DESC"]],
-          });
+//           const stageEntries = await DealStageHistory.findAll({
+//             where: stageHistoryWhereClause,
+//             include: includeClause,
+//             attributes: [
+//               "dealId",
+//               "oldStage",
+//               "newStage",
+//               "updatedAt",
+//               "dealValue",
+//             ],
+//             order: [["updatedAt", "DESC"]],
+//           });
 
-          const currentValue =
-            trackingMetric === "Value"
-              ? stageEntries.reduce(
-                  (sum, entry) => sum + parseFloat(entry.dealValue || 0),
-                  0
-                )
-              : stageEntries.length;
+//           const currentValue =
+//             trackingMetric === "Value"
+//               ? stageEntries.reduce(
+//                   (sum, entry) => sum + parseFloat(entry.dealValue || 0),
+//                   0
+//                 )
+//               : stageEntries.length;
 
-          summary = {
-            totalCount: stageEntries.length,
-            totalValue: stageEntries.reduce(
-              (sum, entry) => sum + parseFloat(entry.dealValue || 0),
-              0
-            ),
-            goalTarget: parseFloat(goal.targetValue),
-            trackingMetric: trackingMetric,
-            progress: {
-              current: currentValue,
-              target: parseFloat(goal.targetValue),
-              percentage: Math.min(
-                100,
-                Math.round((currentValue / parseFloat(goal.targetValue)) * 100)
-              ),
-            },
-          };
+//           summary = {
+//             totalCount: stageEntries.length,
+//             totalValue: stageEntries.reduce(
+//               (sum, entry) => sum + parseFloat(entry.dealValue || 0),
+//               0
+//             ),
+//             goalTarget: parseFloat(goal.targetValue),
+//             trackingMetric: trackingMetric,
+//             progress: {
+//               current: currentValue,
+//               target: parseFloat(goal.targetValue),
+//               percentage: Math.min(
+//                 100,
+//                 Math.round((currentValue / parseFloat(goal.targetValue)) * 100)
+//               ),
+//             },
+//           };
 
-          // Generate breakdown by stage entry date
-          breakdown =
-            goal.period === "Weekly"
-              ? generateWeeklyBreakdownForProgressed(
-                  stageEntries,
-                  goal,
-                  trackingMetric,
-                  start,
-                  end
-                )
-              : generateMonthlyBreakdownForProgressed(
-                  stageEntries,
-                  goal,
-                  trackingMetric,
-                  start,
-                  end
-                );
-        }
-      } else if (goalType === "Added") {
-        const addedDeals = await Deal.findAll({
-          where: whereClause,
-          attributes: [
-            "dealId",
-            "title",
-            "value",
-            "pipeline",
-            "pipelineStage",
-            "status",
-            "masterUserID",
-            "createdAt",
-          ],
-          order: [["createdAt", "DESC"]],
-        });
+//           // Generate breakdown by stage entry date
+//           breakdown =
+//             goal.period === "Weekly"
+//               ? generateWeeklyBreakdownForProgressed(
+//                   stageEntries,
+//                   goal,
+//                   trackingMetric,
+//                   start,
+//                   end
+//                 )
+//               : generateMonthlyBreakdownForProgressed(
+//                   stageEntries,
+//                   goal,
+//                   trackingMetric,
+//                   start,
+//                   end
+//                 );
+//         }
+//       } else if (goalType === "Added") {
+//         const addedDeals = await Deal.findAll({
+//           where: whereClause,
+//           attributes: [
+//             "dealId",
+//             "title",
+//             "value",
+//             "pipeline",
+//             "pipelineStage",
+//             "status",
+//             "masterUserID",
+//             "createdAt",
+//           ],
+//           order: [["createdAt", "DESC"]],
+//         });
 
-        const currentValue =
-          trackingMetric === "Value"
-            ? addedDeals.reduce(
-                (sum, deal) => sum + parseFloat(deal.value || 0),
-                0
-              )
-            : addedDeals.length;
+//         const currentValue =
+//           trackingMetric === "Value"
+//             ? addedDeals.reduce(
+//                 (sum, deal) => sum + parseFloat(deal.value || 0),
+//                 0
+//               )
+//             : addedDeals.length;
 
-        summary = {
-          totalCount: addedDeals.length,
-          totalValue: addedDeals.reduce(
-            (sum, deal) => sum + parseFloat(deal.value || 0),
-            0
-          ),
-          goalTarget: parseFloat(goal.targetValue),
-          trackingMetric: trackingMetric,
-          progress: {
-            current: currentValue,
-            target: parseFloat(goal.targetValue),
-            percentage: Math.min(
-              100,
-              Math.round((currentValue / parseFloat(goal.targetValue)) * 100)
-            ),
-          },
-        };
+//         summary = {
+//           totalCount: addedDeals.length,
+//           totalValue: addedDeals.reduce(
+//             (sum, deal) => sum + parseFloat(deal.value || 0),
+//             0
+//           ),
+//           goalTarget: parseFloat(goal.targetValue),
+//           trackingMetric: trackingMetric,
+//           progress: {
+//             current: currentValue,
+//             target: parseFloat(goal.targetValue),
+//             percentage: Math.min(
+//               100,
+//               Math.round((currentValue / parseFloat(goal.targetValue)) * 100)
+//             ),
+//           },
+//         };
 
-        breakdown =
-          goal.period === "Weekly"
-            ? generateWeeklyBreakdown(
-                addedDeals,
-                goal,
-                trackingMetric,
-                "Deal",
-                start,
-                end
-              )
-            : generateMonthlyBreakdown(
-                addedDeals,
-                goal,
-                trackingMetric,
-                "Deal",
-                start,
-                end
-              );
-      } else if (goalType === "Won") {
-        const wonWhereClause = {
-          ...whereClause,
-          status: "won",
-          updatedAt: {
-            [Op.between]: [start, end],
-          },
-        };
+//         breakdown =
+//           goal.period === "Weekly"
+//             ? generateWeeklyBreakdown(
+//                 addedDeals,
+//                 goal,
+//                 trackingMetric,
+//                 "Deal",
+//                 start,
+//                 end
+//               )
+//             : generateMonthlyBreakdown(
+//                 addedDeals,
+//                 goal,
+//                 trackingMetric,
+//                 "Deal",
+//                 start,
+//                 end
+//               );
+//       } else if (goalType === "Won") {
+//         const wonWhereClause = {
+//           ...whereClause,
+//           status: "won",
+//           updatedAt: {
+//             [Op.between]: [start, end],
+//           },
+//         };
 
-        const wonDeals = await Deal.findAll({
-          where: wonWhereClause,
-          attributes: [
-            "dealId",
-            "title",
-            "value",
-            "pipeline",
-            "pipelineStage",
-            "status",
-            "masterUserID",
-            "updatedAt",
-          ],
-          order: [["updatedAt", "DESC"]],
-        });
+//         const wonDeals = await Deal.findAll({
+//           where: wonWhereClause,
+//           attributes: [
+//             "dealId",
+//             "title",
+//             "value",
+//             "pipeline",
+//             "pipelineStage",
+//             "status",
+//             "masterUserID",
+//             "updatedAt",
+//           ],
+//           order: [["updatedAt", "DESC"]],
+//         });
 
-        const currentValue =
-          trackingMetric === "Value"
-            ? wonDeals.reduce(
-                (sum, deal) => sum + parseFloat(deal.value || 0),
-                0
-              )
-            : wonDeals.length;
+//         const currentValue =
+//           trackingMetric === "Value"
+//             ? wonDeals.reduce(
+//                 (sum, deal) => sum + parseFloat(deal.value || 0),
+//                 0
+//               )
+//             : wonDeals.length;
 
-        summary = {
-          totalCount: wonDeals.length,
-          totalValue: wonDeals.reduce(
-            (sum, deal) => sum + parseFloat(deal.value || 0),
-            0
-          ),
-          goalTarget: parseFloat(goal.targetValue),
-          trackingMetric: trackingMetric,
-          progress: {
-            current: currentValue,
-            target: parseFloat(goal.targetValue),
-            percentage: Math.min(
-              100,
-              Math.round((currentValue / parseFloat(goal.targetValue)) * 100)
-            ),
-          },
-        };
+//         summary = {
+//           totalCount: wonDeals.length,
+//           totalValue: wonDeals.reduce(
+//             (sum, deal) => sum + parseFloat(deal.value || 0),
+//             0
+//           ),
+//           goalTarget: parseFloat(goal.targetValue),
+//           trackingMetric: trackingMetric,
+//           progress: {
+//             current: currentValue,
+//             target: parseFloat(goal.targetValue),
+//             percentage: Math.min(
+//               100,
+//               Math.round((currentValue / parseFloat(goal.targetValue)) * 100)
+//             ),
+//           },
+//         };
 
-        breakdown =
-          goal.period === "Weekly"
-            ? generateWeeklyBreakdown(
-                wonDeals,
-                goal,
-                trackingMetric,
-                "Deal",
-                start,
-                end
-              )
-            : generateMonthlyBreakdown(
-                wonDeals,
-                goal,
-                trackingMetric,
-                "Deal",
-                start,
-                end
-              );
-      }
-    } else if (entity === "Activity") {
-      // Build where clause for activities
-      const activityWhereClause = { ...whereClause };
+//         breakdown =
+//           goal.period === "Weekly"
+//             ? generateWeeklyBreakdown(
+//                 wonDeals,
+//                 goal,
+//                 trackingMetric,
+//                 "Deal",
+//                 start,
+//                 end
+//               )
+//             : generateMonthlyBreakdown(
+//                 wonDeals,
+//                 goal,
+//                 trackingMetric,
+//                 "Deal",
+//                 start,
+//                 end
+//               );
+//       }
+//     } else if (entity === "Activity") {
+//       // Build where clause for activities
+//       const activityWhereClause = { ...whereClause };
 
-      // Add activity type filter if specified
-      if (activityType) {
-        if (activityType.includes(",")) {
-          // Multiple activity types (comma-separated)
-          const activityTypes = activityType
-            .split(",")
-            .map((type) => type.trim())
-            .filter((type) => type !== "");
-          activityWhereClause.type = {
-            [Op.in]: activityTypes,
-          };
-        } else {
-          // Single activity type
-          activityWhereClause.type = activityType;
-        }
-      }
+//       // Add activity type filter if specified
+//       if (activityType) {
+//         if (activityType.includes(",")) {
+//           // Multiple activity types (comma-separated)
+//           const activityTypes = activityType
+//             .split(",")
+//             .map((type) => type.trim())
+//             .filter((type) => type !== "");
+//           activityWhereClause.type = {
+//             [Op.in]: activityTypes,
+//           };
+//         } else {
+//           // Single activity type
+//           activityWhereClause.type = activityType;
+//         }
+//       }
 
-      // Add pipeline filter for Activity goals via Deal association
-      const includeClause = [];
-      if (pipeline) {
-        const dealWhereClause = {};
-        if (pipeline.includes(",")) {
-          const pipelines = pipeline
-            .split(",")
-            .map((p) => p.trim())
-            .filter((p) => p !== "");
-          dealWhereClause.pipeline = {
-            [Op.in]: pipelines,
-          };
-        } else {
-          dealWhereClause.pipeline = pipeline;
-        }
+//       // Add pipeline filter for Activity goals via Deal association
+//       const includeClause = [];
+//       if (pipeline) {
+//         const dealWhereClause = {};
+//         if (pipeline.includes(",")) {
+//           const pipelines = pipeline
+//             .split(",")
+//             .map((p) => p.trim())
+//             .filter((p) => p !== "");
+//           dealWhereClause.pipeline = {
+//             [Op.in]: pipelines,
+//           };
+//         } else {
+//           dealWhereClause.pipeline = pipeline;
+//         }
 
-        includeClause.push({
-          model: Deal,
-          where: dealWhereClause,
-          required: true,
-        });
-      }
+//         includeClause.push({
+//           model: Deal,
+//           where: dealWhereClause,
+//           required: true,
+//         });
+//       }
 
-      if (goalType === "Added") {
-        const tableName = Activity;
-        const columnNames = Object.keys(tableName.rawAttributes);
-        const addedActivities = await Activity.findAll({
-          where: activityWhereClause,
-          include: includeClause,
-          attributes: [
-            ...columnNames,
-            // "activityId",
-            // "type",
-            // "isDone",
-            // "masterUserID",
-            // "dealId",
-            // "createdAt",
-            // "assignedTo",
-            // "markedAsDoneTime",
-          ],
-          include: [
-            {
-              model: MasterUser,
-              attributes: [["name", "assignToUser"]],
-              as: "assignedUser", // <-- must match the alias in the association
-              required: false,
-            },
-          ],
-          order: [["createdAt", "DESC"]],
-        });
+//       if (goalType === "Added") {
+//         const tableName = Activity;
+//         const columnNames = Object.keys(tableName.rawAttributes);
+//         const addedActivities = await Activity.findAll({
+//           where: activityWhereClause,
+//           include: includeClause,
+//           attributes: [
+//             ...columnNames,
+//             // "activityId",
+//             // "type",
+//             // "isDone",
+//             // "masterUserID",
+//             // "dealId",
+//             // "createdAt",
+//             // "assignedTo",
+//             // "markedAsDoneTime",
+//           ],
+//           include: [
+//             {
+//               model: MasterUser,
+//               attributes: [["name", "assignToUser"]],
+//               as: "assignedUser", // <-- must match the alias in the association
+//               required: false,
+//             },
+//           ],
+//           order: [["createdAt", "DESC"]],
+//         });
 
-        const currentValue = addedActivities.length;
+//         const currentValue = addedActivities.length;
 
-        summary = {
-          totalCount: addedActivities.length,
-          goalTarget: parseFloat(goal.targetValue),
-          trackingMetric: "Count",
-          progress: {
-            current: currentValue,
-            target: parseFloat(goal.targetValue),
-            percentage: Math.min(
-              100,
-              Math.round((currentValue / parseFloat(goal.targetValue)) * 100)
-            ),
-          },
-        };
+//         summary = {
+//           totalCount: addedActivities.length,
+//           goalTarget: parseFloat(goal.targetValue),
+//           trackingMetric: "Count",
+//           progress: {
+//             current: currentValue,
+//             target: parseFloat(goal.targetValue),
+//             percentage: Math.min(
+//               100,
+//               Math.round((currentValue / parseFloat(goal.targetValue)) * 100)
+//             ),
+//           },
+//         };
 
-        breakdown =
-          goal.period === "Weekly"
-            ? generateWeeklyBreakdown(
-                addedActivities,
-                goal,
-                "Count",
-                "Activity",
-                start,
-                end
-              )
-            : generateMonthlyBreakdown(
-                addedActivities,
-                goal,
-                "Count",
-                "Activity",
-                start,
-                end
-              );
-      } else if (goalType === "Completed") {
-        activityWhereClause.isDone = true;
-        const tableName = Activity;
-        const columnNames = Object.keys(tableName.rawAttributes);
-        const completedActivities = await Activity.findAll({
-          where: activityWhereClause,
-          include: includeClause,
-          attributes: [
-            ...columnNames,
-            // "activityId",
-            // "type",
-            // "isDone",
-            // "masterUserID",
-            // "dealId",
-            // "updatedAt",
-            // "assignedTo",
-            // "markedAsDoneTime",
-          ],
-          include: [
-            {
-              model: MasterUser,
-              attributes: [["name", "assignToUser"]],
-              as: "assignedUser", // <-- must match the alias in the association
-              required: false,
-            },
-          ],
-          order: [["updatedAt", "DESC"]],
-        });
+//         breakdown =
+//           goal.period === "Weekly"
+//             ? generateWeeklyBreakdown(
+//                 addedActivities,
+//                 goal,
+//                 "Count",
+//                 "Activity",
+//                 start,
+//                 end
+//               )
+//             : generateMonthlyBreakdown(
+//                 addedActivities,
+//                 goal,
+//                 "Count",
+//                 "Activity",
+//                 start,
+//                 end
+//               );
+//       } else if (goalType === "Completed") {
+//         activityWhereClause.isDone = true;
+//         const tableName = Activity;
+//         const columnNames = Object.keys(tableName.rawAttributes);
+//         const completedActivities = await Activity.findAll({
+//           where: activityWhereClause,
+//           include: includeClause,
+//           attributes: [
+//             ...columnNames,
+//             // "activityId",
+//             // "type",
+//             // "isDone",
+//             // "masterUserID",
+//             // "dealId",
+//             // "updatedAt",
+//             // "assignedTo",
+//             // "markedAsDoneTime",
+//           ],
+//           include: [
+//             {
+//               model: MasterUser,
+//               attributes: [["name", "assignToUser"]],
+//               as: "assignedUser", // <-- must match the alias in the association
+//               required: false,
+//             },
+//           ],
+//           order: [["updatedAt", "DESC"]],
+//         });
 
-        const currentValue = completedActivities.length;
+//         const currentValue = completedActivities.length;
 
-        summary = {
-          totalCount: completedActivities.length,
-          goalTarget: parseFloat(goal.targetValue),
-          trackingMetric: "Count",
-          progress: {
-            current: currentValue,
-            target: parseFloat(goal.targetValue),
-            percentage: Math.min(
-              100,
-              Math.round((currentValue / parseFloat(goal.targetValue)) * 100)
-            ),
-          },
-        };
+//         summary = {
+//           totalCount: completedActivities.length,
+//           goalTarget: parseFloat(goal.targetValue),
+//           trackingMetric: "Count",
+//           progress: {
+//             current: currentValue,
+//             target: parseFloat(goal.targetValue),
+//             percentage: Math.min(
+//               100,
+//               Math.round((currentValue / parseFloat(goal.targetValue)) * 100)
+//             ),
+//           },
+//         };
 
-        breakdown =
-          goal.period === "Weekly"
-            ? generateWeeklyBreakdown(
-                completedActivities,
-                goal,
-                "Count",
-                "Activity",
-                start,
-                end
-              )
-            : generateMonthlyBreakdown(
-                completedActivities,
-                goal,
-                "Count",
-                "Activity",
-                start,
-                end
-              );
-      }
-    }
-  } catch (error) {
-    console.error("Error generating goal breakdown data:", error);
-    breakdown = [];
-    summary = {
-      totalCount: 0,
-      totalValue: 0,
-      goalTarget: parseFloat(goal.targetValue),
-      trackingMetric: trackingMetric || "Count",
-      progress: {
-        current: 0,
-        target: parseFloat(goal.targetValue),
-        percentage: 0,
-      },
-    };
-  }
+//         breakdown =
+//           goal.period === "Weekly"
+//             ? generateWeeklyBreakdown(
+//                 completedActivities,
+//                 goal,
+//                 "Count",
+//                 "Activity",
+//                 start,
+//                 end
+//               )
+//             : generateMonthlyBreakdown(
+//                 completedActivities,
+//                 goal,
+//                 "Count",
+//                 "Activity",
+//                 start,
+//                 end
+//               );
+//       }
+//     }
+//   } catch (error) {
+//     console.error("Error generating goal breakdown data:", error);
+//     breakdown = [];
+//     summary = {
+//       totalCount: 0,
+//       totalValue: 0,
+//       goalTarget: parseFloat(goal.targetValue),
+//       trackingMetric: trackingMetric || "Count",
+//       progress: {
+//         current: 0,
+//         target: parseFloat(goal.targetValue),
+//         percentage: 0,
+//       },
+//     };
+//   }
 
-  return {
-    breakdown,
-    summary,
-    periodInfo: {
-      start,
-      end,
-      periodFilter,
-    },
-  };
-}
+//   return {
+//     breakdown,
+//     summary,
+//     periodInfo: {
+//       start,
+//       end,
+//       periodFilter,
+//     },
+//   };
+// }
 
 async function calculateGoalProgress(goal, ownerId, Deal, Lead, LeadPerson, Activity, DealStageHistory, LeadOrganization, MasterUser) {
   const {

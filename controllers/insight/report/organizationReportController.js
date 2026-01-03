@@ -1465,7 +1465,8 @@ async function generateExistingOrganizationPerformanceDataForSave(
   existingyaxis,
   existingDurationUnit,
   existingSegmentedBy,
-  existingfilters
+  existingfilters,
+  MasterUser, LeadPerson, Lead, LeadOrganization
 ) {
   let includeModels = [];
   const baseWhere = {};
@@ -1648,7 +1649,7 @@ async function generateExistingOrganizationPerformanceDataForSave(
 
   if (existingSegmentedBy && existingSegmentedBy !== "none") {
     // For segmented queries - get all results without pagination
-    results = await Organization.findAll({
+    results = await LeadOrganization.findAll({
       where: baseWhere,
       attributes: attributes,
       include: includeModels,
@@ -1660,7 +1661,7 @@ async function generateExistingOrganizationPerformanceDataForSave(
     });
   } else {
     // Get all results without pagination
-    results = await Organization.findAll({
+    results = await LeadOrganization.findAll({
       where: baseWhere,
       attributes: attributes,
       include: includeModels,
@@ -1830,7 +1831,8 @@ async function generateOrganizationPerformanceDataForSave(
   yaxis,
   durationUnit,
   segmentedBy,
-  filters
+  filters,
+  MasterUser, LeadPerson, Lead, LeadOrganization
 ) {
   let includeModels = [];
   const baseWhere = {};
@@ -2030,7 +2032,7 @@ async function generateOrganizationPerformanceDataForSave(
 
   if (segmentedBy && segmentedBy !== "none") {
     // For segmented queries - get all results without pagination
-    results = await Organization.findAll({
+    results = await LeadOrganization.findAll({
       where: baseWhere,
       attributes: attributes,
       include: includeModels,
@@ -2042,7 +2044,7 @@ async function generateOrganizationPerformanceDataForSave(
     });
   } else {
     // Get all results without pagination
-    results = await Organization.findAll({
+    results = await LeadOrganization.findAll({
       where: baseWhere,
       attributes: attributes,
       include: includeModels,
