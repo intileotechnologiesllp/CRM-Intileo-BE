@@ -1,8 +1,8 @@
-const Email = require('../models/email/emailModel');
-const UserCredential = require('../models/email/userCredentialModel'); // ✅ FIXED: Correct path
-const Imap = require('imap-simple'); // ✅ FIX: Use same import as fetchInboxEmails
-const NodeImap = require('imap'); // For direct node-imap access (working method)
-const { simpleParser } = require('mailparser'); // For email parsing
+// REFACTORED: Models now passed as parameters to support dynamic databases
+const Imap = require('imap-simple');
+const NodeImap = require('imap');
+const { simpleParser } = require('mailparser');
+
 
 // � Simple email body fetching service - no race conditions
 // Removed race condition protection for simplicity
@@ -51,12 +51,10 @@ const cleanEmailBody = (body) => {
     .trim();
 };
 
-// ✅ FIX: Remove old providerConfigs, we now use PROVIDER_CONFIG like fetchInboxEmails
-
-// ✅ FIX: Use same IMAP connection logic as fetchInboxEmails
-const connectToIMAP = async (masterUserID, provider) => {
-  let imapConfig; // ✅ FIX: Declare at function scope for error handling
-  let userCredential; // ✅ FIX: Declare at function scope for error handling
+// IMAP connection logic
+const connectToIMAP = async (masterUserID, provider, UserCredential) => {
+  let imapConfig;
+  let userCredential;
   
   try {
     console.log(`🔌 REAL IMAP CONNECTION: ${provider} for user ${masterUserID}`);
@@ -160,7 +158,7 @@ const connectToIMAP = async (masterUserID, provider) => {
 };
 
 // Fetch email body using BODY.PEEK[] method (works with restrictive IMAP servers)
-const fetchEmailBodyOnDemand = async (emailId, masterUserID, provider) => {
+const fetchEmailBodyOnDemand = async (emailId, masterUserID, provider, Email, UserCredential) => {
   const startTime = Date.now();
   
   try {
@@ -421,8 +419,8 @@ const fetchEmailBodyOnDemand = async (emailId, masterUserID, provider) => {
   }
 };
 
-// 🔧 Helper function for actual IMAP fetch (separated for race condition handling)
-const performActualFetch = async (emailId, email, masterUserID, provider, startTime) => {
+// Helper function for actual IMAP fetch
+const performActualFetch = async (emailId, email, masterUserID, provider, startTime, Email, UserCredential) => {
   try {
     console.log(`🚀 PERFORMING ACTUAL FETCH: Email ${emailId}`);
     
@@ -969,7 +967,7 @@ const createInformativeMessage = (email) => {
 };
 
 // Get body fetch statistics
-const getBodyFetchStats = async (masterUserID) => {
+const getBodyFetchStats = async (masterUserID, Email) => {
   try {
     const stats = await Email.findAll({
       attributes: [
@@ -999,7 +997,7 @@ module.exports = {
   createInformativeMessage,
   getBodyFetchStats,
   // Add the missing functions that the controller expects
-  fetchRealEmailContent: async (emailUID, masterUserID) => {
+  fetchRealEmailContent: async (emailUID, masterUserID, Email, UserCredential) => {
     console.log(`📧 Attempting to fetch REAL email content for UID ${emailUID}`);
     console.log(`📧 Connecting to IMAP to fetch REAL content for UID ${emailUID}`);
     console.log(`🔧 ENHANCED DEBUG: fetchRealEmailContent called with UID=${emailUID}, masterUserID=${masterUserID}`);
@@ -1020,7 +1018,7 @@ module.exports = {
 
       // Connect to IMAP with enhanced debugging
       console.log(`🔧 ENHANCED DEBUG: About to call connectToIMAP with provider ${userCredential.provider}`);
-      const connection = await connectToIMAP(masterUserID, userCredential.provider);
+      const connection = await connectToIMAP(masterUserID, userCredential.provider, UserCredential);
       console.log(`✅ ENHANCED DEBUG: IMAP connection successful`);
       
       await connection.openBox('INBOX');

@@ -1,7 +1,5 @@
 const Imap = require('imap-simple');
 const pLimit = require('p-limit');
-const Email = require('../models/email/emailModel');
-const UserCredential = require('../models/email/userCredentialModel');
 
 // Configuration
 const MAX_CONCURRENT_IMAP = 2; // Reduced to 2 for better performance with multiple users
@@ -72,9 +70,11 @@ function createUidRanges(uids) {
  * Sync read/unread flags for paginated emails from IMAP with concurrency control
  * @param {Array} emails - Array of email objects from database
  * @param {number} masterUserID - User ID for IMAP credentials
+ * @param {Object} Email - Email model instance
+ * @param {Object} UserCredential - UserCredential model instance
  * @returns {Promise<Array>} Updated emails array
  */
-async function syncImapFlags(emails, masterUserID) {
+async function syncImapFlags(emails, masterUserID, Email, UserCredential) {
   // 🚀 PERFORMANCE: Check for existing sync operation
   if (activeSyncs.has(masterUserID)) {
     console.log(`⚠️ [IMAP SYNC] User ${masterUserID} already has active sync operation`);
@@ -87,7 +87,7 @@ async function syncImapFlags(emails, masterUserID) {
     console.log(`🔄 [IMAP SYNC] Starting sync for user ${masterUserID} with concurrency control (Active syncs: ${activeSyncs.size})`);
     
     try {
-      return await performImapSync(emails, masterUserID);
+      return await performImapSync(emails, masterUserID, Email, UserCredential);
     } finally {
       activeSyncs.delete(masterUserID);
       console.log(`✅ [IMAP SYNC] Completed sync for user ${masterUserID} (Active syncs: ${activeSyncs.size})`);
@@ -98,7 +98,7 @@ async function syncImapFlags(emails, masterUserID) {
 /**
  * Internal function to perform the actual IMAP sync
  */
-async function performImapSync(emails, masterUserID) {
+async function performImapSync(emails, masterUserID, Email, UserCredential) {
   if (!emails || emails.length === 0) {
     return emails;
   }
@@ -535,9 +535,10 @@ async function performBatchUpdate(updates) {
 /**
  * Check IMAP connection health for a user
  * @param {number} masterUserID - User ID
+ * @param {Object} UserCredential - UserCredential model instance
  * @returns {Promise<boolean>} True if connection is healthy
  */
-async function checkImapHealth(masterUserID) {
+async function checkImapHealth(masterUserID, UserCredential) {
   try {
     const userCredential = await UserCredential.findOne({
       where: { masterUserID },

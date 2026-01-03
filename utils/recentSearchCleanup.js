@@ -1,4 +1,4 @@
-const RecentSearch = require("../models/recentSearchModel");
+// REFACTORED: Models now passed as parameters to support dynamic databases
 const { Op } = require("sequelize");
 
 /**
@@ -7,8 +7,9 @@ const { Op } = require("sequelize");
  * @param {number} options.daysToKeep - Number of days to keep searches (default: 30)
  * @param {number} options.maxPerUser - Maximum searches per user to keep (default: 50)
  * @param {number} options.adminId - Specific admin ID to clean (optional)
+ * @param {Object} RecentSearch - RecentSearch model instance
  */
-async function cleanupRecentSearches(options = {}) {
+async function cleanupRecentSearches(options = {}, RecentSearch) {
   const { daysToKeep = 30, maxPerUser = 50, adminId = null } = options;
 
   try {

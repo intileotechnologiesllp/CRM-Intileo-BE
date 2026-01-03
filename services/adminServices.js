@@ -1,4 +1,3 @@
-const Admin = require("../models/adminModel");
 const bcrypt = require("bcrypt");
 
 exports.signIn = async (email, password, Admin) => {

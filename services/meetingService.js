@@ -1,10 +1,5 @@
 const moment = require("moment-timezone");
 const { Op } = require("sequelize");
-const Activity = require("../models/activity/activityModel");
-const Meeting = require("../models/meeting/meetingModel");
-const MasterUser = require("../models/master/masterUserModel");
-const Person = require("../models/leads/leadPersonModel");
-const CompanySettings = require("../models/company/companySettingsModel");
 
 class MeetingService {
   /**
@@ -16,9 +11,11 @@ class MeetingService {
    * @param {Array} options.attendeeIds - Array of attendee user IDs
    * @param {number} options.excludeMeetingId - Meeting ID to exclude from conflict check
    * @param {string} options.timezone - Timezone for the meeting
+   * @param {Object} Activity - Activity model instance
+   * @param {Object} Meeting - Meeting model instance
    * @returns {Promise<Object>} Conflict information
    */
-  static async checkConflicts(options) {
+  static async checkConflicts(options, Activity, Meeting) {
     const {
       startDateTime,
       endDateTime,
@@ -184,9 +181,11 @@ class MeetingService {
   /**
    * Get user's default timezone
    * @param {number} userId - User ID
+   * @param {Object} MasterUser - MasterUser model instance
+   * @param {Object} CompanySettings - CompanySettings model instance
    * @returns {Promise<string>} Default timezone
    */
-  static async getUserTimezone(userId) {
+  static async getUserTimezone(userId, MasterUser, CompanySettings) {
     try {
       // Try to get from company settings first
       const user = await MasterUser.findByPk(userId);
@@ -254,9 +253,11 @@ class MeetingService {
    * @param {Array} options.personIds - Person IDs from CRM
    * @param {Array} options.userIds - User IDs (internal attendees)
    * @param {Array} options.externalEmails - External email addresses
+   * @param {Object} Person - Person model instance
+   * @param {Object} MasterUser - MasterUser model instance
    * @returns {Promise<Array>} Array of attendee objects {name, email, type}
    */
-  static async prepareAttendees(options) {
+  static async prepareAttendees(options, Person, MasterUser) {
     const { personIds = [], userIds = [], externalEmails = [] } = options;
     const attendees = [];
 

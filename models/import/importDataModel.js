@@ -195,8 +195,6 @@ const ImportData = sequelizeInstance.define('ImportData', {
     }
   ]
 });
-return ImportData
-}
 
 // Instance methods for common operations
 ImportData.prototype.updateProgress = function(progress, additionalData = {}) {
@@ -263,5 +261,8 @@ ImportData.getActiveImports = function(masterUserID = null) {
     order: [['createdAt', 'DESC']]
   });
 };
+
+return ImportData
+}
 
 module.exports = createImportDataModel;

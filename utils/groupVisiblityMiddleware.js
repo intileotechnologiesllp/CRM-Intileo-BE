@@ -1,6 +1,6 @@
-const GroupVisibility = require("../models/admin/groupVisibilityModel");
+// REFACTORED: Models now passed as parameters to support dynamic databases
 
-exports.checkGroupVisibilty = async(userId, groupName) =>{
+exports.checkGroupVisibilty = async(userId, groupName, GroupVisibility) =>{
     try{    
         const findGroup = GroupVisibility.findOne({
             where: {

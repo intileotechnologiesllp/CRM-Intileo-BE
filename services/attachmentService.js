@@ -1,7 +1,6 @@
-const Attachment = require("../models/email/attachmentModel");
 // Note: We only save attachment metadata to database, not files to disk
 
-const saveAttachments = async (attachments, emailID) => {
+const saveAttachments = async (attachments, emailID, Attachment) => {
   const savedAttachments = [];
   console.log(
     `Starting to save ${attachments.length} attachment metadata records for emailID: ${emailID}`
@@ -125,7 +124,7 @@ const saveAttachments = async (attachments, emailID) => {
 
 // Special function for saving user-uploaded attachments (compose email)
 // This saves actual files with file paths, unlike the regular saveAttachments which only saves metadata
-const saveUserUploadedAttachments = async (files, emailID) => {
+const saveUserUploadedAttachments = async (files, emailID, Attachment) => {
   const savedAttachments = [];
   const baseURL = process.env.LOCALHOST_URL || "http://localhost:3056";
 

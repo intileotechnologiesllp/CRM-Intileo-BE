@@ -1,4 +1,3 @@
-const SchedulingLink = require("../models/meeting/schedulingLinkModel");
 const googleCalendarService = require("./googleCalendarService");
 const MeetingService = require("./meetingService");
 const moment = require("moment-timezone");
@@ -21,9 +20,10 @@ class SchedulingLinkService {
    * @param {number} options.userId - User ID
    * @param {Object} options.linkData - Link configuration
    * @param {number} options.linkId - Optional link ID for update
+   * @param {Object} SchedulingLink - SchedulingLink model instance
    * @returns {Promise<Object>} Created/updated link
    */
-  async createOrUpdateLink(options) {
+  async createOrUpdateLink(options, SchedulingLink) {
     const { userId, linkData, linkId } = options;
 
     const linkConfig = {
@@ -64,14 +64,16 @@ class SchedulingLinkService {
   /**
    * Get scheduling link by token (for public access)
    * @param {string} token - Unique token
+   * @param {Object} SchedulingLink - SchedulingLink model instance
+   * @param {Object} MasterUser - MasterUser model instance
    * @returns {Promise<Object>} Link configuration
    */
-  async getLinkByToken(token) {
+  async getLinkByToken(token, SchedulingLink, MasterUser) {
     const link = await SchedulingLink.findOne({
       where: { uniqueToken: token, isActive: true },
       include: [
         {
-          model: require("../models/master/masterUserModel"),
+          model: MasterUser,
           as: "owner",
           attributes: ["masterUserID", "name", "email"],
         },
@@ -91,12 +93,14 @@ class SchedulingLinkService {
    * @param {string} options.token - Link token
    * @param {Date|string} options.startDate - Start date to check from
    * @param {Date|string} options.endDate - End date to check until
+   * @param {Object} SchedulingLink - SchedulingLink model instance
+   * @param {Object} MasterUser - MasterUser model instance
    * @returns {Promise<Array>} Available slots
    */
-  async getAvailableSlotsForLink(options) {
+  async getAvailableSlotsForLink(options, SchedulingLink, MasterUser) {
     const { token, startDate, endDate } = options;
 
-    const link = await this.getLinkByToken(token);
+    const link = await this.getLinkByToken(token, SchedulingLink, MasterUser);
     const owner = link.owner;
 
     // Calculate date range
@@ -263,9 +267,14 @@ class SchedulingLinkService {
    * @param {Object} options.customFields - Custom field values (optional)
    * @param {string} options.meetingTitle - Custom meeting title (optional)
    * @param {string} options.meetingDescription - Custom meeting description (optional)
+   * @param {Object} SchedulingLink - SchedulingLink model instance
+   * @param {Object} MasterUser - MasterUser model instance
+   * @param {Object} Person - Person model instance
+   * @param {Object} Activity - Activity model instance
+   * @param {Object} Meeting - Meeting model instance
    * @returns {Promise<Object>} Created meeting
    */
-  async bookMeetingFromSlot(options) {
+  async bookMeetingFromSlot(options, SchedulingLink, MasterUser, Person, Activity, Meeting) {
     const {
       token,
       selectedSlotStart,
@@ -278,7 +287,7 @@ class SchedulingLinkService {
     } = options;
 
     // Get link configuration
-    const link = await this.getLinkByToken(token);
+    const link = await this.getLinkByToken(token, SchedulingLink, MasterUser);
     const owner = link.owner;
 
     // Validate required fields
@@ -309,7 +318,6 @@ class SchedulingLinkService {
     }
 
     // Create or find person in CRM
-    const Person = require("../models/leads/leadPersonModel");
     let person = await Person.findOne({ where: { email: attendeeEmail } });
     
     if (!person) {
@@ -330,7 +338,6 @@ class SchedulingLinkService {
     }
 
     // Create Activity
-    const Activity = require("../models/activity/activityModel");
     const activity = await Activity.create({
       type: "Meeting",
       subject,
@@ -345,9 +352,6 @@ class SchedulingLinkService {
     });
 
     // Create Meeting with Google Calendar integration
-    const Meeting = require("../models/meeting/meetingModel");
-    const { v4: uuidv4 } = require("uuid");
-    
     const icsUid = `${uuidv4()}@${owner.email.split("@")[1]}`;
     const meeting = await Meeting.create({
       activityId: activity.activityId,
@@ -442,9 +446,10 @@ class SchedulingLinkService {
   /**
    * Get all scheduling links for a user
    * @param {number} userId - User ID
+   * @param {Object} SchedulingLink - SchedulingLink model instance
    * @returns {Promise<Array>} Scheduling links
    */
-  async getUserLinks(userId) {
+  async getUserLinks(userId, SchedulingLink) {
     return await SchedulingLink.findAll({
       where: { masterUserID: userId },
       order: [["createdAt", "DESC"]],
@@ -455,9 +460,10 @@ class SchedulingLinkService {
    * Delete a scheduling link
    * @param {number} userId - User ID
    * @param {number} linkId - Link ID
+   * @param {Object} SchedulingLink - SchedulingLink model instance
    * @returns {Promise<void>}
    */
-  async deleteLink(userId, linkId) {
+  async deleteLink(userId, linkId, SchedulingLink) {
     const link = await SchedulingLink.findByPk(linkId);
     if (!link || link.masterUserID !== userId) {
       throw new Error("Scheduling link not found or access denied");

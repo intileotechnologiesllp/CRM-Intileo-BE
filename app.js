@@ -1,7 +1,7 @@
 require("dotenv").config();
 const express = require("express");
 const path = require("path");
-const sequelize = require("./config/db"); // Import Sequelize instance
+const { defaultSequelize } = require("./config/db"); // Import Sequelize instance
 const { connectMongoDB } = require("./config/mongodb"); // Import MongoDB connection
 const { connectRedis } = require("./config/redis"); // Import Redis connection
 const LoginHistory = require("./models/reports/loginHistoryModel"); // Import models

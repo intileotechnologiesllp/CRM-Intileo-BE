@@ -1,4 +1,5 @@
-const LeadColumn = require("../models/admin/masters/leadColumnsModel");
+// Program IDs constants
+// NOTE: LeadColumn model import removed - not used in this file
 
 const PROGRAMS = {
   AUTHENTICATION: 1, // Program ID for authentication (e.g., sign-in, sign-out)

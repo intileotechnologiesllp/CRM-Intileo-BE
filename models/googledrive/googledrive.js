@@ -24,5 +24,4 @@ const UserGoogleToken = sequelizeInstance.define("UserGoogleToken", {
 return UserGoogleToken
 }
 
-UserGoogleToken.sync({});
 module.exports = createUserGoogleTokenModel;

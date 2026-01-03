@@ -1,14 +1,14 @@
 const { google } = require('googleapis');
-const MasterUser = require('../models/master/masterUserModel');
 const moment = require('moment-timezone');
 
 class GoogleCalendarService {
   /**
    * Get authenticated OAuth2 client for a user
    * @param {number} userId - Master user ID
+   * @param {Object} MasterUser - MasterUser model instance
    * @returns {Promise<Object>} OAuth2 client
    */
-  async getOAuth2Client(userId) {
+  async getOAuth2Client(userId, MasterUser) {
     const user = await MasterUser.findByPk(userId);
     if (!user || !user.googleOAuthToken) {
       throw new Error('Google Calendar not connected for this user');
@@ -64,9 +64,10 @@ class GoogleCalendarService {
    * @param {Array} options.attendees - Array of email addresses
    * @param {boolean} options.createMeetLink - Whether to create Google Meet link
    * @param {string} options.calendarId - Calendar ID (default: 'primary')
+   * @param {Object} MasterUser - MasterUser model instance
    * @returns {Promise<Object>} Created event with meet link
    */
-  async createEvent(options) {
+  async createEvent(options, MasterUser) {
     const {
       userId,
       summary,
@@ -80,7 +81,7 @@ class GoogleCalendarService {
       calendarId = 'primary',
     } = options;
 
-    const oauth2Client = await this.getOAuth2Client(userId);
+    const oauth2Client = await this.getOAuth2Client(userId, MasterUser);
     const calendar = google.calendar({ version: 'v3', auth: oauth2Client });
 
     // Format dates for Google Calendar API
@@ -143,9 +144,10 @@ class GoogleCalendarService {
    * @param {number} options.userId - User ID
    * @param {string} options.eventId - Google Calendar event ID
    * @param {Object} options.updates - Fields to update
+   * @param {Object} MasterUser - MasterUser model instance
    * @returns {Promise<Object>} Updated event
    */
-  async updateEvent(options) {
+  async updateEvent(options, MasterUser) {
     const {
       userId,
       eventId,
@@ -153,7 +155,7 @@ class GoogleCalendarService {
       calendarId = 'primary',
     } = options;
 
-    const oauth2Client = await this.getOAuth2Client(userId);
+    const oauth2Client = await this.getOAuth2Client(userId, MasterUser);
     const calendar = google.calendar({ version: 'v3', auth: oauth2Client });
 
     try {
@@ -236,9 +238,10 @@ class GoogleCalendarService {
    * @param {string} options.eventId - Google Calendar event ID
    * @param {string} options.calendarId - Calendar ID (default: 'primary')
    * @param {boolean} options.sendUpdates - Send cancellation emails (default: true)
+   * @param {Object} MasterUser - MasterUser model instance
    * @returns {Promise<void>}
    */
-  async deleteEvent(options) {
+  async deleteEvent(options, MasterUser) {
     const {
       userId,
       eventId,
@@ -246,7 +249,7 @@ class GoogleCalendarService {
       sendUpdates = true,
     } = options;
 
-    const oauth2Client = await this.getOAuth2Client(userId);
+    const oauth2Client = await this.getOAuth2Client(userId, MasterUser);
     const calendar = google.calendar({ version: 'v3', auth: oauth2Client });
 
     try {
@@ -270,9 +273,10 @@ class GoogleCalendarService {
    * @param {number} options.durationMinutes - Duration of the meeting in minutes
    * @param {string} options.timezone - Timezone (default: 'UTC')
    * @param {Array} options.busyTimes - Additional busy times to consider
+   * @param {Object} MasterUser - MasterUser model instance
    * @returns {Promise<Array>} Array of available time slots
    */
-  async getAvailableSlots(options) {
+  async getAvailableSlots(options, MasterUser) {
     const {
       userId,
       startDate,
@@ -282,7 +286,7 @@ class GoogleCalendarService {
       busyTimes = [],
     } = options;
 
-    const oauth2Client = await this.getOAuth2Client(userId);
+    const oauth2Client = await this.getOAuth2Client(userId, MasterUser);
     const calendar = google.calendar({ version: 'v3', auth: oauth2Client });
 
     // Get user's email
@@ -386,9 +390,10 @@ class GoogleCalendarService {
    * @param {Date|string} options.startDate - Start date
    * @param {Date|string} options.endDate - End date
    * @param {string} options.calendarId - Calendar ID (default: 'primary')
+   * @param {Object} MasterUser - MasterUser model instance
    * @returns {Promise<Array>} Array of events
    */
-  async getEvents(options) {
+  async getEvents(options, MasterUser) {
     const {
       userId,
       startDate,
@@ -396,7 +401,7 @@ class GoogleCalendarService {
       calendarId = 'primary',
     } = options;
 
-    const oauth2Client = await this.getOAuth2Client(userId);
+    const oauth2Client = await this.getOAuth2Client(userId, MasterUser);
     const calendar = google.calendar({ version: 'v3', auth: oauth2Client });
 
     try {
@@ -418,9 +423,10 @@ class GoogleCalendarService {
   /**
    * Check if user has Google Calendar connected
    * @param {number} userId - User ID
+   * @param {Object} MasterUser - MasterUser model instance
    * @returns {Promise<boolean>}
    */
-  async isConnected(userId) {
+  async isConnected(userId, MasterUser) {
     try {
       const user = await MasterUser.findByPk(userId);
       return !!(user && user.googleOAuthToken);
@@ -430,11 +436,12 @@ class GoogleCalendarService {
   }
 
   /**
-   * Get working hours for availability checking (can be extended)
+   * Get user's working hours (placeholder for future implementation)
    * @param {number} userId - User ID
-   * @returns {Promise<Object>} Working hours config
+   * @param {Object} MasterUser - MasterUser model instance
+   * @returns {Promise<Object>} Working hours configuration
    */
-  async getWorkingHours(userId) {
+  async getWorkingHours(userId, MasterUser) {
     // Default working hours (9 AM - 5 PM)
     // Can be extended to fetch from user settings
     return {

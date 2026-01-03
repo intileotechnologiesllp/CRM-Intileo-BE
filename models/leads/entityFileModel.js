@@ -151,8 +151,6 @@ const createEntityFileModel = (sequelizeInstance) => {
     }
   ]
 });
-return EntityFile
-}
 
 // Define associations
 EntityFile.belongsTo(MasterUser, { foreignKey: 'uploadedBy', as: 'uploader' });
@@ -188,5 +186,8 @@ EntityFile.createForEntity = function(entityId, entityType, fileData) {
     ...fileData
   });
 };
+
+return EntityFile
+}
 
 module.exports = createEntityFileModel;

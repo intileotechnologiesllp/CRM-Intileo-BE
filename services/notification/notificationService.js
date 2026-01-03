@@ -136,7 +136,7 @@ class NotificationService {
    * @param {Object} options - Query options
    * @returns {Promise<Object>} Notifications and metadata
    */
-  static async getUserNotifications(userId, options = {}) {
+  static async getUserNotifications(userId, options = {},PushSubscription,  MasterUser) {
     try {
       const {
         page = 1,
@@ -206,7 +206,7 @@ class NotificationService {
    * @param {Number} userId - User ID (for security)
    * @returns {Promise<Object>} Updated notification
    */
-  static async markAsRead(notificationId, userId) {
+  static async markAsRead(notificationId, userId,PushSubscription,  MasterUser ) {
     try {
       const notification = await Notification.findOne({
         where: { notificationId, userId },
@@ -241,7 +241,7 @@ class NotificationService {
    * @param {Number} userId - User ID
    * @returns {Promise<Number>} Number of notifications marked as read
    */
-  static async markAllAsRead(userId) {
+  static async markAllAsRead(userId, PushSubscription,  MasterUser) {
     try {
       const [updated] = await Notification.update(
         { isRead: true, readAt: new Date() },
@@ -272,7 +272,7 @@ class NotificationService {
    * @param {Number} notificationId - Notification ID
    * @param {Number} userId - User ID (for security)
    */
-  static async deleteNotification(notificationId, userId) {
+  static async deleteNotification(notificationId, userId,PushSubscription,  MasterUser) {
     try {
       const notification = await Notification.findOne({
         where: { notificationId, userId },
@@ -299,7 +299,7 @@ class NotificationService {
    * Delete all notifications for a user
    * @param {Number} userId - User ID
    */
-  static async deleteAllNotifications(userId) {
+  static async deleteAllNotifications(userId,PushSubscription,  MasterUser ) {
     try {
       const [updated] = await Notification.update(
         { isDeleted: true, deletedAt: new Date() },
@@ -372,7 +372,7 @@ class NotificationService {
    * @param {Object} updates - Preference updates
    * @returns {Promise<Object>} Updated preferences
    */
-  static async updatePreferences(userId, updates) {
+  static async updatePreferences(userId, updates,PushSubscription,  MasterUser ) {
     try {
       let preferences = await NotificationPreference.findOne({
         where: { userId },

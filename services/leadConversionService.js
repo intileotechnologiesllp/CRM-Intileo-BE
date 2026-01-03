@@ -1,17 +1,24 @@
-const WebFormSubmission = require("../models/webForm/webFormSubmissionModel");
-const WebForm = require("../models/webForm/webFormModel");
-const WebFormField = require("../models/webForm/webFormFieldModel");
-const Lead = require("../models/leads/leadsModel");
-const Person = require("../models/leads/leadPersonModel");
-const Organization = require("../models/leads/leadOrganizationModel");
 const { Op } = require("sequelize");
 
 /**
  * Convert form submission to lead
  * @param {number} submissionId
  * @param {object} form - WebForm instance
+ * @param {Object} WebFormSubmission - WebFormSubmission model
+ * @param {Object} WebFormField - WebFormField model
+ * @param {Object} Lead - Lead model
+ * @param {Object} Person - Person model
+ * @param {Object} Organization - Organization model
  */
-exports.convertSubmissionToLead = async (submissionId, form) => {
+exports.convertSubmissionToLead = async (
+  submissionId,
+  form,
+  WebFormSubmission,
+  WebFormField,
+  Lead,
+  Person,
+  Organization
+) => {
   try {
     // Get submission
     const submission = await WebFormSubmission.findByPk(submissionId);

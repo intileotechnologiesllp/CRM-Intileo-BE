@@ -1,7 +1,7 @@
+// REFACTORED: Models now passed as parameters to support dynamic databases
 const nodemailer = require("nodemailer");
-const UserCredential = require("../models/email/userCredentialModel"); // Adjust path as needed
 
-async function sendEmail(adminEmail, { from, to, subject, text, html }) {
+async function sendEmail(adminEmail, { from, to, subject, text, html }, UserCredential) {
   console.log(`Sending email from: ${from}, to: ${to}, subject: ${subject}`);
   console.log(adminEmail, " adminEmail");
 

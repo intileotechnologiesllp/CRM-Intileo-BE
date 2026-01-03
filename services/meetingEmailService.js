@@ -1,5 +1,5 @@
+// REFACTORED: Models now passed as parameters to support dynamic databases
 const nodemailer = require("nodemailer");
-const UserCredential = require("../models/email/userCredentialModel");
 const { generateICS, generateCancellationICS, generateUpdateICS } = require("../utils/icsGenerator");
 const MeetingService = require("./meetingService");
 
@@ -11,10 +11,11 @@ class MeetingEmailService {
    * @param {Object} options.meeting - Meeting instance
    * @param {string} options.organizerEmail - Organizer email (for SMTP config)
    * @param {Array} options.attendees - Array of attendee objects {name, email}
+   * @param {Object} options.UserCredential - UserCredential model
    * @returns {Promise<Object>} Send result
    */
   static async sendMeetingInvite(options) {
-    const { activity, meeting, organizerEmail, attendees = [] } = options;
+    const { activity, meeting, organizerEmail, attendees = [], UserCredential } = options;
 
     if (!activity || !meeting || !organizerEmail) {
       throw new Error("Activity, meeting, and organizer email are required");
@@ -31,7 +32,7 @@ class MeetingEmailService {
     });
 
     // Get SMTP configuration
-    const transporter = await this.getTransporter(organizerEmail);
+    const transporter = await this.getTransporter(organizerEmail, UserCredential);
 
     const results = [];
 
@@ -84,10 +85,11 @@ class MeetingEmailService {
    * @param {Object} options.meeting - Meeting instance
    * @param {string} options.organizerEmail - Organizer email
    * @param {Array} options.attendees - Array of attendee objects
+   * @param {Object} options.UserCredential - UserCredential model
    * @returns {Promise<Object>} Send result
    */
   static async sendMeetingUpdate(options) {
-    const { activity, meeting, organizerEmail, attendees = [] } = options;
+    const { activity, meeting, organizerEmail, attendees = [], changes, UserCredential } = options;
 
     const icsContent = generateUpdateICS({
       activity,
@@ -98,7 +100,7 @@ class MeetingEmailService {
       action: "REQUEST",
     });
 
-    const transporter = await this.getTransporter(organizerEmail);
+    const transporter = await this.getTransporter(organizerEmail, UserCredential);
     const results = [];
 
     for (const attendee of attendees) {
@@ -150,10 +152,11 @@ class MeetingEmailService {
    * @param {string} options.organizerEmail - Organizer email
    * @param {Array} options.attendees - Array of attendee objects
    * @param {string} options.cancellationReason - Reason for cancellation
+   * @param {Object} options.UserCredential - UserCredential model
    * @returns {Promise<Object>} Send result
    */
   static async sendMeetingCancellation(options) {
-    const { activity, meeting, organizerEmail, attendees = [], cancellationReason } = options;
+    const { activity, meeting, organizerEmail, attendees = [], reason, UserCredential } = options;
 
     const icsContent = generateCancellationICS({
       activity,
@@ -164,7 +167,7 @@ class MeetingEmailService {
       action: "CANCEL",
     });
 
-    const transporter = await this.getTransporter(organizerEmail);
+    const transporter = await this.getTransporter(organizerEmail, UserCredential);
     const results = [];
 
     for (const attendee of attendees) {
@@ -215,12 +218,13 @@ class MeetingEmailService {
    * @param {Object} options.meeting - Meeting instance
    * @param {string} options.organizerEmail - Organizer email
    * @param {Array} options.attendees - Array of attendee objects
+   * @param {Object} options.UserCredential - UserCredential model
    * @returns {Promise<Object>} Send result
    */
   static async sendMeetingReminder(options) {
-    const { activity, meeting, organizerEmail, attendees = [] } = options;
+    const { activity, meeting, organizerEmail, attendees = [], reminderMessage, UserCredential } = options;
 
-    const transporter = await this.getTransporter(organizerEmail);
+    const transporter = await this.getTransporter(organizerEmail, UserCredential);
     const results = [];
 
     for (const attendee of attendees) {
@@ -255,9 +259,10 @@ class MeetingEmailService {
   /**
    * Get nodemailer transporter for organizer email
    * @param {string} organizerEmail - Organizer email
+   * @param {Object} UserCredential - UserCredential model
    * @returns {Promise<Object>} Nodemailer transporter
    */
-  static async getTransporter(organizerEmail) {
+  static async getTransporter(organizerEmail, UserCredential) {
     const userCredential = await UserCredential.findOne({
       where: { email: organizerEmail },
     });

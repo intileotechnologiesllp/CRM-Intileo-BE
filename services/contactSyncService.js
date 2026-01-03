@@ -1,8 +1,3 @@
-const ContactSyncConfig = require("../models/contact/contactSyncConfigModel");
-const ContactSyncHistory = require("../models/contact/contactSyncHistoryModel");
-const ContactChangeLog = require("../models/contact/contactChangeLogModel");
-const ContactSyncMapping = require("../models/contact/contactSyncMappingModel");
-const Person = require("../models/leads/leadPersonModel");
 const googleContactsService = require("./googleContactsService");
 const { Op } = require("sequelize");
 

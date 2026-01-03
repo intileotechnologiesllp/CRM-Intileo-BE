@@ -77,11 +77,22 @@ const {
   fetchSyncEmails,
 } = require("../controllers/email/emailSettingController");
 const nodemailer = require("nodemailer");
-const Email = require("../models/email/emailModel");
-const Attachment = require("../models/email/attachmentModel");
-const UserCredential = require("../models/email/userCredentialModel");
-const DefaultEmail = require("../models/email/defaultEmailModel");
-const MasterUser = require("../models/master/masterUserModel");
+
+// REFACTORED: Use factory functions with defaultSequelize for background workers
+const { defaultSequelize } = require("../config/db");
+const createEmailModel = require("../models/email/emailModel");
+const createAttachmentModel = require("../models/email/attachmentModel");
+const createUserCredentialModel = require("../models/email/userCredentialModel");
+const createDefaultEmailModel = require("../models/email/defaultEmailModel");
+const createMasterUserModel = require("../models/master/masterUserModel");
+
+// Create model instances with default connection for background worker
+const Email = createEmailModel(defaultSequelize);
+const Attachment = createAttachmentModel(defaultSequelize);
+const UserCredential = createUserCredentialModel(defaultSequelize);
+const DefaultEmail = createDefaultEmailModel(defaultSequelize);
+const MasterUser = createMasterUserModel(defaultSequelize);
+
 const { fetchInboxEmails } = require("../controllers/email/emailController");
 const { batch } = require("googleapis/build/src/apis/batch");
 const QUEUE_NAME = "email-fetch-queue";

@@ -1,9 +1,10 @@
 // 📧 IMAP IDLE MANAGER - Real-time Email Synchronization
 // Handles bidirectional sync: CRM ↔ Gmail/Yandex with IMAP IDLE
+// 
+// IMPORTANT: This class requires Email and UserCredential models to be passed
+// to methods that interact with the database (startIdleForUser, getAllActiveUsers, etc.)
 const Imap = require('imap');
 const { EventEmitter } = require('events');
-const Email = require('../models/email/emailModel');
-const UserCredential = require('../models/email/userCredentialModel');
 const { Op } = require('sequelize');
 const redisConnectionPool = require('./redisConnectionPool');
 
@@ -51,7 +52,7 @@ class ImapIdleManager extends EventEmitter {
   }
 
   // Start IDLE monitoring for a user
-  async startIdleForUser(userID) {
+  async startIdleForUser(userID, Email, UserCredential) {
     try {
       console.log(`🔄 [IMAP-IDLE] Starting IDLE for user ${userID}...`);
       
@@ -374,7 +375,7 @@ class ImapIdleManager extends EventEmitter {
   }
 
   // Update email read status in database
-  async updateEmailReadStatus(userID, uid, isRead) {
+  async updateEmailReadStatus(userID, uid, isRead, Email) {
     try {
       const [updatedCount] = await Email.update(
         { 
@@ -587,7 +588,7 @@ class ImapIdleManager extends EventEmitter {
   }
 
   // Get all users that should have active IMAP connections
-  async getAllActiveUsers() {
+  async getAllActiveUsers(UserCredential) {
     try {
       const users = await UserCredential.findAll({
         where: {

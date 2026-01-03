@@ -1,4 +1,8 @@
-const Program = require("../models/admin/masters/programModel");
+const createProgramModel = require("../models/admin/masters/programModel");
+const { defaultSequelize } = require("../config/db");
+
+// Create Program model instance with default connection
+const Program = createProgramModel(defaultSequelize);
 
 const programCache = {};
 

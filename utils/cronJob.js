@@ -1,12 +1,18 @@
 const cron = require("node-cron");
 const { fetchRecentEmail } = require("../controllers/email/emailController");
 const { fetchSentEmails } = require("../controllers/email/emailController"); // Adjust the path to your controller
-const UserCredential = require("../models/email/userCredentialModel"); // Adjust the path to your model
-const Email = require("../models/email/emailModel");
-const Attachment = require("../models/email/attachmentModel");
+const createUserCredentialModel = require("../models/email/userCredentialModel"); // Adjust the path to your model
+const createEmailModel = require("../models/email/emailModel");
+const createAttachmentModel = require("../models/email/attachmentModel");
+const { defaultSequelize } = require("../config/db");
 const nodemailer = require("nodemailer");
 const { Sequelize } = require("sequelize");
 const { cleanupRecentSearches } = require("./recentSearchCleanup");
+
+// Create model instances with default connection
+const UserCredential = createUserCredentialModel(defaultSequelize);
+const Email = createEmailModel(defaultSequelize);
+const Attachment = createAttachmentModel(defaultSequelize);
 
 //
 // Combined cron job to fetch recent and sent emails for all users

@@ -1,7 +1,6 @@
+// REFACTORED: Models now passed as parameters to support dynamic databases
 const Imap = require('imap-simple');
 const { simpleParser } = require('mailparser');
-const { Email } = require('../models/index');
-const UserCredential = require('../models/email/userCredentialModel');
 
 // Provider configurations
 const PROVIDER_CONFIG = {
@@ -25,7 +24,7 @@ const PROVIDER_CONFIG = {
 /**
  * Connect to IMAP server for a specific user
  */
-const connectToIMAP = async (masterUserID, provider = 'gmail') => {
+const connectToIMAP = async (masterUserID, provider = 'gmail', UserCredential) => {
   try {
     console.log(`🔌 Connecting to IMAP for user ${masterUserID}, provider: ${provider}`);
     
@@ -89,7 +88,7 @@ const connectToIMAP = async (masterUserID, provider = 'gmail') => {
 /**
  * Fetch email body on demand using the EXACT working method from fetchRecentEmail
  */
-const fetchEmailBodyOnDemand = async (emailId, masterUserID, provider = 'gmail') => {
+const fetchEmailBodyOnDemand = async (emailId, masterUserID, provider = 'gmail', Email, UserCredential) => {
   let connection = null;
   
   try {
@@ -173,14 +172,14 @@ const fetchEmailBodyOnDemand = async (emailId, masterUserID, provider = 'gmail')
       imapFolderName = 'INBOX';
     }
     
-    console.log(`📁 Opening folder: ${imapFolderName} (database folder: ${email.folder}, provider: ${provider})`);
+    console.log(`Opening folder: ${imapFolderName} (database folder: ${email.folder}, provider: ${provider})`);
     
     // Connect to IMAP
-    connection = await connectToIMAP(masterUserID, provider);
-    await connection.openBox(imapFolderName); // 🔧 OPEN CORRECT FOLDER
+    connection = await connectToIMAP(masterUserID, provider, UserCredential);
+    await connection.openBox(imapFolderName);
     
-    // Use the EXACT working method from fetchRecentEmail
-    console.log(`🎯 Using proven working method: { bodies: "", struct: true }`);
+    // Use the working method from fetchRecentEmail
+    console.log(`Using proven working method: { bodies: "", struct: true }`);
     
     let searchCriteria;
     let searchType;

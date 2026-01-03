@@ -4,14 +4,10 @@
  * - Supports recursive/nested condition groups (AND/OR with subgroups)
  * - Supports templating: {{entity.field}}, {{event.path}}, {{now}}
  *
- * Assumptions:
- * - You already have Sequelize models: Deal, Lead (and optionally others)
- * - You will pass: automationJson (graph), entity, event payload
- *
- * You can drop this in a file like: automationRunner.js
+ * REFACTORED: Models passed as parameters instead of direct import
+ * NOTE: This file appears to be example/draft code - not currently used in production
  */
 
-const { Deal } = require("../models");
 const { sendEmail } = require("./emailSend");
 
 // ------------------------------
