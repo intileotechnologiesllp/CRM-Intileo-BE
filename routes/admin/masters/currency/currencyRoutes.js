@@ -1,8 +1,12 @@
 const express = require("express");
 const currencyController = require("../../../../controllers/admin/masters/currency/currencyController");
 const verifyToken = require("../../../../middlewares/authMiddleware").verifyToken; // Import verifyToken middleware if needed
+const dbContextMiddleware = require("../../../../middlewares/dbContext");
 const validatePrivilege = require("../../../../middlewares/validatePrivilege");
 const router = express.Router();
+
+
+router.use(dbContextMiddleware);
 
 // Currency CRUD routes (REST style)
 // router.post("/", verifyToken, validatePrivilege(11, "create"), currencyController.createcurrency); // Create currency

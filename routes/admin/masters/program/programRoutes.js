@@ -1,7 +1,10 @@
 const express = require("express");
 const programController = require("../../../../controllers/admin/masters/program/programController");
 const verifyToken = require("../../../../middlewares/authMiddleware").verifyToken; // Import verifyToken middleware if needed
+const dbContextMiddleware = require("../../../../middlewares/dbContext");
 const router = express.Router();
+
+router.use(dbContextMiddleware);
 
 router.post("/create", verifyToken,programController.createprogram); // Add program
 router.post("/edit/:programId", verifyToken,programController.editprogram); // Edit program

@@ -5,6 +5,7 @@ const {
   checkItemPermission,
 } = require("../../middlewares/visibilityMiddleware");
 const { verifyToken } = require("../../middlewares/authMiddleware");
+const dbContextMiddleware = require("../../middlewares/dbContext");
 const {
   getDealsByStage,
   getAllDeals,
@@ -14,6 +15,10 @@ const validatePrivilege = require("../../middlewares/validatePrivilege");
  * Enhanced getDealsByStage with visibility groups support
  * GET /api/deals/stages/:pipelineId
  */
+
+router.use(dbContextMiddleware);
+
+
 router.get(
   "/stages/:pipelineId",
   verifyToken,

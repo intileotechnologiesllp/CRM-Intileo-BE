@@ -14,10 +14,16 @@ const router = express.Router();
 const insightController = require("../../controllers/insight/insightController");
 // const { authMiddleware } = require("../middlewares/authMiddleware");
 const { verifyToken } = require("../../middlewares/authMiddleware");
+const dbContextMiddleware = require("../../middlewares/dbContext");
 // Apply auth middleware to all routes
 // router.use(authMiddleware);
 
 // =============== DASHBOARD ROUTES ===============
+
+router.use(dbContextMiddleware);
+
+
+
 router.post(
   "/create-dashboards",
   verifyToken,

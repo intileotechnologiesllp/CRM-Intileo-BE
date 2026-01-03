@@ -1,7 +1,7 @@
 const express = require("express");
 const router = express.Router();
 const { verifyToken } = require("../../middlewares/authMiddleware");
-
+const dbContextMiddleware = require("../../middlewares/dbContext");
 // Import controllers
 const visibilityGroupController = require("../../controllers/admin/visibilityGroupController");
 const groupMembershipController = require("../../controllers/admin/groupMembershipController");
@@ -24,6 +24,7 @@ const requireRole = (roles) => {
 
 // Apply authentication middleware to all routes
 router.use(verifyToken);
+router.use(dbContextMiddleware);
 
 // ===========================================
 // VISIBILITY GROUPS ROUTES

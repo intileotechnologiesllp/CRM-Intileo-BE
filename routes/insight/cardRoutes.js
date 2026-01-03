@@ -2,6 +2,11 @@ const express = require("express");
 const router = express.Router();
 const cardController = require("../../controllers/insight/cardController");
 const { verifyToken } = require("../../middlewares/authMiddleware"); // Adjust path as needed
+const dbContextMiddleware = require("../../middlewares/dbContext");
+
+
+router.use(dbContextMiddleware);
+
 
 // Create a new card
 router.post("/create-card", verifyToken, cardController.createCard);

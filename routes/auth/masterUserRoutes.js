@@ -3,6 +3,7 @@ const router = express.Router();
 const masterUserController = require("../../controllers/auth/masterUserController");
 // const { authenticate } = require("../../middlewares/authMiddleware");
 const { verifyToken } = require("../../middlewares/authMiddleware");
+const dbContextMiddleware = require("../../middlewares/dbContext");
 console.log(masterUserController);
 // const rateLimit = require("express-rate-limit");
 
@@ -39,26 +40,27 @@ const storage = multer.diskStorage({
 });
 const upload = multer({ storage });
 
-router.post("/create", verifyToken, masterUserController.createMasterUser);
+
+router.post("/create", verifyToken, dbContextMiddleware, masterUserController.createMasterUser);
 
 // Get all master users
-router.get("/get", verifyToken, masterUserController.getMasterUsers);
+router.get("/get", verifyToken, dbContextMiddleware, masterUserController.getMasterUsers);
 
-router.patch("/update-groupId", verifyToken, masterUserController.updateMasterGroupId);
+router.patch("/update-groupId", verifyToken, dbContextMiddleware, masterUserController.updateMasterGroupId);
 // Toggle Master User Status (Activate/Deactivate)
-router.post("/toggle-status/:masterUserID", verifyToken,masterUserController.toggleMasterUserStatus);
+router.post("/toggle-status/:masterUserID", verifyToken, dbContextMiddleware, masterUserController.toggleMasterUserStatus);
 
 
 // Delete a master user
-router.post("/delete/:id", verifyToken, masterUserController.deleteMasterUser);
+router.post("/delete/:id", verifyToken, dbContextMiddleware, masterUserController.deleteMasterUser);
 router.get("/reset-password", masterUserController.handleResetLink);
 router.post("/reset-password", masterUserController.resetPassword);
 router.get("/resend-reset-link",masterUserController.resendResetLink);
-router.post("/update/:masterUserID", verifyToken, masterUserController.updateMasterUser);
-router.get("/profile", verifyToken,masterUserController.getProfile);
-router.post("/update-profile", verifyToken,upload.single("profileImage"),masterUserController.updateProfile);
-router.post("/start-google-oauth", verifyToken,masterUserController.startGoogleOAuth);
+router.post("/update/:masterUserID", verifyToken, dbContextMiddleware,  masterUserController.updateMasterUser);
+router.get("/profile", verifyToken, dbContextMiddleware, masterUserController.getProfile);
+router.post("/update-profile", verifyToken, dbContextMiddleware, upload.single("profileImage"),masterUserController.updateProfile);
+router.post("/start-google-oauth", verifyToken, dbContextMiddleware, masterUserController.startGoogleOAuth);
 router.get("/oauth2callback", masterUserController.handleGoogleOAuthCallback);
-router.post("/set-permission-sets", verifyToken,masterUserController.setMasterUserPermissions);
+router.post("/set-permission-sets", verifyToken, dbContextMiddleware, masterUserController.setMasterUserPermissions);
 
 module.exports = router;

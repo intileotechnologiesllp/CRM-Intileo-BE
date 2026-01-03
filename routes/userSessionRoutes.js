@@ -2,9 +2,12 @@ const express = require("express");
 const router = express.Router();
 const userSessionController = require("../controllers/userSession/userSessionController");
 const { verifyToken } = require("../middlewares/authMiddleware");
+const dbContextMiddleware = require("../middlewares/dbContext");
+
 
 // Apply authentication middleware to all routes
 router.use(verifyToken);
+router.use(dbContextMiddleware);
 
 /**
  * @route   GET /api/user-sessions/active

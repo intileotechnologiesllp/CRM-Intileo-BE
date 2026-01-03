@@ -2,6 +2,17 @@ const express = require("express");
 const router = express.Router();
 const contactSyncController = require("../../controllers/contact/contactSyncController");
 const { verifyToken } = require("../../middlewares/authMiddleware");
+const dbContextMiddleware = require("../../middlewares/dbContext");
+
+// Callback doesn't need auth - user ID comes from OAuth state parameter
+router.get(
+  "/oauth/google/callback",
+  contactSyncController.handleGoogleCallback
+);
+
+
+router.use(dbContextMiddleware);
+
 
 // OAuth routes
 router.get(
@@ -9,11 +20,7 @@ router.get(
   verifyToken,
   contactSyncController.getGoogleAuthUrl
 );
-// Callback doesn't need auth - user ID comes from OAuth state parameter
-router.get(
-  "/oauth/google/callback",
-  contactSyncController.handleGoogleCallback
-);
+
 
 // Sync configuration routes
 router.get("/config", verifyToken, contactSyncController.getSyncConfig);

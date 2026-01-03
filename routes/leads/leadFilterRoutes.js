@@ -3,6 +3,10 @@ const router = express.Router();
 const { verifyToken } = require("../../middlewares/authMiddleware");
 const leadFilterController = require("../../controllers/leads/leadFilterController");
 const validatePrivilege = require("../../middlewares/validatePrivilege");
+const dbContextMiddleware = require("../../middlewares/dbContext");
+
+router.use(dbContextMiddleware);
+
 
 router.post("/create-filter",verifyToken,leadFilterController.saveLeadFilter);
 router.get("/get-filters",verifyToken,leadFilterController.getLeadFilters);

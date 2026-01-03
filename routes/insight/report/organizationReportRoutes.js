@@ -3,6 +3,13 @@ const router = express.Router();
 const organizationReportController = require("../../../controllers/insight/report/organizationReportController.js");
 // const { authMiddleware } = require("../middlewares/authMiddleware");
 const { verifyToken } = require("../../../middlewares/authMiddleware");
+const dbContextMiddleware = require("../../../middlewares/dbContext");
+
+
+
+router.use(dbContextMiddleware);
+
+
 
 router.post("/create-organizationreport", verifyToken, organizationReportController.createOrganizationReport);
 

@@ -2,6 +2,7 @@ const express = require("express");
 const router = express.Router();
 const emailSettingsController = require("../../controllers/email/emailSettingController");
 const { verifyToken } = require("../../middlewares/authMiddleware");
+const dbContextMiddleware = require("../../middlewares/dbContext");
 const validatePrivilege = require("../../middlewares/validatePrivilege");
 const multer = require("multer");
 const path = require("path");
@@ -26,6 +27,7 @@ const cleanEmailBody = (body) => {
 };
 
 
+router.use(dbContextMiddleware);
 
 router.post("/create-default-email", verifyToken, emailSettingsController.createOrUpdateDefaultEmail);
 router.get("/get-default-email",verifyToken, emailSettingsController.getDefaultEmail);

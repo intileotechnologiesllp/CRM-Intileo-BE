@@ -2,6 +2,9 @@ const express = require("express");
 const router = express.Router();
 const userInterfacePreferencesController = require("../controllers/userInterfacePreferencesController");
 const { verifyToken } = require("../middlewares/authMiddleware");
+const dbContextMiddleware = require("../middlewares/dbContext");
+
+router.use(dbContextMiddleware);
 
 // Get user interface preferences
 router.get(

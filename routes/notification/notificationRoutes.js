@@ -3,10 +3,11 @@ const router = express.Router();
 const notificationController = require("../../controllers/notification/notificationController");
 const notificationStatsController = require("../../controllers/notification/notificationStatsController");
 const { verifyToken } = require("../../middlewares/authMiddleware");
+const dbContextMiddleware = require("../../middlewares/dbContext");
 
 // All routes require authentication
 router.use(verifyToken);
-
+router.use(dbContextMiddleware);
 // =============== NOTIFICATION ROUTES ===============
 
 /**

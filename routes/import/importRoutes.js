@@ -8,10 +8,12 @@ const importExecutionController = require('../../controllers/import/importExecut
 
 // Import middleware (you may need to adjust these based on your auth system)
 const { verifyToken } = require('../../middlewares/authMiddleware');
+const dbContextMiddleware = require("../../middlewares/dbContext");
 const validatePrivilege = require('../../middlewares/validatePrivilege');
 
 // Apply authentication to all routes
 router.use(verifyToken);
+router.use(dbContextMiddleware);
 router.use(validatePrivilege(5, "create")); // Assuming import requires create privileges
 
 // ===== FILE UPLOAD & ANALYSIS ROUTES =====

@@ -3,6 +3,7 @@ const router = express.Router();
 const googleDriveController = require("../../controllers/googleDrive/googledrive"); // Adjust the path as necessary
 const multer = require("multer");
 const { verifyToken } = require("../../middlewares/authMiddleware");
+const dbContextMiddleware = require("../../middlewares/dbContext");
 
 const storage = multer.diskStorage({
   destination: function (req, file, cb) {
@@ -14,6 +15,12 @@ const storage = multer.diskStorage({
 });
 
 const upload = multer({ storage });
+
+
+
+router.use(dbContextMiddleware);
+
+
 
 router.get("/connect", verifyToken, googleDriveController.connectDrive);
 router.get("/callback", verifyToken, googleDriveController.googleCallback);

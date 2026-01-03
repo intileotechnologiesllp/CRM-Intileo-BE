@@ -2,6 +2,11 @@ const express = require('express');
 const router = express.Router();
 const lostReasonController = require('../../controllers/deals/lostReasonController');
 const { verifyToken } = require('../../middlewares/authMiddleware');
+const dbContextMiddleware = require("../../middlewares/dbContext");
+
+
+router.use(dbContextMiddleware);
+
 
 // Settings Routes (must come before /:id routes)
 router.get('/settings', verifyToken, lostReasonController.getLostReasonSettings);

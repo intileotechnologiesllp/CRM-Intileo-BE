@@ -6,6 +6,11 @@ const router = express.Router();
 const EmailBodyService = require('../services/emailBodyService');
 const BackgroundBodyFetcher = require('../workers/backgroundBodyFetcher');
 const { verifyToken } = require('../middlewares/authMiddleware');
+const dbContextMiddleware = require("../middlewares/dbContext");
+
+
+router.use(dbContextMiddleware);
+
 
 // 📊 Get body fetch statistics for current user
 router.get('/stats', verifyToken, async (req, res) => {

@@ -3,6 +3,10 @@ const router = express.Router();
 const { verifyToken } = require("../../middlewares/authMiddleware");
 const validatePrivilege = require("../../middlewares/validatePrivilege");
 const leadContactsController = require("../../controllers/leads/leadContactController");
+const dbContextMiddleware = require("../../middlewares/dbContext");
+
+router.use(dbContextMiddleware);
+
 
 router.post(
   "/create-organization",

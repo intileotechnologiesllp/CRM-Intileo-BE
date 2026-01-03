@@ -2,7 +2,11 @@ const express = require("express");
 const router = express.Router();
 const { verifyToken } = require("../../middlewares/authMiddleware");
 const meetingController = require("../../controllers/meeting/meetingController");
+const dbContextMiddleware = require("../../middlewares/dbContext");
 
+
+
+router.use(dbContextMiddleware);
 // /**
 //  * @route   POST /api/meetings
 //  * @desc    Create a new meeting

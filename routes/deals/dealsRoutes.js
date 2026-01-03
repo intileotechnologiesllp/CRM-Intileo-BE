@@ -2,6 +2,7 @@
 const express = require("express");
 const router = express.Router();
 const { verifyToken } = require("../../middlewares/authMiddleware");
+const dbContextMiddleware = require("../../middlewares/dbContext");
 const dealsController = require("../../controllers/deals/dealsController");
 
 const Deal = require("../../models/deals/dealsModels");
@@ -9,6 +10,10 @@ const multer = require('multer');
 const upload = multer({ dest: 'uploads/' });
 const validatePrivilege = require("../../middlewares/validatePrivilege");
 const activitySettingsMiddleware = require("../../middlewares/activitySettingsMiddleware");
+
+
+router.use(dbContextMiddleware);
+
 
 router.post("/create-deal", verifyToken, validatePrivilege(0, "create"), dealsController.createDeal);
 router.get("/get-deals", verifyToken,dealsController.getDeals);

@@ -1,8 +1,13 @@
 const express = require("express");
 const departmentController = require("../../../../controllers/admin/masters/department/departmentController");
 const verifyToken = require("../../../../middlewares/authMiddleware").verifyToken; // Import verifyToken middleware if needed
+const dbContextMiddleware = require("../../../../middlewares/dbContext");
 const validatePrivilege = require("../../../../middlewares/validatePrivilege");
 const router = express.Router();
+
+
+router.use(dbContextMiddleware);
+
 
 router.post("/create", verifyToken,departmentController.createdepartment); // Add department
 router.post("/edit/:departmentId",verifyToken, departmentController.editdepartment); // Edit department

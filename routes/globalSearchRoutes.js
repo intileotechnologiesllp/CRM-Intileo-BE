@@ -2,6 +2,11 @@ const express = require("express");
 const router = express.Router();
 const { verifyToken } = require("../middlewares/authMiddleware");
 const globalSearchController = require("../controllers/globalSearchController");
+const dbContextMiddleware = require("../middlewares/dbContext");
+
+
+router.use(dbContextMiddleware);
+
 
 // Global search endpoint
 router.get("/search", verifyToken, globalSearchController.globalSearch);

@@ -2,9 +2,12 @@ const express = require("express");
 const router = express.Router();
 const pipelineController = require("../controllers/deals/pipelineController");
 const { verifyToken } = require("../middlewares/authMiddleware");
+const dbContextMiddleware = require("../middlewares/dbContext");
 
 // All pipeline routes require authentication
 router.use(verifyToken);
+router.use(dbContextMiddleware);
+
 
 // Simple admin validation middleware (only admins can manage pipelines)
 const validateAdmin = (req, res, next) => {

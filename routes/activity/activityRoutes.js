@@ -2,9 +2,12 @@ const express = require("express");
 const router = express.Router();
 const { verifyToken } = require("../../middlewares/authMiddleware");
 const validatePrivilege = require("../../middlewares/validatePrivilege");
+const dbContextMiddleware = require("../../middlewares/dbContext");
 
 const activityController = require("../../controllers/activity/activityController");
 const activitySettingsMiddleware = require("../../middlewares/activitySettingsMiddleware");
+
+router.use(dbContextMiddleware);
 
 router.post("/create-activity", verifyToken, activityController.createActivity);
 router.get("/get-activities", verifyToken,activityController.getActivities);

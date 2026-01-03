@@ -2,7 +2,13 @@ const express = require("express");
 const router = express.Router();
 const userFavoritesController = require("../../controllers/favorites/userFavoritesController");
 const { verifyToken } = require("../../middlewares/authMiddleware");
+const dbContextMiddleware = require("../../middlewares/dbContext");
 const validatePrivilege = require("../../middlewares/validatePrivilege");
+
+
+
+router.use(dbContextMiddleware);
+
 
 // Add a user to favorites
 router.post("/add", verifyToken,userFavoritesController.addUserToFavorites);

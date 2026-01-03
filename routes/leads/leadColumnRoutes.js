@@ -1,8 +1,13 @@
 const express = require("express");
 const router = express.Router();
 const { verifyToken } = require("../../middlewares/authMiddleware");
+const dbContextMiddleware = require("../../middlewares/dbContext");
 const leadColumnController = require("../../controllers/leads/leadColumnController");
 // const validatePrivilege = require("../../middlewares/validatePrivilege");
+
+
+router.use(dbContextMiddleware);
+
 
 router.post(
   "/create-column",

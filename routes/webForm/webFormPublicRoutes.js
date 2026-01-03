@@ -3,7 +3,7 @@ const router = express.Router();
 const webFormPublicController = require("../../controllers/webForm/webFormPublicController");
 const webFormEmbedController = require("../../controllers/webForm/webFormEmbedController");
 const rateLimit = require("express-rate-limit");
-
+const dbContextMiddleware = require("../../middlewares/dbContext");
 // Rate limiting for public API
 const formSubmitLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
@@ -14,6 +14,10 @@ const formSubmitLimiter = rateLimit({
 // ====================================
 // PUBLIC ROUTES (No Authentication)
 // ====================================
+
+
+router.use(dbContextMiddleware);
+
 
 // Get embed script (external JS file - Zoho/HubSpot style)
 router.get("/embed/:uniqueKey.js", webFormEmbedController.getEmbedScript);

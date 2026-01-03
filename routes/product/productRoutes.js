@@ -2,9 +2,14 @@
 const express = require("express");
 const router = express.Router();
 const { verifyToken } = require("../../middlewares/authMiddleware");
+const dbContextMiddleware = require("../../middlewares/dbContext");
 const validatePrivilege = require("../../middlewares/validatePrivilege");
 const productController = require("../../controllers/product/productController");
 const Product = require("../../models/product/productModel");
+
+
+router.use(dbContextMiddleware);
+
 
 // Product CRUD routes
 // Permission 29: Add products

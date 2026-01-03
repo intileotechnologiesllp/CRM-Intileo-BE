@@ -2,6 +2,10 @@ const express = require("express");
 const router = express.Router();
 const { verifyToken } = require("../../middlewares/authMiddleware");
 const schedulingLinkController = require("../../controllers/meeting/schedulingLinkController");
+const dbContextMiddleware = require("../../middlewares/dbContext");
+
+
+router.use(dbContextMiddleware);
 
 
 router.get("/getDateTimeSlote",  schedulingLinkController.getTimeSlots);

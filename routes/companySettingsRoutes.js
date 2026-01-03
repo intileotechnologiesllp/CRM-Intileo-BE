@@ -2,10 +2,12 @@ const express = require("express");
 const router = express.Router();
 const companySettingsController = require("../controllers/company/companySettingsController");
 const { verifyToken } = require("../middlewares/authMiddleware");
-
+const dbContextMiddleware = require("../middlewares/dbContext");
 // Apply authentication middleware to all routes
-router.use(verifyToken);
 
+
+router.use(verifyToken);
+router.use(dbContextMiddleware);
 /**
  * @route   GET /api/company-settings
  * @desc    Get company settings

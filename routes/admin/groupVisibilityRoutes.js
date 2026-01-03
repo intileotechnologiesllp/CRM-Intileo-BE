@@ -1,7 +1,10 @@
 const express = require("express");
 const router = express.Router();
 const { verifyToken } = require("../../middlewares/authMiddleware");
+const dbContextMiddleware = require("../../middlewares/dbContext");
 const groupVisibilityController = require("../../controllers/admin/groupVisibilityController");
+
+router.use(dbContextMiddleware);
 
 
 router.post("/create-groupvisibility", verifyToken, groupVisibilityController.createVisibilityGroup);

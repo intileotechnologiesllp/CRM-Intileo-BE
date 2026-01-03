@@ -3,10 +3,14 @@ const router = express.Router();
 const webFormController = require("../../controllers/webForm/webFormController");
 const webFormPublicController = require("../../controllers/webForm/webFormPublicController");
 const { verifyToken } = require("../../middlewares/authMiddleware");
-
+const dbContextMiddleware = require("../../middlewares/dbContext");
 // ====================================
 // ADMIN ROUTES (Protected)
 // ====================================
+
+
+router.use(dbContextMiddleware);
+
 
 // Form Management
 router.post("/", verifyToken, webFormController.createForm);

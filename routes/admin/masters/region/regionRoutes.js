@@ -4,6 +4,9 @@ const router = express.Router();
 const validatePrivilege = require("../../../../middlewares/validatePrivilege");
 const verifyToken =
   require("../../../../middlewares/authMiddleware").verifyToken; // Import verifyToken middleware if needed
+const dbContextMiddleware = require("../../../../middlewares/dbContext");
+
+router.use(dbContextMiddleware);
 
 router.post("/create", verifyToken,regionController.createRegion); // Add region
 router.get("/:countryId", verifyToken, regionController.getRegions); // Get regions by country

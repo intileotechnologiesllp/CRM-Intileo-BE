@@ -3,6 +3,11 @@ const router = express.Router();
 
 const subadminController = require("../../controllers/auth/subadminController");
 const { verifyToken } = require("../../middlewares/authMiddleware");
+const dbContextMiddleware = require("../../middlewares/dbContext");
+
+
+router.use(dbContextMiddleware);
+
 
 router.post("/create", verifyToken, subadminController.createSubadmin);
 router.get("/get", verifyToken, subadminController.getSubadmins);

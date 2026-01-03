@@ -3,7 +3,11 @@ const router = express.Router();
 const emailController = require("../../controllers/email/emailController");
 const imapTestController = require("../../controllers/email/imapTestController");
 const { verifyToken } = require("../../middlewares/authMiddleware");
+const dbContextMiddleware = require("../../middlewares/dbContext");
 // const validatePrivilege = require("../../middlewares/validatePrivilege");
+
+
+router.use(dbContextMiddleware);
 
 // Fetch inbox emails
 router.post("/fetch-inbox", verifyToken, emailController.queueFetchInboxEmails);

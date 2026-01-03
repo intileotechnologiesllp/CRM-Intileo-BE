@@ -1,8 +1,11 @@
 const express = require("express");
 const labelController = require("../../../../controllers/admin/masters/labels/labelController");
 const verifyToken = require("../../../../middlewares/authMiddleware").verifyToken; // Import verifyToken middleware
+const dbContextMiddleware = require("../../../../middlewares/dbContext");
 const validatePrivilege = require("../../../../middlewares/validatePrivilege");
 const router = express.Router();
+
+router.use(dbContextMiddleware);
 
 // CRUD routes for labels
 router.post("/create", verifyToken,labelController.createLabel); // Create label

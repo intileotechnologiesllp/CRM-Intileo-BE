@@ -6,6 +6,11 @@ const multer = require('multer');
 const upload = multer({ dest: 'uploads/' });
 const validatePrivilege = require("../../middlewares/validatePrivilege");
 const Lead = require("../../models/leads/leadsModel");
+const dbContextMiddleware = require("../../middlewares/dbContext");
+
+
+router.use(dbContextMiddleware);
+
 
 // Create a lead (Admin only)
 router.post("/create", verifyToken, validatePrivilege(7, "create"), leadController.createLead);

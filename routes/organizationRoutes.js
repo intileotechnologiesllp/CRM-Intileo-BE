@@ -3,9 +3,13 @@ const router = express.Router();
 const organizationController = require("../controllers/organizationController");
 const { verifyToken } = require("../middlewares/authMiddleware");
 const validatePrivilege = require("../middlewares/validatePrivilege");
+const dbContextMiddleware = require("../middlewares/dbContext");
 
 // Apply authentication middleware to all routes
 // router.use(verifyToken);
+
+router.use(dbContextMiddleware);
+
 
 // Organization CRUD Routes
 router.post("/", verifyToken,organizationController.createOrganization);
