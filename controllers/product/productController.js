@@ -96,7 +96,7 @@ exports.uploadProductImage = (req, res, next) => {
 // Create a new product
 exports.createProduct = async (req, res) => {
   try {
-    const {
+    let {
       name,
       code,
       description,
@@ -116,6 +116,21 @@ exports.createProduct = async (req, res) => {
       metadata,
       variations, // Array of variation objects
     } = req.body;
+
+    // Convert string values to proper types
+    cost = cost && cost.toString().trim() !== "" ? parseFloat(cost) : null;
+    taxPercentage = taxPercentage && taxPercentage.toString().trim() !== "" ? parseFloat(taxPercentage) : 0;
+    discountValue = discountValue && discountValue.toString().trim() !== "" ? parseFloat(discountValue) : null;
+    hasVariations = hasVariations === true || hasVariations === "true" || hasVariations === 1 || hasVariations === "1";
+    
+    // Parse prices if it's a string
+    if (typeof prices === "string") {
+      try {
+        prices = JSON.parse(prices);
+      } catch (e) {
+        // If parsing fails, keep as is
+      }
+    }
 
     const ownerId = req.adminId;
 
@@ -188,6 +203,7 @@ exports.createProduct = async (req, res) => {
     });
 
     res.status(201).json({
+      statusCode: 201,
       status: "success",
       message: "Product created successfully",
       data: createdProduct,
@@ -205,7 +221,18 @@ exports.createProduct = async (req, res) => {
       }
     }
 
+    // Handle duplicate code error
+    if (error.name === "SequelizeUniqueConstraintError" && error.fields && error.fields.code) {
+      return res.status(409).json({
+        statusCode: 409,
+        status: "error",
+        message: `Product code '${req.body.code}' already exists. Please use a unique code.`,
+        error: "DUPLICATE_CODE",
+      });
+    }
+
     res.status(500).json({
+      statusCode: 500,
       status: "error",
       message: "Failed to create product",
       error: error.message,
@@ -509,12 +536,36 @@ exports.getProductById = async (req, res) => {
 exports.updateProduct = async (req, res) => {
   try {
     const { id } = req.params;
-    const updateData = req.body;
+    let updateData = { ...req.body };
+
+    // Convert string values to proper types
+    if (updateData.cost !== undefined) {
+      updateData.cost = updateData.cost && updateData.cost.toString().trim() !== "" ? parseFloat(updateData.cost) : null;
+    }
+    if (updateData.taxPercentage !== undefined) {
+      updateData.taxPercentage = updateData.taxPercentage && updateData.taxPercentage.toString().trim() !== "" ? parseFloat(updateData.taxPercentage) : 0;
+    }
+    if (updateData.discountValue !== undefined) {
+      updateData.discountValue = updateData.discountValue && updateData.discountValue.toString().trim() !== "" ? parseFloat(updateData.discountValue) : null;
+    }
+    if (updateData.hasVariations !== undefined) {
+      updateData.hasVariations = updateData.hasVariations === true || updateData.hasVariations === "true" || updateData.hasVariations === 1 || updateData.hasVariations === "1";
+    }
+    
+    // Parse prices if it's a string
+    if (updateData.prices && typeof updateData.prices === "string") {
+      try {
+        updateData.prices = JSON.parse(updateData.prices);
+      } catch (e) {
+        // If parsing fails, keep as is
+      }
+    }
 
     const product = await Product.findByPk(id);
 
     if (!product) {
       return res.status(404).json({
+        statusCode: 404,
         status: "error",
         message: "Product not found",
       });
@@ -592,6 +643,7 @@ exports.updateProduct = async (req, res) => {
     });
 
     res.status(200).json({
+      statusCode: 200,
       status: "success",
       message: "Product updated successfully",
       data: updatedProduct,
@@ -609,7 +661,18 @@ exports.updateProduct = async (req, res) => {
       }
     }
 
+    // Handle duplicate code error
+    if (error.name === "SequelizeUniqueConstraintError" && error.fields && error.fields.code) {
+      return res.status(409).json({
+        statusCode: 409,
+        status: "error",
+        message: `Product code '${req.body.code}' already exists. Please use a unique code.`,
+        error: "DUPLICATE_CODE",
+      });
+    }
+
     res.status(500).json({
+      statusCode: 500,
       status: "error",
       message: "Failed to update product",
       error: error.message,
@@ -683,7 +746,7 @@ exports.addProductToDeal = async (req, res) => {
     console.log("🔵 [ADD PRODUCT TO DEAL] Request received");
     console.log("🔵 Request body:", JSON.stringify(req.body, null, 2));
 
-    const {
+    let {
       dealId,
       productId,
       variationId,
@@ -700,48 +763,75 @@ exports.addProductToDeal = async (req, res) => {
       notes,
     } = req.body;
 
-    console.log("🔵 Parsed values:", {
+    // Convert string values to proper types and handle empty strings
+    dealId = dealId && dealId.toString().trim() !== "" ? parseInt(dealId) : null;
+    productId = productId && productId.toString().trim() !== "" ? parseInt(productId) : null;
+    variationId = variationId && variationId.toString().trim() !== "" ? parseInt(variationId) : null;
+    quantity = quantity && quantity.toString().trim() !== "" ? parseFloat(quantity) : null;
+    unitPrice = unitPrice && unitPrice.toString().trim() !== "" ? parseFloat(unitPrice) : null;
+    discountValue = discountValue && discountValue.toString().trim() !== "" ? parseFloat(discountValue) : 0;
+    taxPercentage = taxPercentage && taxPercentage.toString().trim() !== "" ? parseFloat(taxPercentage) : 0;
+
+    console.log("🔵 Parsed and converted values:", {
       dealId,
       productId,
       quantity,
       unitPrice,
     });
 
-    // Validate required fields - check for both missing and empty string values
-    if (!dealId || dealId.trim() === "" || !productId || productId.trim() === "" || !quantity || !unitPrice) {
-      console.log("❌ Missing required fields");
+    // Validate required fields
+    if (!dealId || !productId || !quantity || !unitPrice) {
+      console.log("❌ Missing or invalid required fields");
       return res.status(400).json({
         statusCode: 400,
         status: "error",
         message:
-          "Missing required fields: dealId, productId, quantity, unitPrice",
+          "Missing or invalid required fields: dealId, productId, quantity, unitPrice must be valid numbers",
         receivedValues: { dealId, productId, quantity, unitPrice }
       });
     }
 
-    // Calculate amounts
-    const subtotal = parseFloat(quantity) * parseFloat(unitPrice);
+    // Validate numeric values
+    if (isNaN(quantity) || isNaN(unitPrice) || quantity <= 0 || unitPrice < 0) {
+      console.log("❌ Invalid numeric values");
+      return res.status(400).json({
+        statusCode: 400,
+        status: "error",
+        message: "quantity must be greater than 0 and unitPrice must be non-negative",
+        receivedValues: { quantity, unitPrice }
+      });
+    }
+
+    // Calculate amounts (values are already parsed as floats)
+    const subtotal = quantity * unitPrice;
     let discountAmount = 0;
 
-    if (discountType === "percentage") {
-      discountAmount = (subtotal * parseFloat(discountValue)) / 100;
-    } else if (discountType === "fixed") {
-      discountAmount = parseFloat(discountValue);
+    if (discountType === "percentage" && discountValue > 0) {
+      discountAmount = (subtotal * discountValue) / 100;
+    } else if (discountType === "amount" && discountValue > 0) {
+      discountAmount = discountValue;
+    } else if (discountType === "fixed" && discountValue > 0) {
+      discountAmount = discountValue;
     }
 
     const amountAfterDiscount = subtotal - discountAmount;
     let taxAmount = 0;
     let total = amountAfterDiscount;
 
-    if (taxType === "tax-exclusive") {
-      taxAmount = (amountAfterDiscount * parseFloat(taxPercentage || 0)) / 100;
+    if (taxType === "tax-exclusive" && taxPercentage > 0) {
+      taxAmount = (amountAfterDiscount * taxPercentage) / 100;
       total = amountAfterDiscount + taxAmount;
-    } else if (taxType === "tax-inclusive") {
-      taxAmount =
-        (amountAfterDiscount * parseFloat(taxPercentage || 0)) /
-        (100 + parseFloat(taxPercentage || 0));
+    } else if (taxType === "tax-inclusive" && taxPercentage > 0) {
+      taxAmount = (amountAfterDiscount * taxPercentage) / (100 + taxPercentage);
       total = amountAfterDiscount;
     }
+
+    console.log("🔵 Calculated amounts:", {
+      subtotal: subtotal.toFixed(2),
+      discountAmount: discountAmount.toFixed(2),
+      taxAmount: taxAmount.toFixed(2),
+      total: total.toFixed(2),
+    });
 
     console.log("🔵 Creating deal product with:", {
       dealId,
@@ -755,7 +845,7 @@ exports.addProductToDeal = async (req, res) => {
     const dealProduct = await DealProduct.create({
       dealId,
       productId,
-      variationId,
+      variationId: variationId || null,
       quantity,
       unitPrice,
       currency: currency || "INR",
