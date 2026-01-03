@@ -14,18 +14,9 @@ const MiscSettings = require("../../models/miscSettings/miscSettingModel.js");
 const GroupVisibility = require("../../models/admin/groupVisibilityModel.js");
 const { google } = require("googleapis");
 const DatabaseConnectionManager = require("../../config/dbConnectionManager.js");
+const { getClientDbConnection } = require("../../config/db");
 
 exports.signIn = async (req, res) => {
-  const {
-    Admin,
-    MasterUser,
-    AuditTrail,
-    History,
-    MiscSetting,
-    GroupVisibility,
-    LoginHistory,
-    RecentLoginHistory,
-  } = req.models;
   const {
     email,
     password,
@@ -38,15 +29,27 @@ exports.signIn = async (req, res) => {
 
   try {
     // Step 1: Verify user in client database
-    const verificationResult =
-      await DatabaseConnectionManager.verifyUserInDatabase(email, password);
+    const verificationResult = await DatabaseConnectionManager.verifyUserInDatabase(email, password);
     const { user, creator, clientConfig, planDetails } = verificationResult;
+
+    // Step 2: Get client database connection and models
+    const clientConnection = await getClientDbConnection(clientConfig);
+    const models = DatabaseConnectionManager.getAllModels(clientConnection);
+    
+    // Destructure models
+    const {
+      MasterUser,
+      AuditTrail,
+      GroupVisibility,
+      LoginHistory,
+      RecentLoginHistory,
+    } = models;
 
     // Check if user is active
     if (!user.isActive) {
       await logAuditTrail(
         AuditTrail,
-        PROGRAMS.AUTHENTICATION,
+        "AUTHENTICATION",
         "SIGN_IN",
         user.loginType,
         "User account is deactivated",
@@ -66,13 +69,13 @@ exports.signIn = async (req, res) => {
       });
     }
 
-    // Step 2: Check if 2FA is enabled (from first function)
+    // Step 3: Check if 2FA is enabled
     const locationInfo = systemInfo?.approximateLocation;
 
     if (user.twoFactorEnabled) {
       await logAuditTrail(
         AuditTrail,
-        PROGRAMS.AUTHENTICATION,
+        "AUTHENTICATION",
         "SIGN_IN_2FA_REQUIRED",
         "Password verified, awaiting 2FA",
         user.masterUserID
@@ -94,7 +97,7 @@ exports.signIn = async (req, res) => {
       });
     }
 
-    // Step 3: Login history and session tracking (from first function)
+    // Step 4: Login history and session tracking
     const loginTimeUTC = new Date();
     const loginTimeIST = moment(loginTimeUTC)
       .tz("Asia/Kolkata")
@@ -115,17 +118,13 @@ exports.signIn = async (req, res) => {
         .split(" ")
         .map(Number);
 
-      previousTotalDurationInSeconds =
-        (hours || 0) * 3600 + (minutes || 0) * 60;
+      previousTotalDurationInSeconds = (hours || 0) * 3600 + (minutes || 0) * 60;
     }
 
-    const currentSessionDurationInSeconds = 0; // No logout yet for new session
-    const totalSessionDurationInSeconds =
-      previousTotalDurationInSeconds + currentSessionDurationInSeconds;
+    const currentSessionDurationInSeconds = 0;
+    const totalSessionDurationInSeconds = previousTotalDurationInSeconds + currentSessionDurationInSeconds;
     const totalHours = Math.floor(totalSessionDurationInSeconds / 3600);
-    const totalMinutes = Math.floor(
-      (totalSessionDurationInSeconds % 3600) / 60
-    );
+    const totalMinutes = Math.floor((totalSessionDurationInSeconds % 3600) / 60);
     const totalSessionDuration = `${totalHours} hours ${totalMinutes} minutes`;
 
     // Save new login history
@@ -159,7 +158,7 @@ exports.signIn = async (req, res) => {
       totalSessionDuration,
     });
 
-    // Step 4: Fetch user's groups (from first function)
+    // Step 5: Fetch user's groups
     const allGroups = await GroupVisibility.findAll({
       where: { isActive: true },
       include: [
@@ -179,10 +178,7 @@ exports.signIn = async (req, res) => {
         groupUserIds = memberIdsRaw
           .map((id) => parseInt(id, 10))
           .filter((id) => !isNaN(id));
-      } else if (
-        typeof memberIdsRaw === "string" &&
-        memberIdsRaw.trim() !== ""
-      ) {
+      } else if (typeof memberIdsRaw === "string" && memberIdsRaw.trim() !== "") {
         groupUserIds = memberIdsRaw
           .split(",")
           .map((id) => parseInt(id.trim(), 10))
@@ -218,13 +214,13 @@ exports.signIn = async (req, res) => {
 
     const groupIds = formattedGroups.map((group) => group.groupId);
 
-    // Step 5: Generate JWT token (combined from both)
+    // Step 6: Generate JWT token
     const token = jwt.sign(
       {
         id: user.masterUserID,
         email: user.email,
         loginType: user.loginType,
-        sessionId: newSession.id, // Include session ID for tracking
+        sessionId: newSession.id,
         clientId: clientConfig.id,
         dbName: clientConfig.db_name,
         clientName: clientConfig.name,
@@ -237,13 +233,11 @@ exports.signIn = async (req, res) => {
       { expiresIn: "30d" }
     );
 
-    // Step 6: Prepare response
+    // Step 7: Prepare response
     const response = {
       success: true,
       statusCode: 200,
-      message: `${
-        user.loginType === "admin" ? "Admin" : "General User"
-      } sign-in successful`,
+      message: `${user.loginType === "admin" ? "Admin" : "General User"} sign-in successful`,
       token,
       totalSessionDuration,
       userGroups: formattedGroups,
@@ -296,7 +290,7 @@ exports.signIn = async (req, res) => {
     // Log successful sign-in
     await logAuditTrail(
       AuditTrail,
-      PROGRAMS.AUTHENTICATION,
+      "AUTHENTICATION",
       "SIGN_IN",
       user.loginType,
       "Sign-in successful",
@@ -330,13 +324,8 @@ exports.signIn = async (req, res) => {
       errorType = "DB_CONNECTION_ERROR";
     }
 
-    await logAuditTrail(
-      AuditTrail,
-      PROGRAMS.AUTHENTICATION,
-      "SIGN_IN",
-      errorType,
-      error.message || message
-    );
+    // Note: Can't log to AuditTrail here since we don't have the model
+    // You could log to central database or console
 
     res.status(statusCode).json({
       success: false,
@@ -346,6 +335,337 @@ exports.signIn = async (req, res) => {
     });
   }
 };
+// exports.signIn = async (req, res) => {
+//   const {
+//     Admin,
+//     MasterUser,
+//     AuditTrail,
+//     History,
+//     MiscSetting,
+//     GroupVisibility,
+//     LoginHistory,
+//     RecentLoginHistory,
+//   } = req.models;
+//   const {
+//     email,
+//     password,
+//     systemInfo,
+//     device,
+//     longitude,
+//     latitude,
+//     ipAddress,
+//   } = req.body;
+
+//   try {
+//     // Step 1: Verify user in client database
+//     const verificationResult =
+//       await DatabaseConnectionManager.verifyUserInDatabase(email, password);
+//     const { user, creator, clientConfig, planDetails } = verificationResult;
+
+//     // Check if user is active
+//     if (!user.isActive) {
+//       await logAuditTrail(
+//         AuditTrail,
+//         PROGRAMS.AUTHENTICATION,
+//         "SIGN_IN",
+//         user.loginType,
+//         "User account is deactivated",
+//         user.masterUserID
+//       );
+//       return res.status(403).json({
+//         success: false,
+//         message: "User account is deactivated",
+//       });
+//     }
+
+//     // Check if client is active
+//     if (!clientConfig.isActive) {
+//       return res.status(403).json({
+//         success: false,
+//         message: "Client account is deactivated",
+//       });
+//     }
+
+//     // Step 2: Check if 2FA is enabled (from first function)
+//     const locationInfo = systemInfo?.approximateLocation;
+
+//     if (user.twoFactorEnabled) {
+//       await logAuditTrail(
+//         AuditTrail,
+//         PROGRAMS.AUTHENTICATION,
+//         "SIGN_IN_2FA_REQUIRED",
+//         "Password verified, awaiting 2FA",
+//         user.masterUserID
+//       );
+
+//       return res.status(200).json({
+//         success: true,
+//         message: "2FA verification required",
+//         requiresTwoFactor: true,
+//         userId: user.masterUserID,
+//         email: user.email,
+//         sessionData: {
+//           systemInfo,
+//           device,
+//           longitude,
+//           latitude,
+//           ipAddress,
+//         },
+//       });
+//     }
+
+//     // Step 3: Login history and session tracking (from first function)
+//     const loginTimeUTC = new Date();
+//     const loginTimeIST = moment(loginTimeUTC)
+//       .tz("Asia/Kolkata")
+//       .format("YYYY-MM-DD HH:mm:ss");
+
+//     // Fetch latest login history for the user
+//     const latestLoginHistory = await LoginHistory.findOne({
+//       where: { userId: user.masterUserID },
+//       order: [["loginTime", "DESC"]],
+//     });
+
+//     // Calculate total session duration
+//     let previousTotalDurationInSeconds = 0;
+//     if (latestLoginHistory && latestLoginHistory.totalSessionDuration) {
+//       const [hours, minutes] = latestLoginHistory.totalSessionDuration
+//         .replace(" hours", "")
+//         .replace(" minutes", "")
+//         .split(" ")
+//         .map(Number);
+
+//       previousTotalDurationInSeconds =
+//         (hours || 0) * 3600 + (minutes || 0) * 60;
+//     }
+
+//     const currentSessionDurationInSeconds = 0; // No logout yet for new session
+//     const totalSessionDurationInSeconds =
+//       previousTotalDurationInSeconds + currentSessionDurationInSeconds;
+//     const totalHours = Math.floor(totalSessionDurationInSeconds / 3600);
+//     const totalMinutes = Math.floor(
+//       (totalSessionDurationInSeconds % 3600) / 60
+//     );
+//     const totalSessionDuration = `${totalHours} hours ${totalMinutes} minutes`;
+
+//     // Save new login history
+//     const newSession = await LoginHistory.create({
+//       userId: user.masterUserID,
+//       loginType: user.loginType,
+//       ipAddress: ipAddress || null,
+//       longitude: locationInfo?.longitude || null,
+//       latitude: locationInfo?.latitude || null,
+//       loginTime: loginTimeIST,
+//       username: user.name,
+//       totalSessionDuration,
+//       isActive: true,
+//       device: device,
+//       location: `${locationInfo?.city}, ${locationInfo?.country}` || null,
+//     });
+
+//     // Update RecentLoginHistory
+//     await RecentLoginHistory.destroy({
+//       where: { userId: user.masterUserID },
+//     });
+
+//     await RecentLoginHistory.create({
+//       userId: user.masterUserID,
+//       loginType: user.loginType,
+//       ipAddress: ipAddress || null,
+//       longitude: longitude || null,
+//       latitude: latitude || null,
+//       loginTime: loginTimeIST,
+//       username: user.name,
+//       totalSessionDuration,
+//     });
+
+//     // Step 4: Fetch user's groups (from first function)
+//     const allGroups = await GroupVisibility.findAll({
+//       where: { isActive: true },
+//       include: [
+//         {
+//           model: MasterUser,
+//           as: "creator",
+//           attributes: ["masterUserID", "name", "email"],
+//         },
+//       ],
+//     });
+
+//     const userGroups = allGroups.filter((group) => {
+//       const memberIdsRaw = group.memberIds;
+//       let groupUserIds = [];
+
+//       if (Array.isArray(memberIdsRaw)) {
+//         groupUserIds = memberIdsRaw
+//           .map((id) => parseInt(id, 10))
+//           .filter((id) => !isNaN(id));
+//       } else if (
+//         typeof memberIdsRaw === "string" &&
+//         memberIdsRaw.trim() !== ""
+//       ) {
+//         groupUserIds = memberIdsRaw
+//           .split(",")
+//           .map((id) => parseInt(id.trim(), 10))
+//           .filter((id) => !isNaN(id));
+//       }
+
+//       return groupUserIds.includes(parseInt(user.masterUserID, 10));
+//     });
+
+//     const formattedGroups = userGroups.map((group) => ({
+//       groupId: group.groupId,
+//       groupName: group.groupName,
+//       description: group.description,
+//       isDefault: group.isDefault,
+//       isActive: group.isActive,
+//       pipeline: group.pipeline,
+//       lead: group.lead,
+//       deal: group.deal,
+//       person: group.person,
+//       Organization: group.Organization,
+//       group: group.group,
+//       createdBy: group.createdBy,
+//       creator: group.creator
+//         ? {
+//             masterUserID: group.creator.masterUserID,
+//             firstName: group.creator.name,
+//             email: group.creator.email,
+//           }
+//         : null,
+//       createdAt: group.createdAt,
+//       updatedAt: group.updatedAt,
+//     }));
+
+//     const groupIds = formattedGroups.map((group) => group.groupId);
+
+//     // Step 5: Generate JWT token (combined from both)
+//     const token = jwt.sign(
+//       {
+//         id: user.masterUserID,
+//         email: user.email,
+//         loginType: user.loginType,
+//         sessionId: newSession.id, // Include session ID for tracking
+//         clientId: clientConfig.id,
+//         dbName: clientConfig.db_name,
+//         clientName: clientConfig.name,
+//         organizationName: clientConfig.organizationName,
+//         api_key: clientConfig.api_key,
+//         planId: clientConfig.planId,
+//         userType: user.userType,
+//       },
+//       process.env.JWT_SECRET,
+//       { expiresIn: "30d" }
+//     );
+
+//     // Step 6: Prepare response
+//     const response = {
+//       success: true,
+//       statusCode: 200,
+//       message: `${
+//         user.loginType === "admin" ? "Admin" : "General User"
+//       } sign-in successful`,
+//       token,
+//       totalSessionDuration,
+//       userGroups: formattedGroups,
+//       groupIds: groupIds,
+//       user: {
+//         id: user.masterUserID,
+//         email: user.email,
+//         name: user.name,
+//         loginType: user.loginType,
+//         userType: user.userType,
+//         twoFactorEnabled: user.twoFactorEnabled,
+//       },
+//       clientInfo: {
+//         clientId: clientConfig.id,
+//         clientName: clientConfig.name,
+//         organizationName: clientConfig.organizationName,
+//         dbName: clientConfig.db_name,
+//         isActive: clientConfig.isActive,
+//         paymentDone: clientConfig.paymentDone,
+//         isTrialExpired: clientConfig.isTrialExpired,
+//         trialPeriodDays: clientConfig.trialPeriodDays,
+//         startDate: clientConfig.startDate,
+//         ActualStartDate: clientConfig.ActualStartDate,
+//         ActualEndDate: clientConfig.ActualEndDate,
+//       },
+//       creator: {
+//         id: creator.masterUserID,
+//         email: creator.email,
+//         name: creator.name,
+//         userType: creator.userType,
+//       },
+//     };
+
+//     // Add plan details if available
+//     if (planDetails) {
+//       response.planDetails = {
+//         id: planDetails.id,
+//         name: planDetails.name,
+//         code: planDetails.code,
+//         description: planDetails.description,
+//         currency: planDetails.currency,
+//         unitAmount: planDetails.unitAmount,
+//         billingInterval: planDetails.billingInterval,
+//         trialPeriodDays: planDetails.trialPeriodDays,
+//         isActive: planDetails.isActive,
+//         features: planDetails.features,
+//       };
+//     }
+
+//     // Log successful sign-in
+//     await logAuditTrail(
+//       AuditTrail,
+//       PROGRAMS.AUTHENTICATION,
+//       "SIGN_IN",
+//       user.loginType,
+//       "Sign-in successful",
+//       user.masterUserID
+//     );
+
+//     res.status(200).json(response);
+//   } catch (error) {
+//     console.error("Error during sign-in:", error);
+
+//     // Enhanced error handling
+//     let statusCode = 500;
+//     let message = "Internal server error";
+//     let errorType = "unknown";
+
+//     if (error.message.includes("Client not found")) {
+//       statusCode = 404;
+//       message = "Client not found";
+//       errorType = "CLIENT_NOT_FOUND";
+//     } else if (error.message.includes("User not found in client database")) {
+//       statusCode = 404;
+//       message = "User not found. Please use /connect-db API first.";
+//       errorType = "USER_NOT_FOUND";
+//     } else if (error.message.includes("Invalid password")) {
+//       statusCode = 401;
+//       message = "Invalid password";
+//       errorType = "INVALID_PASSWORD";
+//     } else if (error.message.includes("Database connection")) {
+//       statusCode = 503;
+//       message = "Database connection error";
+//       errorType = "DB_CONNECTION_ERROR";
+//     }
+
+//     await logAuditTrail(
+//       AuditTrail,
+//       PROGRAMS.AUTHENTICATION,
+//       "SIGN_IN",
+//       errorType,
+//       error.message || message
+//     );
+
+//     res.status(statusCode).json({
+//       success: false,
+//       statusCode,
+//       message,
+//       error: process.env.NODE_ENV === "development" ? error.message : undefined,
+//     });
+//   }
+// };
 
 exports.createAdmin = async (req, res) => {
   const { Admin } = req.models;

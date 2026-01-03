@@ -153,39 +153,39 @@ const createEntityFileModel = (sequelizeInstance) => {
 });
 
 // Define associations
-EntityFile.belongsTo(MasterUser, { foreignKey: 'uploadedBy', as: 'uploader' });
+// EntityFile.belongsTo(MasterUser, { foreignKey: 'uploadedBy', as: 'uploader' });
 
-// Dynamic associations based on entityType
-EntityFile.prototype.getEntity = async function() {
-  if (this.entityType === 'person') {
-    return await Person.findByPk(this.entityId);
-  } else if (this.entityType === 'organization') {
-    return await Organization.findByPk(this.entityId);
-  }
-  return null;
-};
+// // Dynamic associations based on entityType
+// EntityFile.prototype.getEntity = async function() {
+//   if (this.entityType === 'person') {
+//     return await Person.findByPk(this.entityId);
+//   } else if (this.entityType === 'organization') {
+//     return await Organization.findByPk(this.entityId);
+//   }
+//   return null;
+// };
 
-// Static method to get files for a specific entity
-EntityFile.getFilesForEntity = function(entityId, entityType, options = {}) {
-  return this.findAll({
-    where: {
-      entityId,
-      entityType,
-      isActive: true,
-      ...options.where
-    },
-    ...options
-  });
-};
+// // Static method to get files for a specific entity
+// EntityFile.getFilesForEntity = function(entityId, entityType, options = {}) {
+//   return this.findAll({
+//     where: {
+//       entityId,
+//       entityType,
+//       isActive: true,
+//       ...options.where
+//     },
+//     ...options
+//   });
+// };
 
-// Static method to create file for entity
-EntityFile.createForEntity = function(entityId, entityType, fileData) {
-  return this.create({
-    entityId,
-    entityType,
-    ...fileData
-  });
-};
+// // Static method to create file for entity
+// EntityFile.createForEntity = function(entityId, entityType, fileData) {
+//   return this.create({
+//     entityId,
+//     entityType,
+//     ...fileData
+//   });
+// };
 
 return EntityFile
 }

@@ -271,8 +271,8 @@ Lead.belongsTo(Deal, { foreignKey: "dealId", as: "DealLeads" });
 Lead.hasMany(Deal, { foreignKey: "leadId", as: "LeadDeals" });
 
 // // Dashboard-Report-Goal associations
-Dashboard.hasMany(Report, { foreignKey: "dashboardIds", as: "Reports" });
-Report.belongsTo(Dashboard, { foreignKey: "dashboardIds", as: "Dashboard" });
+Dashboard.hasMany(Report, { foreignKey: "dashboardId", as: "Reports" });
+Report.belongsTo(Dashboard, { foreignKey: "dashboardId", as: "Dashboard" });
 
 Dashboard.hasMany(Goal, { foreignKey: "dashboardId", as: "Goals" });
 Goal.belongsTo(Dashboard, { foreignKey: "dashboardId", as: "Dashboard" });

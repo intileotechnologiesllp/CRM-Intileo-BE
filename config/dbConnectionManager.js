@@ -431,7 +431,7 @@ class DatabaseConnectionManager {
       case 'WebFormField':
         model = createWebFormFieldModel(connection);
         break;
-      case 'webFormSubmission':
+      case 'WebFormSubmission':
         model = createWebFormSubmissionModel(connection);
         break;
       case 'WebFormTracking':

@@ -179,7 +179,7 @@ const WebFormSubmission = sequelizeInstance.define("WebFormSubmission", {
     defaultValue: DataTypes.NOW,
   },
 }, {
-  tableName: "webFormSubmissions",
+  tableName: "WebFormSubmissions",
   timestamps: true,
   indexes: [
     { fields: ["formId"] },
