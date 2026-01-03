@@ -41,6 +41,8 @@ router.put("/:id", verifyToken, schedulingLinkController.createOrUpdateLink);
  */
 router.delete("/:id", verifyToken, schedulingLinkController.deleteLink);
 
+router.post("/book-meeting", schedulingLinkController.bookGoogleMeet);
+
 
 /**
  * PUBLIC ROUTES (No authentication required)

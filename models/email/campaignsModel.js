@@ -1,15 +1,16 @@
 const { DataTypes } = require("sequelize");
 const sequelize = require("../../config/db");
+const EmailTemplate = require("./emailTemplateModel");
 
-const EmailTemplate = sequelize.define(
-  "EmailTemplate",
+const Campaigns = sequelize.define(
+  "Campaigns",
   {
-    templateId: {
+    campaignId: {
       type: DataTypes.INTEGER,
       primaryKey: true,
       autoIncrement: true,
     },
-    templateName: {
+    campaignName: {
       type: DataTypes.STRING,
       allowNull: false,
     },
@@ -17,9 +18,29 @@ const EmailTemplate = sequelize.define(
       type: DataTypes.STRING,
       allowNull: false,
     },
-    body: {
-      type: DataTypes.TEXT("long"),
+    receivers: {
+      type: DataTypes.STRING,
       allowNull: false,
+    },
+    sender: {
+      type: DataTypes.STRING,
+      allowNull: false,
+    },
+    emailContent: {
+      type: DataTypes.INTEGER,
+      allowNull: false,
+      references: {
+        model: EmailTemplate,
+        key: "templateId",
+      },
+    },
+    sendingTime: {
+      type: DataTypes.JSON,
+      allowNull: false,
+    },
+    Engagement: {
+      type: DataTypes.JSON,
+      allowNull: true,
     },
     createdBy: {
       type: DataTypes.INTEGER,
@@ -51,4 +72,4 @@ const EmailTemplate = sequelize.define(
   }
 );
 
-module.exports = EmailTemplate;
+module.exports = Campaigns;
