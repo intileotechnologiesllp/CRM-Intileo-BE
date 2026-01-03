@@ -1,3 +1,5 @@
+const { StartupQuestion } = require("../../models");
+
 exports.saveStartUpQuestions = async (req, res) => {
   const {
     jobTitle,
