@@ -225,6 +225,118 @@ const invalidateUserCredentialCache = async (masterUserID) => {
     console.error(`❌ [CACHE] Failed to invalidate UserCredential cache for ${masterUserID}:`, error.message);
   }
 };
+
+// =================== AUTO-LINKING FUNCTIONALITY ===================
+
+/**
+ * 🔗 AUTO-LINK: Automatically link emails to relevant leads, deals, persons, and organizations
+ * This function scans email addresses (sender and recipients) and finds matching records
+ * 
+ * @param {string} sender - Email sender address
+ * @param {string} recipient - Email recipient addresses (comma-separated)
+ * @param {number} masterUserID - User ID for linking
+ * @returns {Promise<Object>} Object with leadId, dealId (personId and organizationId for future use)
+ */
+const autoLinkEmailToRecords = async (sender, recipient, masterUserID) => {
+  try {
+    console.log(`🔗 [AUTO-LINK] Scanning email addresses - Sender: ${sender}, Recipients: ${recipient}`);
+    
+    // Extract all unique email addresses from sender and recipients
+    const emailAddresses = new Set();
+    
+    if (sender) {
+      emailAddresses.add(sender.toLowerCase().trim());
+    }
+    
+    if (recipient) {
+      // Parse recipient field (can be comma-separated or semicolon-separated)
+      const recipientList = recipient.split(/[,;]/).map(email => {
+        // Extract email from "Name <email@domain.com>" format
+        const match = email.match(/<(.+?)>/);
+        return match ? match[1].toLowerCase().trim() : email.toLowerCase().trim();
+      }).filter(email => email && email.includes('@'));
+      
+      recipientList.forEach(email => emailAddresses.add(email));
+    }
+    
+    const uniqueEmails = Array.from(emailAddresses);
+    console.log(`🔗 [AUTO-LINK] Found ${uniqueEmails.length} unique email addresses to check: ${uniqueEmails.join(', ')}`);
+    
+    if (uniqueEmails.length === 0) {
+      console.log(`⚠️ [AUTO-LINK] No valid email addresses found, skipping auto-link`);
+      return { leadId: null, dealId: null };
+    }
+    
+    // Search for matching records in parallel for better performance
+    const [matchingLeads, matchingDeals] = await Promise.all([
+      // Find matching leads (unconverted leads only - no dealId)
+      Lead.findAll({
+        where: {
+          email: { [Op.in]: uniqueEmails },
+          dealId: null // Only link to unconverted leads
+        },
+        attributes: ['leadId', 'email', 'contactPerson', 'organization', 'status'],
+        order: [['createdAt', 'DESC']],
+        limit: 5
+      }),
+      
+      // Find matching deals (active deals)
+      Deal.findAll({
+        where: {
+          email: { [Op.in]: uniqueEmails }
+        },
+        attributes: ['dealId', 'email', 'contactPerson', 'organization', 'status'],
+        order: [['createdAt', 'DESC']],
+        limit: 5
+      })
+    ]);
+    
+    // Log findings
+    console.log(`🔗 [AUTO-LINK] Search results:`);
+    console.log(`   Leads: ${matchingLeads.length} found`);
+    console.log(`  💼 Deals: ${matchingDeals.length} found`);
+    
+    // Priority linking logic:
+    // 1. Link to most recent deal (highest priority - active sales opportunity)
+    // 2. If no deal, link to most recent lead (potential opportunity)
+    
+    const linkResult = {
+      leadId: null,
+      dealId: null
+    };
+    
+    // Link to Deal (highest priority for active sales opportunities)
+    if (matchingDeals.length > 0) {
+      const mostRecentDeal = matchingDeals[0];
+      linkResult.dealId = mostRecentDeal.dealId;
+      console.log(`✅ [AUTO-LINK] Linked to Deal: ${mostRecentDeal.dealId} (${mostRecentDeal.contactPerson || 'No name'}) - Status: ${mostRecentDeal.status || 'Unknown'}`);
+    }
+    
+    // Link to Lead (if no deal found - for nurturing prospects)
+    if (!linkResult.dealId && matchingLeads.length > 0) {
+      const mostRecentLead = matchingLeads[0];
+      linkResult.leadId = mostRecentLead.leadId;
+      console.log(`✅ [AUTO-LINK] Linked to Lead: ${mostRecentLead.leadId} (${mostRecentLead.contactPerson || 'No name'}) - Status: ${mostRecentLead.status || 'Unknown'}`);
+    }
+    
+    // Log final linking summary
+    const linkedCount = Object.values(linkResult).filter(id => id !== null).length;
+    if (linkedCount > 0) {
+      console.log(`🎉 [AUTO-LINK] Successfully linked email to ${linkedCount} record(s):`, linkResult);
+    } else {
+      console.log(`ℹ️ [AUTO-LINK] No matching records found for email addresses - Email will be saved without linking`);
+    }
+    
+    return linkResult;
+    
+  } catch (error) {
+    console.error(`❌ [AUTO-LINK] Error during auto-linking:`, error.message);
+    console.error(`❌ [AUTO-LINK] Stack trace:`, error.stack);
+    // Return empty result on error - don't block email saving
+    return { leadId: null, dealId: null };
+  }
+};
+
 const concurrencyLimit = pLimit(MAX_CONCURRENT_USERS);
 
 // 🚀 PERFORMANCE: User session tracking
@@ -1110,7 +1222,29 @@ const saveEmailsInParallel = async (emails, concurrency = 10, userID, provider, 
         });
         
         if (!existingEmail) {
-          // 🔍 DEBUG: Log UID before saving
+          // � AUTO-LINK: Find matching leads, deals, persons before saving
+          console.log(`[Batch ${page}] 🔗 AUTO-LINKING email: ${email.messageId}`);
+          const linkResult = await autoLinkEmailToRecords(email.sender, email.recipient, userID);
+          
+          // Apply auto-link results to email data
+          if (linkResult.leadId) {
+            email.leadId = linkResult.leadId;
+            console.log(`[Batch ${page}] ✅ Auto-linked to Lead: ${linkResult.leadId}`);
+          }
+          if (linkResult.dealId) {
+            email.dealId = linkResult.dealId;
+            console.log(`[Batch ${page}] ✅ Auto-linked to Deal: ${linkResult.dealId}`);
+          }
+          if (linkResult.personId) {
+            email.personId = linkResult.personId;
+            console.log(`[Batch ${page}] ✅ Auto-linked to Person: ${linkResult.personId}`);
+          }
+          if (linkResult.organizationId) {
+            email.organizationId = linkResult.organizationId;
+            console.log(`[Batch ${page}] ✅ Auto-linked to Organization: ${linkResult.organizationId}`);
+          }
+          
+          // �🔍 DEBUG: Log UID before saving
           console.log(`[Batch ${page}] 💾 SAVING NEW EMAIL: ${email.messageId} with UID: ${email.uid}`);
           const savedEmail = await Email.create(email);
           savedEmails.push(savedEmail);

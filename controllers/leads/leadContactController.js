@@ -4,7 +4,7 @@ exports.updateOrganizationColumnChecks = async (req, res) => {
   const { columns } = req.body;
 
   if (!Array.isArray(columns)) {
-    return res.status(400).json({ message: "Columns array is required." });
+    return res.status(400).json({ statusCode: 400, message: "Columns array is required." });
   }
 
   try {
@@ -15,7 +15,7 @@ exports.updateOrganizationColumnChecks = async (req, res) => {
     // Find the global OrganizationColumnPreference record
     let pref = await OrganizationColumnPreference.findOne();
     if (!pref) {
-      return res.status(404).json({ message: "Preferences not found." });
+      return res.status(404).json({ statusCode: 404, message: "Preferences not found." });
     }
 
     // Parse columns if stored as string
@@ -144,6 +144,7 @@ exports.updateOrganizationColumnChecks = async (req, res) => {
     await pref.save();
 
     res.status(200).json({
+      statusCode: 200,
       message: "Organization columns updated",
       columns: pref.columns,
       customFieldsProcessed: customFields.length,
@@ -152,7 +153,7 @@ exports.updateOrganizationColumnChecks = async (req, res) => {
     });
   } catch (error) {
     console.error("Error updating organization columns:", error);
-    res.status(500).json({ message: "Error updating organization columns" });
+    res.status(500).json({ statusCode: 500, message: "Error updating organization columns" });
   }
 };
 
@@ -165,7 +166,7 @@ exports.updatePersonColumnChecks = async (req, res) => {
   const { columns, entityType: globalEntityType } = req.body;
 
   if (!Array.isArray(columns)) {
-    return res.status(400).json({ message: "Columns array is required." });
+    return res.status(400).json({ statusCode: 400, message: "Columns array is required." });
   }
 
   try {
@@ -194,7 +195,7 @@ exports.updatePersonColumnChecks = async (req, res) => {
       // Find the global PersonColumnPreference record
       let personPref = await PersonColumnPreference.findOne();
       if (!personPref) {
-        return res.status(404).json({ message: "Person preferences not found." });
+        return res.status(404).json({ statusCode: 404, message: "Person preferences not found." });
       }
 
       // Parse person columns if stored as string
@@ -339,7 +340,7 @@ exports.updatePersonColumnChecks = async (req, res) => {
       // Find the global OrganizationColumnPreference record
       let orgPref = await OrganizationColumnPreference.findOne();
       if (!orgPref) {
-        return res.status(404).json({ message: "Organization preferences not found." });
+        return res.status(404).json({ statusCode: 404, message: "Organization preferences not found." });
       }
 
       // Parse organization columns if stored as string
@@ -492,6 +493,7 @@ exports.updatePersonColumnChecks = async (req, res) => {
     }
 
     res.status(200).json({
+      statusCode: 200,
       message,
       results,
       totalPersonColumns: personColumns.length,
@@ -499,7 +501,7 @@ exports.updatePersonColumnChecks = async (req, res) => {
     });
   } catch (error) {
     console.error("Error updating columns:", error);
-    res.status(500).json({ message: "Error updating columns" });
+    res.status(500).json({ statusCode: 500, message: "Error updating columns" });
   }
 };
 
@@ -621,10 +623,7 @@ exports.getOrganizationColumnPreference = async (req, res) => {
       }
     }
 
-    res.status(200).json({
-      columns: uniqueColumns,
-      customFieldsCount: customFields.length,
-      message: "Organization column preferences with custom fields fetched successfully",
+    res.status(200).json({ statusCode: 200, message: "Organization column preferences with custom fields fetched successfully",
       hasCustomFields: customFields.length > 0,
       userAuthenticated: !!req.adminId,
       cleanedInvalidFields: originalColumnsCount > filteredColumnsCount,
@@ -632,8 +631,7 @@ exports.getOrganizationColumnPreference = async (req, res) => {
     });
   } catch (error) {
     console.error("Error fetching organization column preferences:", error);
-    res.status(500).json({
-      message: "Error fetching organization preferences",
+    res.status(500).json({ statusCode: 500, message: "Error fetching organization preferences",
       error: error.message,
       userAuthenticated: !!req.adminId,
     });
@@ -756,10 +754,7 @@ exports.getPersonColumnPreference = async (req, res) => {
       }
     }
 
-    res.status(200).json({
-      columns: uniqueColumns,
-      customFieldsCount: customFields.length,
-      message: "Person column preferences with custom fields fetched successfully",
+    res.status(200).json({ statusCode: 200, message: "Person column preferences with custom fields fetched successfully",
       hasCustomFields: customFields.length > 0,
       userAuthenticated: !!req.adminId,
       cleanedInvalidFields: originalColumnsCount > filteredColumnsCount,
@@ -767,8 +762,7 @@ exports.getPersonColumnPreference = async (req, res) => {
     });
   } catch (error) {
     console.error("Error fetching person column preferences:", error);
-    res.status(500).json({
-      message: "Error fetching person preferences",
+    res.status(500).json({ statusCode: 500, message: "Error fetching person preferences",
       error: error.message,
       userAuthenticated: !!req.adminId,
     });
@@ -995,12 +989,7 @@ exports.getBothColumnPreferences = async (req, res) => {
       }
     }
 
-    res.status(200).json({
-      organizationColumns: uniqueOrgColumns,
-      personColumns: uniquePersonColumns,
-      organizationCustomFieldsCount: orgCustomFields.length,
-      personCustomFieldsCount: personCustomFields.length,
-      message: "Both organization and person column preferences with custom fields fetched successfully",
+    res.status(200).json({ statusCode: 200, message: "Both organization and person column preferences with custom fields fetched successfully",
       hasOrganizationCustomFields: orgCustomFields.length > 0,
       hasPersonCustomFields: personCustomFields.length > 0,
       userAuthenticated: !!req.adminId,
@@ -1011,8 +1000,7 @@ exports.getBothColumnPreferences = async (req, res) => {
     });
   } catch (error) {
     console.error("Error fetching both column preferences:", error);
-    res.status(500).json({
-      message: "Error fetching both column preferences",
+    res.status(500).json({ statusCode: 500, message: "Error fetching both column preferences",
       error: error.message,
       userAuthenticated: !!req.adminId,
     });
@@ -1064,7 +1052,7 @@ exports.saveAllOrganizationFieldsWithCheck = async (req, res) => {
       .json({ message: "All organization columns saved", columns: pref.columns });
   } catch (error) {
     console.log("Error saving all organization columns:", error);
-    res.status(500).json({ message: "Error saving all organization columns" });
+    res.status(500).json({ statusCode: 500, message: "Error saving all organization columns" });
   }
 };
 
@@ -1113,7 +1101,7 @@ exports.saveAllPersonFieldsWithCheck = async (req, res) => {
       .json({ message: "All person columns saved", columns: pref.columns });
   } catch (error) {
     console.log("Error saving all person columns:", error);
-    res.status(500).json({ message: "Error saving all person columns" });
+    res.status(500).json({ statusCode: 500, message: "Error saving all person columns" });
   }
 };
 // Bulk update organizations with custom fields (accepts { leadOrganizationId: [], updateData: {} })
@@ -1133,8 +1121,7 @@ exports.bulkUpdateOrganizations = async (req, res) => {
     typeof updateData !== "object" ||
     Object.keys(updateData).length === 0
   ) {
-    return res.status(400).json({
-      message:
+    return res.status(400).json({ statusCode: 400, message:
         "'leadOrganizationId' array and 'updateData' object are required.",
     });
   }
@@ -1311,8 +1298,7 @@ exports.bulkUpdateOrganizations = async (req, res) => {
       });
     }
   }
-  res.status(200).json({
-    message: "Bulk update completed.",
+  res.status(200).json({ statusCode: 200, message: "Bulk update completed.",
     results,
     total: results.length,
     successCount: results.filter((r) => r.success).length,
@@ -1336,8 +1322,7 @@ exports.bulkUpdatePersons = async (req, res) => {
     typeof updateData !== "object" ||
     Object.keys(updateData).length === 0
   ) {
-    return res.status(400).json({
-      message: "'personId' array and 'updateData' object are required.",
+    return res.status(400).json({ statusCode: 400, message: "'personId' array and 'updateData' object are required.",
     });
   }
 
@@ -1509,8 +1494,7 @@ exports.bulkUpdatePersons = async (req, res) => {
       results.push({ personId: pId, success: false, error: error.message });
     }
   }
-  res.status(200).json({
-    message: "Bulk update completed.",
+  res.status(200).json({ statusCode: 200, message: "Bulk update completed.",
     results,
     total: results.length,
     successCount: results.filter((r) => r.success).length,
@@ -2688,6 +2672,7 @@ exports.getOrganizationsAndPersons = async (req, res) => {
         "[DEBUG] Entity filters applied but no matching organizations found - returning empty results"
       );
       return res.status(200).json({
+        statusCode: 200,
         totalRecords: 0,
         totalPages: 0,
         currentPage: orgPage,
@@ -3063,6 +3048,7 @@ exports.getOrganizationsAndPersons = async (req, res) => {
 
     // Return organizations in enhanced format with timeline support and person pagination
     res.status(200).json({
+      statusCode: 200,
       // Organization pagination metadata
       totalRecords: organizations.length,
       totalPages: Math.ceil(organizations.length / orgLimit),
@@ -3098,7 +3084,7 @@ exports.getOrganizationsAndPersons = async (req, res) => {
     });
   } catch (error) {
     console.error("Error fetching organizations and persons:", error);
-    res.status(500).json({ message: "Internal server error" });
+    res.status(500).json({ statusCode: 500, message: "Internal server error" });
   }
 };
 // Get organizations with persons, leadCount, and ownerName, supporting dynamic filtering
@@ -3387,7 +3373,7 @@ exports.getPerson = async (req, res) => {
     });
 
     if (!person) {
-      return res.status(404).json({ message: "Person not found." });
+      return res.status(404).json({ statusCode: 404, message: "Person not found." });
     }
 
     // Get emails and phones directly from the person record
@@ -3409,14 +3395,13 @@ exports.getPerson = async (req, res) => {
       phones,
     };
 
-    res.status(200).json({
-      message: "Person fetched successfully",
+    res.status(200).json({ statusCode: 200, message: "Person fetched successfully",
       person: personResponse
     });
 
   } catch (error) {
     console.error("Error fetching person:", error);
-    res.status(500).json({ message: "Internal server error", error: error.message });
+    res.status(500).json({ statusCode: 500, message: "Internal server error", error: error.message });
   }
 };
 
@@ -3597,8 +3582,7 @@ exports.getContactTimeline = async (req, res) => {
       offset,
     });
 
-    res.status(200).json({
-      message: "Contact timeline fetched successfully",
+    res.status(200).json({ statusCode: 200, message: "Contact timeline fetched successfully",
       pagination: {
         total: count,
         page,
@@ -3611,7 +3595,7 @@ exports.getContactTimeline = async (req, res) => {
     });
   } catch (error) {
     console.error("Error fetching contact timeline:", error);
-    res.status(500).json({ message: "Internal server error" });
+    res.status(500).json({ statusCode: 500, message: "Internal server error" });
   }
 };
 exports.getPersonTimeline = async (req, res) => {
@@ -3634,7 +3618,7 @@ exports.getPersonTimeline = async (req, res) => {
       ],
     });
     if (!person) {
-      return res.status(404).json({ message: "Person not found" });
+      return res.status(404).json({ statusCode: 404, message: "Person not found" });
     }
 
     // Fetch related leads
@@ -3952,6 +3936,7 @@ exports.getPersonTimeline = async (req, res) => {
     );
 
     res.status(200).json({
+      statusCode: 200,
       person,
       leads,
       deals,
@@ -3982,7 +3967,7 @@ exports.getPersonTimeline = async (req, res) => {
     });
   } catch (error) {
     console.error("Error fetching person timeline:", error);
-    res.status(500).json({ message: "Internal server error" });
+    res.status(500).json({ statusCode: 500, message: "Internal server error" });
   }
 };
 
@@ -3999,7 +3984,7 @@ exports.getOrganizationTimeline = async (req, res) => {
     // Fetch the organization
     const organization = await Organization.findByPk(organizationId);
     if (!organization) {
-      return res.status(404).json({ message: "Organization not found" });
+      return res.status(404).json({ statusCode: 404, message: "Organization not found" });
     }
 
     // Fetch all persons in this organization
@@ -4378,6 +4363,7 @@ exports.getOrganizationTimeline = async (req, res) => {
     );
 
     res.status(200).json({
+      statusCode: 200,
       organization,
       persons,
       leads,
@@ -4409,7 +4395,7 @@ exports.getOrganizationTimeline = async (req, res) => {
     });
   } catch (error) {
     console.error("Error fetching organization timeline:", error);
-    res.status(500).json({ message: "Internal server error" });
+    res.status(500).json({ statusCode: 500, message: "Internal server error" });
   }
 };
 exports.getPersonFields = async (req, res) => {
@@ -4510,16 +4496,11 @@ exports.getPersonFields = async (req, res) => {
     // Combine standard and custom fields
     const allFields = [...fields, ...customFieldsFormatted];
 
-    res.status(200).json({ 
-      fields: allFields,
-      standardFieldsCount: fields.length,
-      customFieldsCount: customFields.length,
-      totalFieldsCount: allFields.length,
-      message: "Person fields fetched successfully"
+    res.status(200).json({ statusCode: 200, message: "Person fields fetched successfully"
     });
   } catch (error) {
     console.error("Error fetching person fields:", error);
-    res.status(500).json({ message: "Internal server error" });
+    res.status(500).json({ statusCode: 500, message: "Internal server error" });
   }
 };
 
@@ -4621,16 +4602,11 @@ exports.getOrganizationFields = async (req, res) => {
     // Combine standard and custom fields
     const allFields = [...fields, ...customFieldsFormatted];
 
-    res.status(200).json({ 
-      fields: allFields,
-      standardFieldsCount: fields.length,
-      customFieldsCount: customFields.length,
-      totalFieldsCount: allFields.length,
-      message: "Organization fields fetched successfully"
+    res.status(200).json({ statusCode: 200, message: "Organization fields fetched successfully"
     });
   } catch (error) {
     console.error("Error fetching organization fields:", error);
-    res.status(500).json({ message: "Internal server error" });
+    res.status(500).json({ statusCode: 500, message: "Internal server error" });
   }
 };
 exports.updateOrganization = async (req, res) => {
@@ -4641,19 +4617,18 @@ exports.updateOrganization = async (req, res) => {
     // Find the organization by leadOrganizationId
     const org = await Organization.findByPk(leadOrganizationId);
     if (!org) {
-      return res.status(404).json({ message: "Organization not found" });
+      return res.status(404).json({ statusCode: 404, message: "Organization not found" });
     }
 
     // Update all fields provided in req.body
     await org.update(updateFields);
 
-    res.status(200).json({
-      message: "Organization updated successfully",
+    res.status(200).json({ statusCode: 200, message: "Organization updated successfully",
       organization: org,
     });
   } catch (error) {
     console.error("Error updating organization:", error);
-    res.status(500).json({ message: "Internal server error" });
+    res.status(500).json({ statusCode: 500, message: "Internal server error" });
   }
 };
 /**
@@ -4672,7 +4647,7 @@ exports.updatePerson = async (req, res) => {
     // Find the person
     const person = await Person.findByPk(personId);
     if (!person) {
-      return res.status(404).json({ message: "Person not found" });
+      return res.status(404).json({ statusCode: 404, message: "Person not found" });
     }
 
     // Handle multiple emails - use emails array if provided, otherwise use single email
@@ -4699,8 +4674,7 @@ exports.updatePerson = async (req, res) => {
         const emailRegex = /^[a-zA-Z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(?:\.[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*$/;
         
         if (!emailRegex.test(emailToValidate) || emailToValidate.length > 254) {
-          return res.status(400).json({
-            message: `Invalid email format: ${emailToValidate}. Please provide a valid email address.`,
+          return res.status(400).json({ statusCode: 400, message: `Invalid email format: ${emailToValidate}. Please provide a valid email address.`,
           });
         }
       }
@@ -4714,8 +4688,7 @@ exports.updatePerson = async (req, res) => {
         const phoneRegex = /^\+?\d{7,15}$/;
         
         if (!phoneRegex.test(phoneToValidate.trim())) {
-          return res.status(400).json({
-            message: `Invalid phone number format: ${phoneToValidate}. Phone number should contain only digits (7-15 digits) with optional + for country code. No spaces, dashes, or other characters allowed.`,
+          return res.status(400).json({ statusCode: 400, message: `Invalid phone number format: ${phoneToValidate}. Phone number should contain only digits (7-15 digits) with optional + for country code. No spaces, dashes, or other characters allowed.`,
           });
         }
       }
@@ -4731,8 +4704,7 @@ exports.updatePerson = async (req, res) => {
         } 
       });
       if (existingEmailPerson) {
-        return res.status(409).json({
-          message: "A person with this email address already exists.",
+        return res.status(409).json({ statusCode: 409, message: "A person with this email address already exists.",
           person: {
             personId: existingEmailPerson.personId,
             contactPerson: existingEmailPerson.contactPerson,
@@ -4829,13 +4801,12 @@ exports.updatePerson = async (req, res) => {
       phones: phoneList.length > 0 ? phoneList : undefined,
     };
 
-    res.status(200).json({
-      message: "Person updated successfully",
+    res.status(200).json({ statusCode: 200, message: "Person updated successfully",
       person: personResponse,
     });
   } catch (error) {
     console.error("Error updating person:", error);
-    res.status(500).json({ message: "Internal server error" });
+    res.status(500).json({ statusCode: 500, message: "Internal server error" });
   }
 };
 
@@ -4907,30 +4878,28 @@ exports.getPerson = async (req, res) => {
     
     const person = await getPersonWithContactInfo(personId);
     if (!person) {
-      return res.status(404).json({ message: "Person not found" });
+      return res.status(404).json({ statusCode: 404, message: "Person not found" });
     }
 
-    res.status(200).json({
-      message: "Person retrieved successfully",
+    res.status(200).json({ statusCode: 200, message: "Person retrieved successfully",
       person
     });
   } catch (error) {
     console.error("Error getting person:", error);
-    res.status(500).json({ message: "Internal server error" });
+    res.status(500).json({ statusCode: 500, message: "Internal server error" });
   }
 };
 exports.linkPersonToOrganization = async (req, res) => {
   const { personId, leadOrganizationId } = req.body;
   try {
     const person = await Person.findByPk(personId);
-    if (!person) return res.status(404).json({ message: "Person not found" });
+    if (!person) return res.status(404).json({ statusCode: 404, message: "Person not found" });
 
     if (
       person.leadOrganizationId &&
       person.leadOrganizationId !== leadOrganizationId
     ) {
-      return res.status(400).json({
-        message: "Person is already linked to another organization.",
+      return res.status(400).json({ statusCode: 400, message: "Person is already linked to another organization.",
         currentOrganizationId: person.leadOrganizationId,
       });
     }
@@ -4938,35 +4907,34 @@ exports.linkPersonToOrganization = async (req, res) => {
     // Fetch the organization name
     const organization = await Organization.findByPk(leadOrganizationId);
     if (!organization) {
-      return res.status(404).json({ message: "Organization not found" });
+      return res.status(404).json({ statusCode: 404, message: "Organization not found" });
     }
 
     person.leadOrganizationId = leadOrganizationId;
     person.organization = organization.organization; // Update the organization column
     await person.save();
 
-    res.status(200).json({
-      message: "Person linked to organization",
+    res.status(200).json({ statusCode: 200, message: "Person linked to organization",
       person,
     });
   } catch (error) {
-    res.status(500).json({ message: "Internal server error" });
+    res.status(500).json({ statusCode: 500, message: "Internal server error" });
   }
 };
 exports.addPersonNote = async (req, res) => {
   const { personId } = req.params; // Get personId from params
   if (!personId) {
-    return res.status(400).json({ message: "Person ID is required." });
+    return res.status(400).json({ statusCode: 400, message: "Person ID is required." });
   }
   const { content } = req.body;
   if (!content || content.trim() === "") {
-    return res.status(400).json({ message: "Note content is required." });
+    return res.status(400).json({ statusCode: 400, message: "Note content is required." });
   }
   try {
     // Verify person exists
     const person = await Person.findByPk(personId);
     if (!person) {
-      return res.status(404).json({ message: "Person not found." });
+      return res.status(404).json({ statusCode: 404, message: "Person not found." });
     }
 
     const note = await PersonNote.create({
@@ -4987,30 +4955,29 @@ exports.addPersonNote = async (req, res) => {
       ],
     });
 
-    res.status(201).json({
-      message: "Note added to person successfully",
+    res.status(201).json({ statusCode: 201, message: "Note added to person successfully",
       note: noteWithCreator,
     });
   } catch (error) {
     console.error("Error adding person note:", error);
-    res.status(500).json({ message: "Internal server error" });
+    res.status(500).json({ statusCode: 500, message: "Internal server error" });
   }
 };
 
 exports.addOrganizationNote = async (req, res) => {
   const { leadOrganizationId } = req.params; // Get leadOrganizationId from params
   if (!leadOrganizationId) {
-    return res.status(400).json({ message: "Organization ID is required." });
+    return res.status(400).json({ statusCode: 400, message: "Organization ID is required." });
   }
   const { content } = req.body;
   if (!content || content.trim() === "") {
-    return res.status(400).json({ message: "Note content is required." });
+    return res.status(400).json({ statusCode: 400, message: "Note content is required." });
   }
   try {
     // Verify organization exists
     const organization = await Organization.findByPk(leadOrganizationId);
     if (!organization) {
-      return res.status(404).json({ message: "Organization not found." });
+      return res.status(404).json({ statusCode: 404, message: "Organization not found." });
     }
 
     const note = await OrganizationNote.create({
@@ -5031,13 +4998,12 @@ exports.addOrganizationNote = async (req, res) => {
       ],
     });
 
-    res.status(201).json({
-      message: "Note added to organization successfully",
+    res.status(201).json({ statusCode: 201, message: "Note added to organization successfully",
       note: noteWithCreator,
     });
   } catch (error) {
     console.error("Error adding organization note:", error);
-    res.status(500).json({ message: "Internal server error" });
+    res.status(500).json({ statusCode: 500, message: "Internal server error" });
   }
 };
 
@@ -5051,7 +5017,7 @@ exports.getPersonNotes = async (req, res) => {
     // Verify person exists
     const person = await Person.findByPk(personId);
     if (!person) {
-      return res.status(404).json({ message: "Person not found." });
+      return res.status(404).json({ statusCode: 404, message: "Person not found." });
     }
 
     const { count, rows: notes } = await PersonNote.findAndCountAll({
@@ -5068,8 +5034,7 @@ exports.getPersonNotes = async (req, res) => {
       offset,
     });
 
-    res.status(200).json({
-      message: "Person notes fetched successfully",
+    res.status(200).json({ statusCode: 200, message: "Person notes fetched successfully",
       pagination: {
         total: count,
         page: parseInt(page),
@@ -5080,7 +5045,7 @@ exports.getPersonNotes = async (req, res) => {
     });
   } catch (error) {
     console.error("Error fetching person notes:", error);
-    res.status(500).json({ message: "Internal server error" });
+    res.status(500).json({ statusCode: 500, message: "Internal server error" });
   }
 };
 
@@ -5094,7 +5059,7 @@ exports.getOrganizationNotes = async (req, res) => {
     // Verify organization exists
     const organization = await Organization.findByPk(leadOrganizationId);
     if (!organization) {
-      return res.status(404).json({ message: "Organization not found." });
+      return res.status(404).json({ statusCode: 404, message: "Organization not found." });
     }
 
     const { count, rows: notes } = await OrganizationNote.findAndCountAll({
@@ -5111,8 +5076,7 @@ exports.getOrganizationNotes = async (req, res) => {
       offset,
     });
 
-    res.status(200).json({
-      message: "Organization notes fetched successfully",
+    res.status(200).json({ statusCode: 200, message: "Organization notes fetched successfully",
       pagination: {
         total: count,
         page: parseInt(page),
@@ -5123,7 +5087,7 @@ exports.getOrganizationNotes = async (req, res) => {
     });
   } catch (error) {
     console.error("Error fetching organization notes:", error);
-    res.status(500).json({ message: "Internal server error" });
+    res.status(500).json({ statusCode: 500, message: "Internal server error" });
   }
 };
 
@@ -5133,7 +5097,7 @@ exports.updatePersonNote = async (req, res) => {
   const { content } = req.body;
 
   if (!content || content.trim() === "") {
-    return res.status(400).json({ message: "Note content is required." });
+    return res.status(400).json({ statusCode: 400, message: "Note content is required." });
   }
 
   try {
@@ -5143,7 +5107,7 @@ exports.updatePersonNote = async (req, res) => {
     });
 
     if (!note) {
-      return res.status(404).json({ message: "Note not found." });
+      return res.status(404).json({ statusCode: 404, message: "Note not found." });
     }
 
     // Check if user has permission to update (only creator or admin)
@@ -5167,13 +5131,12 @@ exports.updatePersonNote = async (req, res) => {
       ],
     });
 
-    res.status(200).json({
-      message: "Person note updated successfully",
+    res.status(200).json({ statusCode: 200, message: "Person note updated successfully",
       note: updatedNote,
     });
   } catch (error) {
     console.error("Error updating person note:", error);
-    res.status(500).json({ message: "Internal server error" });
+    res.status(500).json({ statusCode: 500, message: "Internal server error" });
   }
 };
 
@@ -5183,7 +5146,7 @@ exports.updateOrganizationNote = async (req, res) => {
   const { content } = req.body;
 
   if (!content || content.trim() === "") {
-    return res.status(400).json({ message: "Note content is required." });
+    return res.status(400).json({ statusCode: 400, message: "Note content is required." });
   }
 
   try {
@@ -5193,7 +5156,7 @@ exports.updateOrganizationNote = async (req, res) => {
     });
 
     if (!note) {
-      return res.status(404).json({ message: "Note not found." });
+      return res.status(404).json({ statusCode: 404, message: "Note not found." });
     }
 
     // Check if user has permission to update (only creator or admin)
@@ -5217,13 +5180,12 @@ exports.updateOrganizationNote = async (req, res) => {
       ],
     });
 
-    res.status(200).json({
-      message: "Organization note updated successfully",
+    res.status(200).json({ statusCode: 200, message: "Organization note updated successfully",
       note: updatedNote,
     });
   } catch (error) {
     console.error("Error updating organization note:", error);
-    res.status(500).json({ message: "Internal server error" });
+    res.status(500).json({ statusCode: 500, message: "Internal server error" });
   }
 };
 
@@ -5238,7 +5200,7 @@ exports.deletePersonNote = async (req, res) => {
     });
 
     if (!note) {
-      return res.status(404).json({ message: "Note not found." });
+      return res.status(404).json({ statusCode: 404, message: "Note not found." });
     }
 
     // Check if user has permission to delete (only creator or admin)
@@ -5251,12 +5213,11 @@ exports.deletePersonNote = async (req, res) => {
     // Delete the note
     await note.destroy();
 
-    res.status(200).json({
-      message: "Person note deleted successfully",
+    res.status(200).json({ statusCode: 200, message: "Person note deleted successfully",
     });
   } catch (error) {
     console.error("Error deleting person note:", error);
-    res.status(500).json({ message: "Internal server error" });
+    res.status(500).json({ statusCode: 500, message: "Internal server error" });
   }
 };
 
@@ -5271,7 +5232,7 @@ exports.deleteOrganizationNote = async (req, res) => {
     });
 
     if (!note) {
-      return res.status(404).json({ message: "Note not found." });
+      return res.status(404).json({ statusCode: 404, message: "Note not found." });
     }
 
     // Check if user has permission to delete (only creator or admin)
@@ -5284,12 +5245,11 @@ exports.deleteOrganizationNote = async (req, res) => {
     // Delete the note
     await note.destroy();
 
-    res.status(200).json({
-      message: "Organization note deleted successfully",
+    res.status(200).json({ statusCode: 200, message: "Organization note deleted successfully",
     });
   } catch (error) {
     console.error("Error deleting organization note:", error);
-    res.status(500).json({ message: "Internal server error" });
+    res.status(500).json({ statusCode: 500, message: "Internal server error" });
   }
 };
 
@@ -5313,7 +5273,7 @@ exports.deleteOrganizationNote = async (req, res) => {
 //     });
 //   } catch (error) {
 //     console.error("Error fetching contact persons:", error);
-//     res.status(500).json({ message: "Internal server error" });
+//     res.status(500).json({ statusCode: 500, message: "Internal server error" });
 //   }
 // };
 
@@ -5354,6 +5314,7 @@ exports.getAllContactPersons = async (req, res) => {
     }));
 
     res.status(200).json({
+      statusCode: 200,
       contactPersons,
       pagination: {
         total: count,
@@ -5364,7 +5325,7 @@ exports.getAllContactPersons = async (req, res) => {
     });
   } catch (error) {
     console.error("Error fetching contact persons:", error);
-    res.status(500).json({ message: "Internal server error" });
+    res.status(500).json({ statusCode: 500, message: "Internal server error" });
   }
 };
 
@@ -5374,7 +5335,7 @@ exports.getPersonsByOrganization = async (req, res) => {
     // Find the organization
     const organization = await Organization.findByPk(leadOrganizationId);
     if (!organization) {
-      return res.status(404).json({ message: "Organization not found" });
+      return res.status(404).json({ statusCode: 404, message: "Organization not found" });
     }
 
     // Find all persons linked to this organization
@@ -5412,7 +5373,7 @@ exports.getPersonsByOrganization = async (req, res) => {
       persons: personsWithOwner,
     });
   } catch (error) {
-    res.status(500).json({ message: "Internal server error" });
+    res.status(500).json({ statusCode: 500, message: "Internal server error" });
   }
 };
 
@@ -5911,9 +5872,7 @@ exports.getPersonsByIds = async (req, res) => {
     personIds = [...new Set(personIds)].map(id => parseInt(id)).filter(id => !isNaN(id));
 
     if (personIds.length === 0) {
-      return res.status(400).json({
-        success: false,
-        message: "personId or personIds parameter is required"
+      return res.status(400).json({ statusCode: 400, message: "personId or personIds parameter is required"
       });
     }
 
@@ -5936,9 +5895,7 @@ exports.getPersonsByIds = async (req, res) => {
     });
 
     if (persons.length === 0) {
-      return res.status(404).json({
-        success: false,
-        message: "No persons found for the provided IDs"
+      return res.status(404).json({ statusCode: 404, message: "No persons found for the provided IDs"
       });
     }
 
@@ -6124,9 +6081,7 @@ exports.getPersonsByIds = async (req, res) => {
     const filteredPersons = filterDataByColumnPreference(enrichedPersons, personColumnPref, 'person');
 
     // Prepare response with detailed information
-    res.status(200).json({
-      success: true,
-      message: `Successfully fetched ${filteredPersons.length} person(s)`,
+    res.status(200).json({ statusCode: 200, message: `Successfully fetched ${filteredPersons.length} person(s)`,
       data: {
         persons: filteredPersons,
         totalCount: filteredPersons.length,
@@ -6146,9 +6101,7 @@ exports.getPersonsByIds = async (req, res) => {
 
   } catch (error) {
     console.error("Error fetching persons by IDs:", error);
-    res.status(500).json({ 
-      success: false,
-      message: "Internal server error",
+    res.status(500).json({ statusCode: 500, message: "Internal server error",
       error: error.message 
     });
   }
@@ -6225,9 +6178,7 @@ exports.getOrganizationsByIds = async (req, res) => {
     organizationIds = [...new Set(organizationIds)].map(id => parseInt(id)).filter(id => !isNaN(id));
 
     if (organizationIds.length === 0) {
-      return res.status(400).json({
-        success: false,
-        message: "organizationId/leadOrganizationId or organizationIds/leadOrganizationIds parameter is required"
+      return res.status(400).json({ statusCode: 400, message: "organizationId/leadOrganizationId or organizationIds/leadOrganizationIds parameter is required"
       });
     }
 
@@ -6250,9 +6201,7 @@ exports.getOrganizationsByIds = async (req, res) => {
     });
 
     if (organizations.length === 0) {
-      return res.status(404).json({
-        success: false,
-        message: "No organizations found for the provided IDs"
+      return res.status(404).json({ statusCode: 404, message: "No organizations found for the provided IDs"
       });
     }
 
@@ -6387,9 +6336,7 @@ exports.getOrganizationsByIds = async (req, res) => {
     const filteredOrganizations = filterDataByColumnPreference(enrichedOrganizations, orgColumnPref, 'organization');
 
     // Prepare response with detailed information
-    res.status(200).json({
-      success: true,
-      message: `Successfully fetched ${filteredOrganizations.length} organization(s)`,
+    res.status(200).json({ statusCode: 200, message: `Successfully fetched ${filteredOrganizations.length} organization(s)`,
       data: {
         organizations: filteredOrganizations,
         totalCount: filteredOrganizations.length,
@@ -6409,9 +6356,7 @@ exports.getOrganizationsByIds = async (req, res) => {
 
   } catch (error) {
     console.error("Error fetching organizations by IDs:", error);
-    res.status(500).json({ 
-      success: false,
-      message: "Internal server error",
+    res.status(500).json({ statusCode: 500, message: "Internal server error",
       error: error.message 
     });
   }
@@ -7722,6 +7667,7 @@ exports.getPersonsAndOrganizations = async (req, res) => {
         "[DEBUG] Entity filters applied but no matching persons found - returning empty results"
       );
       return res.status(200).json({
+        statusCode: 200,
         totalRecords: 0,
         totalPages: 0,
         currentPage: personPage,
@@ -8102,6 +8048,7 @@ exports.getPersonsAndOrganizations = async (req, res) => {
         }
     // Return both filtered datasets in separate arrays with proper pagination metadata
     res.status(200).json({
+      statusCode: 200,
       // Pagination metadata based on actual database counts
       totalRecords: totalPersonsCount + totalOrganizationsCount,
       totalPages: Math.ceil(totalPersonsCount / personLimit), // Person pagination
@@ -8159,7 +8106,7 @@ exports.getPersonsAndOrganizations = async (req, res) => {
     });
   } catch (error) {
     console.error("Error fetching persons and organizations:", error);
-    res.status(500).json({ message: "Internal server error" });
+    res.status(500).json({ statusCode: 500, message: "Internal server error" });
   }
 };
 
@@ -8181,19 +8128,13 @@ exports.getPersonsAndOrganizations = async (req, res) => {
 
 //     // Check permissions
 //     if (role !== "admin" && organization.ownerId !== adminId) {
-//       return res.status(403).json({
-//         success: false,
-//         error: "Permission denied",
-//         message: "You don't have permission to delete this organization"
+//       return res.status(403).json({ statusCode: 403, message: "You don't have permission to delete this organization"
 //       });
 //     }
 
 //     // Check if already soft deleted
 //     if (organization.active === 0) {
-//       return res.status(400).json({
-//         success: false,
-//         error: "Organization already deleted",
-//         message: "This organization has already been deleted"
+//       return res.status(400).json({ statusCode: 400, message: "This organization has already been deleted"
 //       });
 //     }
 
@@ -8203,9 +8144,7 @@ exports.getPersonsAndOrganizations = async (req, res) => {
 //       // deletedAt: new Date() 
 //     });
 
-//     return res.status(200).json({
-//       success: true,
-//       message: "Organization soft deleted successfully",
+//     return res.status(200).json({ statusCode: 200, message: "Organization soft deleted successfully",
 //       data: {
 //         leadOrganizationId: organization.leadOrganizationId,
 //         organization: organization.organization,
@@ -8216,10 +8155,7 @@ exports.getPersonsAndOrganizations = async (req, res) => {
 
 //   } catch (error) {
 //     console.error("Error soft deleting Organization:", error);
-//     return res.status(500).json({
-//       success: false,
-//       error: "Internal server error",
-//       message: error.message
+//     return res.status(500).json({ statusCode: 500, message: error.message
 //     });
 //   }
 // };
@@ -8245,10 +8181,7 @@ exports.deleteOrganization = async (req, res) => {
     // Check permissions
     if (role !== "admin" && organization.masterUserID !== adminId ) {
       await transaction.rollback();
-      return res.status(403).json({
-        success: false,
-        error: "Permission denied",
-        message: "You don't have permission to delete this organization"
+      return res.status(403).json({ statusCode: 403, message: "You don't have permission to delete this organization"
       });
     }
 
@@ -8294,9 +8227,7 @@ exports.deleteOrganization = async (req, res) => {
     // Commit the transaction
     await transaction.commit();
 
-    return res.status(200).json({
-      success: true,
-      message: "Organization deleted successfully and all references removed",
+    return res.status(200).json({ statusCode: 200, message: "Organization deleted successfully and all references removed",
       data: {
         leadOrganizationId: organization.leadOrganizationId,
         organization: organization.organization,
@@ -8308,10 +8239,7 @@ exports.deleteOrganization = async (req, res) => {
     await transaction.rollback();
     
     console.error("Error deleting Organization:", error);
-    return res.status(500).json({
-      success: false,
-      error: "Internal server error",
-      message: error.message
+    return res.status(500).json({ statusCode: 500, message: error.message
     });
   }
 };
@@ -8336,10 +8264,7 @@ exports.deletePerson = async (req, res) => {
     // Check permissions
     if (role !== "admin" && person.masterUserID !== adminId) {
       await transaction.rollback();
-      return res.status(403).json({
-        success: false,
-        error: "Permission denied",
-        message: "You don't have permission to delete this Person"
+      return res.status(403).json({ statusCode: 403, message: "You don't have permission to delete this Person"
       });
     }
 
@@ -8376,9 +8301,7 @@ exports.deletePerson = async (req, res) => {
     // Commit the transaction
     await transaction.commit();
 
-    return res.status(200).json({
-      success: true,
-      message: "person deleted successfully and all references removed",
+    return res.status(200).json({ statusCode: 200, message: "person deleted successfully and all references removed",
       data: {
         personId: person.personId,
         contactPerson: person.contactPerson,
@@ -8390,10 +8313,7 @@ exports.deletePerson = async (req, res) => {
     await transaction.rollback();
     
     console.error("Error deleting person:", error);
-    return res.status(500).json({
-      success: false,
-      error: "Internal server error",
-      message: error.message
+    return res.status(500).json({ statusCode: 500, message: error.message
     });
   }
 };
@@ -8409,9 +8329,7 @@ exports.updatePersonOwner = async (req, res) => {
 
   // Validate required fields
   if (!personId || !ownerId) {
-    return res.status(400).json({
-      success: false,
-      message: "personId and ownerId are required."
+    return res.status(400).json({ statusCode: 400, message: "personId and ownerId are required."
     });
   }
 
@@ -8422,9 +8340,7 @@ exports.updatePersonOwner = async (req, res) => {
     const newOwner = await MasterUser.findByPk(ownerId, { transaction });
     if (!newOwner) {
       await transaction.rollback();
-      return res.status(404).json({
-        success: false,
-        message: "New owner not found."
+      return res.status(404).json({ statusCode: 404, message: "New owner not found."
       });
     }
 
@@ -8448,9 +8364,7 @@ exports.updatePersonOwner = async (req, res) => {
 
     if (!person) {
       await transaction.rollback();
-      return res.status(404).json({
-        success: false,
-        message: "Person not found or you don't have permission to update it."
+      return res.status(404).json({ statusCode: 404, message: "Person not found or you don't have permission to update it."
       });
     }
 
@@ -8459,9 +8373,7 @@ exports.updatePersonOwner = async (req, res) => {
 
     await transaction.commit();
 
-    return res.status(200).json({
-      success: true,
-      message: "Person owner updated successfully.",
+    return res.status(200).json({ statusCode: 200, message: "Person owner updated successfully.",
       data: {
         personId: person.personId,
         name: person.name,
@@ -8474,10 +8386,7 @@ exports.updatePersonOwner = async (req, res) => {
   } catch (error) {
     await transaction.rollback();
     console.error("Error updating person owner:", error);
-    return res.status(500).json({
-      success: false,
-      error: "Internal server error",
-      message: error.message
+    return res.status(500).json({ statusCode: 500, message: error.message
     });
   }
 };
@@ -8493,9 +8402,7 @@ exports.updateOrganizationOwner = async (req, res) => {
 
   // Validate required fields
   if (!leadOrganizationId || !ownerId) {
-    return res.status(400).json({
-      success: false,
-      message: "leadOrganizationId and ownerId are required."
+    return res.status(400).json({ statusCode: 400, message: "leadOrganizationId and ownerId are required."
     });
   }
 
@@ -8506,9 +8413,7 @@ exports.updateOrganizationOwner = async (req, res) => {
     const newOwner = await MasterUser.findByPk(ownerId, { transaction });
     if (!newOwner) {
       await transaction.rollback();
-      return res.status(404).json({
-        success: false,
-        message: "New owner not found."
+      return res.status(404).json({ statusCode: 404, message: "New owner not found."
       });
     }
 
@@ -8532,9 +8437,7 @@ exports.updateOrganizationOwner = async (req, res) => {
 
     if (!organization) {
       await transaction.rollback();
-      return res.status(404).json({
-        success: false,
-        message: "Organization not found or you don't have permission to update it."
+      return res.status(404).json({ statusCode: 404, message: "Organization not found or you don't have permission to update it."
       });
     }
 
@@ -8543,9 +8446,7 @@ exports.updateOrganizationOwner = async (req, res) => {
 
     await transaction.commit();
 
-    return res.status(200).json({
-      success: true,
-      message: "Organization owner updated successfully.",
+    return res.status(200).json({ statusCode: 200, message: "Organization owner updated successfully.",
       data: {
         leadOrganizationId: organization.leadOrganizationId,
         name: organization.name,
@@ -8558,10 +8459,7 @@ exports.updateOrganizationOwner = async (req, res) => {
   } catch (error) {
     await transaction.rollback();
     console.error("Error updating organization owner:", error);
-    return res.status(500).json({
-      success: false,
-      error: "Internal server error",
-      message: error.message
+    return res.status(500).json({ statusCode: 500, message: error.message
     });
   }
 };
@@ -8577,9 +8475,7 @@ exports.bulkUpdatePersonOwners = async (req, res) => {
 
   // Validate required fields
   if (!Array.isArray(personIds) || personIds.length === 0 || !ownerId) {
-    return res.status(400).json({
-      success: false,
-      message: "personIds array and ownerId are required."
+    return res.status(400).json({ statusCode: 400, message: "personIds array and ownerId are required."
     });
   }
 
@@ -8589,9 +8485,7 @@ exports.bulkUpdatePersonOwners = async (req, res) => {
     // Check if the new owner exists
     const newOwner = await MasterUser.findByPk(ownerId);
     if (!newOwner) {
-      return res.status(404).json({
-        success: false,
-        message: "New owner not found."
+      return res.status(404).json({ statusCode: 404, message: "New owner not found."
       });
     }
 
@@ -8658,9 +8552,7 @@ exports.bulkUpdatePersonOwners = async (req, res) => {
     const successCount = results.filter(r => r.success).length;
     const failureCount = results.filter(r => !r.success).length;
 
-    return res.status(200).json({
-      success: true,
-      message: `Bulk update completed. ${successCount} successful, ${failureCount} failed.`,
+    return res.status(200).json({ statusCode: 200, message: `Bulk update completed. ${successCount} successful, ${failureCount} failed.`,
       results: results,
       summary: {
         total: personIds.length,
@@ -8671,10 +8563,7 @@ exports.bulkUpdatePersonOwners = async (req, res) => {
 
   } catch (error) {
     console.error("Error in bulk update person owners:", error);
-    return res.status(500).json({
-      success: false,
-      error: "Internal server error",
-      message: error.message
+    return res.status(500).json({ statusCode: 500, message: error.message
     });
   }
 };
@@ -8690,9 +8579,7 @@ exports.bulkUpdateOrganizationOwners = async (req, res) => {
 
   // Validate required fields
   if (!Array.isArray(leadOrganizationIds) || leadOrganizationIds.length === 0 || !ownerId) {
-    return res.status(400).json({
-      success: false,
-      message: "leadOrganizationIds array and ownerId are required."
+    return res.status(400).json({ statusCode: 400, message: "leadOrganizationIds array and ownerId are required."
     });
   }
 
@@ -8702,9 +8589,7 @@ exports.bulkUpdateOrganizationOwners = async (req, res) => {
     // Check if the new owner exists
     const newOwner = await MasterUser.findByPk(ownerId);
     if (!newOwner) {
-      return res.status(404).json({
-        success: false,
-        message: "New owner not found."
+      return res.status(404).json({ statusCode: 404, message: "New owner not found."
       });
     }
 
@@ -8771,9 +8656,7 @@ exports.bulkUpdateOrganizationOwners = async (req, res) => {
     const successCount = results.filter(r => r.success).length;
     const failureCount = results.filter(r => !r.success).length;
 
-    return res.status(200).json({
-      success: true,
-      message: `Bulk update completed. ${successCount} successful, ${failureCount} failed.`,
+    return res.status(200).json({ statusCode: 200, message: `Bulk update completed. ${successCount} successful, ${failureCount} failed.`,
       results: results,
       summary: {
         total: leadOrganizationIds.length,
@@ -8784,10 +8667,7 @@ exports.bulkUpdateOrganizationOwners = async (req, res) => {
 
   } catch (error) {
     console.error("Error in bulk update organization owners:", error);
-    return res.status(500).json({
-      success: false,
-      error: "Internal server error",
-      message: error.message
+    return res.status(500).json({ statusCode: 500, message: error.message
     });
   }
 };
@@ -8916,26 +8796,20 @@ exports.uploadEntityFiles = async (req, res) => {
     });
 
     if (!entity) {
-      return res.status(404).json({
-        success: false,
-        message: `${entityType.charAt(0).toUpperCase() + entityType.slice(1)} not found`
+      return res.status(404).json({ statusCode: 404, message: `${entityType.charAt(0).toUpperCase() + entityType.slice(1)} not found`
       });
     }
 
     // Handle file upload
     entityFileUpload.array('files', 10)(req, res, async (err) => {
       if (err) {
-        return res.status(400).json({
-          success: false,
-          message: 'File upload failed',
+        return res.status(400).json({ statusCode: 400, message: 'File upload failed',
           error: err.message
         });
       }
 
       if (!req.files || req.files.length === 0) {
-        return res.status(400).json({
-          success: false,
-          message: 'No files uploaded'
+        return res.status(400).json({ statusCode: 400, message: 'No files uploaded'
         });
       }
 
@@ -8971,9 +8845,7 @@ exports.uploadEntityFiles = async (req, res) => {
         });
       }
 
-      res.status(201).json({
-        success: true,
-        message: `${uploadedFiles.length} file(s) uploaded successfully`,
+      res.status(201).json({ statusCode: 201, message: `${uploadedFiles.length} file(s) uploaded successfully`,
         data: {
           entityId,
           entityType,
@@ -8984,9 +8856,7 @@ exports.uploadEntityFiles = async (req, res) => {
 
   } catch (error) {
     console.error('Upload entity files error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Failed to upload files',
+    res.status(500).json({ statusCode: 500, message: 'Failed to upload files',
       error: error.message
     });
   }
@@ -9020,9 +8890,7 @@ exports.getEntityFiles = async (req, res) => {
     });
 
     if (!entity) {
-      return res.status(404).json({
-        success: false,
-        message: `${entityType.charAt(0).toUpperCase() + entityType.slice(1)} not found`
+      return res.status(404).json({ statusCode: 404, message: `${entityType.charAt(0).toUpperCase() + entityType.slice(1)} not found`
       });
     }
 
@@ -9099,9 +8967,7 @@ exports.getEntityFiles = async (req, res) => {
       raw: true
     });
 
-    res.status(200).json({
-      success: true,
-      message: `${entityType.charAt(0).toUpperCase() + entityType.slice(1)} files retrieved successfully`,
+    res.status(200).json({ statusCode: 200, message: `${entityType.charAt(0).toUpperCase() + entityType.slice(1)} files retrieved successfully`,
       data: {
         entityId,
         entityType,
@@ -9129,9 +8995,7 @@ exports.getEntityFiles = async (req, res) => {
 
   } catch (error) {
     console.error('Get entity files error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Failed to retrieve entity files',
+    res.status(500).json({ statusCode: 500, message: 'Failed to retrieve entity files',
       error: error.message
     });
   }
@@ -9155,9 +9019,7 @@ exports.downloadEntityFile = async (req, res) => {
     });
 
     if (!entityFile) {
-      return res.status(404).json({
-        success: false,
-        message: 'File not found'
+      return res.status(404).json({ statusCode: 404, message: 'File not found'
       });
     }
 
@@ -9165,9 +9027,7 @@ exports.downloadEntityFile = async (req, res) => {
     try {
       await fs.access(entityFile.filePath);
     } catch (error) {
-      return res.status(404).json({
-        success: false,
-        message: 'File not found on server'
+      return res.status(404).json({ statusCode: 404, message: 'File not found on server'
       });
     }
 
@@ -9186,9 +9046,7 @@ exports.downloadEntityFile = async (req, res) => {
 
   } catch (error) {
     console.error('Download entity file error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Failed to download file',
+    res.status(500).json({ statusCode: 500, message: 'Failed to download file',
       error: error.message
     });
   }
@@ -9212,25 +9070,19 @@ exports.deleteEntityFile = async (req, res) => {
     });
 
     if (!entityFile) {
-      return res.status(404).json({
-        success: false,
-        message: 'File not found'
+      return res.status(404).json({ statusCode: 404, message: 'File not found'
       });
     }
 
     // Soft delete the file
     await entityFile.update({ isActive: false });
 
-    res.status(200).json({
-      success: true,
-      message: 'File deleted successfully'
+    res.status(200).json({ statusCode: 200, message: 'File deleted successfully'
     });
 
   } catch (error) {
     console.error('Delete entity file error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Failed to delete file',
+    res.status(500).json({ statusCode: 500, message: 'Failed to delete file',
       error: error.message
     });
   }
@@ -9373,9 +9225,7 @@ exports.getPersonSidebarPreferences = async (req, res) => {
       });
     }
 
-    res.status(200).json({
-      success: true,
-      message: "Person sidebar preferences retrieved successfully",
+    res.status(200).json({ statusCode: 200, message: "Person sidebar preferences retrieved successfully",
       sidebarSections: Array.isArray(sidebarPrefs.sidebarSections) 
         ? sidebarPrefs.sidebarSections 
         : (typeof sidebarPrefs.sidebarSections === 'string' 
@@ -9390,9 +9240,7 @@ exports.getPersonSidebarPreferences = async (req, res) => {
 
   } catch (error) {
     console.error("Error fetching person sidebar preferences:", error);
-    res.status(500).json({
-      success: false,
-      message: "Error fetching person sidebar preferences",
+    res.status(500).json({ statusCode: 500, message: "Error fetching person sidebar preferences",
       error: error.message
     });
   }
@@ -9409,18 +9257,14 @@ exports.updatePersonSidebarPreferences = async (req, res) => {
 
     // Validate input
     if (!Array.isArray(sidebarSections)) {
-      return res.status(400).json({
-        success: false,
-        message: "sidebarSections must be an array"
+      return res.status(400).json({ statusCode: 400, message: "sidebarSections must be an array"
       });
     }
 
     // Validate each section has required properties
     for (const section of sidebarSections) {
       if (!section.id || typeof section.name !== 'string' || typeof section.enabled !== 'boolean' || typeof section.order !== 'number') {
-        return res.status(400).json({
-          success: false,
-          message: "Each section must have id, name (string), enabled (boolean), and order (number) properties"
+        return res.status(400).json({ statusCode: 400, message: "Each section must have id, name (string), enabled (boolean), and order (number) properties"
         });
       }
     }
@@ -9443,18 +9287,14 @@ exports.updatePersonSidebarPreferences = async (req, res) => {
       await sidebarPrefs.save();
     }
 
-    res.status(200).json({
-      success: true,
-      message: "Person sidebar preferences updated successfully",
+    res.status(200).json({ statusCode: 200, message: "Person sidebar preferences updated successfully",
       sidebarSections: sidebarPrefs.sidebarSections,
       totalSections: sidebarPrefs.sidebarSections.length
     });
 
   } catch (error) {
     console.error("Error updating person sidebar preferences:", error);
-    res.status(500).json({
-      success: false,
-      message: "Error updating person sidebar preferences",
+    res.status(500).json({ statusCode: 500, message: "Error updating person sidebar preferences",
       error: error.message
     });
   }
@@ -9538,18 +9378,14 @@ exports.resetPersonSidebarPreferences = async (req, res) => {
       await sidebarPrefs.save();
     }
 
-    res.status(200).json({
-      success: true,
-      message: "Person sidebar preferences reset to defaults successfully",
+    res.status(200).json({ statusCode: 200, message: "Person sidebar preferences reset to defaults successfully",
       sidebarSections: sidebarPrefs.sidebarSections,
       totalSections: sidebarPrefs.sidebarSections.length
     });
 
   } catch (error) {
     console.error("Error resetting person sidebar preferences:", error);
-    res.status(500).json({
-      success: false,
-      message: "Error resetting person sidebar preferences",
+    res.status(500).json({ statusCode: 500, message: "Error resetting person sidebar preferences",
       error: error.message
     });
   }
@@ -9566,9 +9402,7 @@ exports.togglePersonSidebarSection = async (req, res) => {
 
     // Validate input
     if (!sectionId || typeof enabled !== 'boolean') {
-      return res.status(400).json({
-        success: false,
-        message: "sectionId and enabled (boolean) are required"
+      return res.status(400).json({ statusCode: 400, message: "sectionId and enabled (boolean) are required"
       });
     }
 
@@ -9578,9 +9412,7 @@ exports.togglePersonSidebarSection = async (req, res) => {
     });
 
     if (!sidebarPrefs) {
-      return res.status(404).json({
-        success: false,
-        message: "Person sidebar preferences not found. Please initialize preferences first."
+      return res.status(404).json({ statusCode: 404, message: "Person sidebar preferences not found. Please initialize preferences first."
       });
     }
 
@@ -9593,9 +9425,7 @@ exports.togglePersonSidebarSection = async (req, res) => {
         sectionsArray = JSON.parse(sectionsArray);
       } catch (parseError) {
         console.error("Error parsing sidebarSections JSON:", parseError);
-        return res.status(500).json({
-          success: false,
-          message: "Invalid sidebar sections data format"
+        return res.status(500).json({ statusCode: 500, message: "Invalid sidebar sections data format"
         });
       }
     }
@@ -9667,9 +9497,7 @@ exports.togglePersonSidebarSection = async (req, res) => {
     // Check if the section was found
     const sectionExists = sections.find(s => s.id === sectionId);
     if (!sectionExists) {
-      return res.status(404).json({
-        success: false,
-        message: `Section '${sectionId}' not found in sidebar preferences`
+      return res.status(404).json({ statusCode: 404, message: `Section '${sectionId}' not found in sidebar preferences`
       });
     }
 
@@ -9678,18 +9506,14 @@ exports.togglePersonSidebarSection = async (req, res) => {
     sidebarPrefs.updatedAt = new Date();
     await sidebarPrefs.save();
 
-    res.status(200).json({
-      success: true,
-      message: `Section '${sectionId}' ${enabled ? 'enabled' : 'disabled'} successfully`,
+    res.status(200).json({ statusCode: 200, message: `Section '${sectionId}' ${enabled ? 'enabled' : 'disabled'} successfully`,
       sidebarSections: sidebarPrefs.sidebarSections,
       updatedSection: sectionExists
     });
 
   } catch (error) {
     console.error("Error toggling person sidebar section:", error);
-    res.status(500).json({
-      success: false,
-      message: "Error toggling person sidebar section",
+    res.status(500).json({ statusCode: 500, message: "Error toggling person sidebar section",
       error: error.message
     });
   }
@@ -9779,9 +9603,7 @@ exports.getOrganizationSidebarPreferences = async (req, res) => {
       });
     }
 
-    res.status(200).json({
-      success: true,
-      message: "Organization sidebar preferences retrieved successfully",
+    res.status(200).json({ statusCode: 200, message: "Organization sidebar preferences retrieved successfully",
       sidebarSections: Array.isArray(sidebarPrefs.sidebarSections) 
         ? sidebarPrefs.sidebarSections 
         : (typeof sidebarPrefs.sidebarSections === 'string' 
@@ -9796,9 +9618,7 @@ exports.getOrganizationSidebarPreferences = async (req, res) => {
 
   } catch (error) {
     console.error("Error fetching organization sidebar preferences:", error);
-    res.status(500).json({
-      success: false,
-      message: "Error fetching organization sidebar preferences",
+    res.status(500).json({ statusCode: 500, message: "Error fetching organization sidebar preferences",
       error: error.message
     });
   }
@@ -9815,18 +9635,14 @@ exports.updateOrganizationSidebarPreferences = async (req, res) => {
 
     // Validate input
     if (!Array.isArray(sidebarSections)) {
-      return res.status(400).json({
-        success: false,
-        message: "sidebarSections must be an array"
+      return res.status(400).json({ statusCode: 400, message: "sidebarSections must be an array"
       });
     }
 
     // Validate each section has required properties
     for (const section of sidebarSections) {
       if (!section.id || typeof section.name !== 'string' || typeof section.enabled !== 'boolean' || typeof section.order !== 'number') {
-        return res.status(400).json({
-          success: false,
-          message: "Each section must have id, name (string), enabled (boolean), and order (number) properties"
+        return res.status(400).json({ statusCode: 400, message: "Each section must have id, name (string), enabled (boolean), and order (number) properties"
         });
       }
     }
@@ -9849,18 +9665,14 @@ exports.updateOrganizationSidebarPreferences = async (req, res) => {
       await sidebarPrefs.save();
     }
 
-    res.status(200).json({
-      success: true,
-      message: "Organization sidebar preferences updated successfully",
+    res.status(200).json({ statusCode: 200, message: "Organization sidebar preferences updated successfully",
       sidebarSections: sidebarPrefs.sidebarSections,
       totalSections: sidebarPrefs.sidebarSections.length
     });
 
   } catch (error) {
     console.error("Error updating organization sidebar preferences:", error);
-    res.status(500).json({
-      success: false,
-      message: "Error updating organization sidebar preferences",
+    res.status(500).json({ statusCode: 500, message: "Error updating organization sidebar preferences",
       error: error.message
     });
   }
@@ -9951,18 +9763,14 @@ exports.resetOrganizationSidebarPreferences = async (req, res) => {
       await sidebarPrefs.save();
     }
 
-    res.status(200).json({
-      success: true,
-      message: "Organization sidebar preferences reset to defaults successfully",
+    res.status(200).json({ statusCode: 200, message: "Organization sidebar preferences reset to defaults successfully",
       sidebarSections: sidebarPrefs.sidebarSections,
       totalSections: sidebarPrefs.sidebarSections.length
     });
 
   } catch (error) {
     console.error("Error resetting organization sidebar preferences:", error);
-    res.status(500).json({
-      success: false,
-      message: "Error resetting organization sidebar preferences",
+    res.status(500).json({ statusCode: 500, message: "Error resetting organization sidebar preferences",
       error: error.message
     });
   }
@@ -9979,9 +9787,7 @@ exports.toggleOrganizationSidebarSection = async (req, res) => {
 
     // Validate input
     if (!sectionId || typeof enabled !== 'boolean') {
-      return res.status(400).json({
-        success: false,
-        message: "sectionId and enabled (boolean) are required"
+      return res.status(400).json({ statusCode: 400, message: "sectionId and enabled (boolean) are required"
       });
     }
 
@@ -9991,9 +9797,7 @@ exports.toggleOrganizationSidebarSection = async (req, res) => {
     });
 
     if (!sidebarPrefs) {
-      return res.status(404).json({
-        success: false,
-        message: "Organization sidebar preferences not found. Please initialize preferences first."
+      return res.status(404).json({ statusCode: 404, message: "Organization sidebar preferences not found. Please initialize preferences first."
       });
     }
 
@@ -10006,9 +9810,7 @@ exports.toggleOrganizationSidebarSection = async (req, res) => {
         sectionsArray = JSON.parse(sectionsArray);
       } catch (parseError) {
         console.error("Error parsing organization sidebarSections JSON:", parseError);
-        return res.status(500).json({
-          success: false,
-          message: "Invalid sidebar sections data format"
+        return res.status(500).json({ statusCode: 500, message: "Invalid sidebar sections data format"
         });
       }
     }
@@ -10087,9 +9889,7 @@ exports.toggleOrganizationSidebarSection = async (req, res) => {
     // Check if the section was found
     const sectionExists = sections.find(s => s.id === sectionId);
     if (!sectionExists) {
-      return res.status(404).json({
-        success: false,
-        message: `Section '${sectionId}' not found in organization sidebar preferences`
+      return res.status(404).json({ statusCode: 404, message: `Section '${sectionId}' not found in organization sidebar preferences`
       });
     }
 
@@ -10098,18 +9898,14 @@ exports.toggleOrganizationSidebarSection = async (req, res) => {
     sidebarPrefs.updatedAt = new Date();
     await sidebarPrefs.save();
 
-    res.status(200).json({
-      success: true,
-      message: `Section '${sectionId}' ${enabled ? 'enabled' : 'disabled'} successfully`,
+    res.status(200).json({ statusCode: 200, message: `Section '${sectionId}' ${enabled ? 'enabled' : 'disabled'} successfully`,
       sidebarSections: sidebarPrefs.sidebarSections,
       updatedSection: sectionExists
     });
 
   } catch (error) {
     console.error("Error toggling organization sidebar section:", error);
-    res.status(500).json({
-      success: false,
-      message: "Error toggling organization sidebar section",
+    res.status(500).json({ statusCode: 500, message: "Error toggling organization sidebar section",
       error: error.message
     });
   }

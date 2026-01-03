@@ -1319,8 +1319,8 @@ exports.googleAuthCallback = async (req, res) => {
     if (req.method === 'GET') {
       // Use localhost for development, or FRONTEND_URL for production
       const frontendUrl = process.env.NODE_ENV === 'production' 
-        ? (process.env.FRONTEND_URL || 'http://localhost:3056')
-        : 'http://localhost:3056';
+        ? (process.env.FRONTEND_URL || 'http://localhost:4001')
+        : 'http://localhost:4001';
       const redirectUrl = `${frontendUrl}/google-login-error.html?error=${encodeURIComponent(error.message)}`;
       return res.redirect(redirectUrl);
     }

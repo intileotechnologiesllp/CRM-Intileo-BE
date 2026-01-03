@@ -13,8 +13,7 @@ router.post(
 router.post("/create-person", verifyToken, validatePrivilege(23, "create"), leadContactsController.createPerson);
 router.get("/get-person/:personId",leadContactsController.getPerson);
 router.get("/get-contact-timeline",leadContactsController.getContactTimeline);
-router.get(
-  "/get-person-timeline/:personId", verifyToken,
+router.get("/get-person-timeline/:personId", verifyToken,
   leadContactsController.getPersonTimeline
 );
 router.get(
