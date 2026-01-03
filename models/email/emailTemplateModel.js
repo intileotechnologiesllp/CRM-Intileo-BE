@@ -21,6 +21,10 @@ const EmailTemplate = sequelize.define(
       type: DataTypes.TEXT("long"),
       allowNull: false,
     },
+    html: {
+      type: DataTypes.TEXT("long"),
+      allowNull: false,
+    },
     createdBy: {
       type: DataTypes.INTEGER,
 
@@ -51,4 +55,5 @@ const EmailTemplate = sequelize.define(
   }
 );
 
+EmailTemplate.sync({alter: false}); // Ensure the table is created
 module.exports = EmailTemplate;

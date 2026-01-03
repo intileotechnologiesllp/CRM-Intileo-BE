@@ -3,6 +3,7 @@ const SchedulingLink = require("../../models/meeting/schedulingLinkModel");
 const MasterUser = require("../../models/master/masterUserModel");
 const googleCalendarService = require("../../services/googleCalendarService");
 const { google } = require("googleapis");
+const { Activity } = require("../../models");
 
 const oauth2Client = new google.auth.OAuth2(
   process.env.GOOGLE_CLIENT_ID,
@@ -384,7 +385,19 @@ exports.bookMeeting = async (req, res) => {
 
 exports.bookGoogleMeet = async (req, res) => {
   try {
-    const { masterUserId, summary, description, start, end, email,durationMinutes } = req.body;
+    const {
+      masterUserId,
+      summary,
+      description,
+      start,
+      end,
+      email,
+      durationMinutes,
+    } = req.body;
+
+    const startDateTime = moment.tz(start, timezone);
+    const endDateTime = startDateTime.clone().add(durationMinutes, "minutes");
+
     const user = await MasterUser.findByPk(masterUserId);
     if (!user || !user.googleOAuthToken) {
       return res.status(400).json({
@@ -396,8 +409,6 @@ exports.bookGoogleMeet = async (req, res) => {
       refresh_token: user.googleOAuthToken,
     });
 
-    const startDateTime = moment.tz(start, timezone);
-    const endDateTime = startDateTime.clone().add(durationMinutes, "minutes");
     const calendar = google.calendar({
       version: "v3",
       auth: oauth2Client,
@@ -431,6 +442,19 @@ exports.bookGoogleMeet = async (req, res) => {
       sendUpdates: "all",
     });
 
+    await Activity.create({
+      type: "Meeting",
+      subject: summary,
+      description,
+      startDateTime: startDateTime,
+      endDateTime: endDateTime,
+      // location,
+      videoCallIntegration: response.data.hangoutLink,
+      priority,
+      assignedTo: masterUserId,
+      masterUserId,
+      isDone: false,
+    });
     return {
       eventId: response.data.id,
       meetLink: response.data.hangoutLink,

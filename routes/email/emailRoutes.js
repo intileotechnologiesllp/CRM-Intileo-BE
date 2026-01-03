@@ -134,9 +134,9 @@ router.get(
   emailController.getDetailedConnectionStatus
 ); // Detailed Redis locks and backoff status (temp: no auth)
 
-router.post("/", verifyToken, emailController.createTemplate);
-router.get("/", verifyToken, emailController.getAllTemplates);
-router.get("/:id", verifyToken, emailController.getTemplateById);
-router.put("/:id", verifyToken, emailController.updateTemplate);
-router.delete("/:id", verifyToken, emailController.deleteTemplate);
+router.post("/create-campaign-template", verifyToken, emailController.createEmailCampaignTemplate);
+router.get("/get-campaign-template", verifyToken, emailController.getAllTemplates);
+router.get("/get-campaign-template/:id", verifyToken, emailController.getCampaignTemplateById);
+router.put("/update-campaign-template/:id", verifyToken, emailController.updateTemplate);
+router.delete("/delete-campaign-template/:id", verifyToken, emailController.deleteCampaignTemplate);
 module.exports = router;
