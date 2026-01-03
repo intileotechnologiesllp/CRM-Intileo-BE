@@ -12,16 +12,34 @@ const { logAuditTrail } = require("../../utils/auditTrailLogger"); // Import the
 const PROGRAMS = require("../../utils/programConstants");
 const MiscSettings = require("../../models/miscSettings/miscSettingModel.js");
 const GroupVisibility = require("../../models/admin/groupVisibilityModel.js");
-const { google } = require("googleapis")
+const { google } = require("googleapis");
 const DatabaseConnectionManager = require("../../config/dbConnectionManager.js");
 
 exports.signIn = async (req, res) => {
-  const { Admin, MasterUser, AuditTrail, History, MiscSetting, GroupVisibility, LoginHistory, RecentLoginHistory, } = req.models;
-  const { email, password, systemInfo, device, longitude, latitude, ipAddress } = req.body;
+  const {
+    Admin,
+    MasterUser,
+    AuditTrail,
+    History,
+    MiscSetting,
+    GroupVisibility,
+    LoginHistory,
+    RecentLoginHistory,
+  } = req.models;
+  const {
+    email,
+    password,
+    systemInfo,
+    device,
+    longitude,
+    latitude,
+    ipAddress,
+  } = req.body;
 
   try {
     // Step 1: Verify user in client database
-    const verificationResult = await DatabaseConnectionManager.verifyUserInDatabase(email, password);
+    const verificationResult =
+      await DatabaseConnectionManager.verifyUserInDatabase(email, password);
     const { user, creator, clientConfig, planDetails } = verificationResult;
 
     // Check if user is active
@@ -36,7 +54,7 @@ exports.signIn = async (req, res) => {
       );
       return res.status(403).json({
         success: false,
-        message: "User account is deactivated"
+        message: "User account is deactivated",
       });
     }
 
@@ -44,13 +62,13 @@ exports.signIn = async (req, res) => {
     if (!clientConfig.isActive) {
       return res.status(403).json({
         success: false,
-        message: "Client account is deactivated"
+        message: "Client account is deactivated",
       });
     }
 
     // Step 2: Check if 2FA is enabled (from first function)
     const locationInfo = systemInfo?.approximateLocation;
-    
+
     if (user.twoFactorEnabled) {
       await logAuditTrail(
         AuditTrail,
@@ -59,7 +77,7 @@ exports.signIn = async (req, res) => {
         "Password verified, awaiting 2FA",
         user.masterUserID
       );
-      
+
       return res.status(200).json({
         success: true,
         message: "2FA verification required",
@@ -71,8 +89,8 @@ exports.signIn = async (req, res) => {
           device,
           longitude,
           latitude,
-          ipAddress
-        }
+          ipAddress,
+        },
       });
     }
 
@@ -97,13 +115,17 @@ exports.signIn = async (req, res) => {
         .split(" ")
         .map(Number);
 
-      previousTotalDurationInSeconds = (hours || 0) * 3600 + (minutes || 0) * 60;
+      previousTotalDurationInSeconds =
+        (hours || 0) * 3600 + (minutes || 0) * 60;
     }
 
     const currentSessionDurationInSeconds = 0; // No logout yet for new session
-    const totalSessionDurationInSeconds = previousTotalDurationInSeconds + currentSessionDurationInSeconds;
+    const totalSessionDurationInSeconds =
+      previousTotalDurationInSeconds + currentSessionDurationInSeconds;
     const totalHours = Math.floor(totalSessionDurationInSeconds / 3600);
-    const totalMinutes = Math.floor((totalSessionDurationInSeconds % 3600) / 60);
+    const totalMinutes = Math.floor(
+      (totalSessionDurationInSeconds % 3600) / 60
+    );
     const totalSessionDuration = `${totalHours} hours ${totalMinutes} minutes`;
 
     // Save new login history
@@ -118,7 +140,7 @@ exports.signIn = async (req, res) => {
       totalSessionDuration,
       isActive: true,
       device: device,
-      location: `${locationInfo?.city}, ${locationInfo?.country}` || null
+      location: `${locationInfo?.city}, ${locationInfo?.country}` || null,
     });
 
     // Update RecentLoginHistory
@@ -140,27 +162,37 @@ exports.signIn = async (req, res) => {
     // Step 4: Fetch user's groups (from first function)
     const allGroups = await GroupVisibility.findAll({
       where: { isActive: true },
-      include: [{
-        model: MasterUser,
-        as: 'creator',
-        attributes: ['masterUserID', 'name', 'email']
-      }]
+      include: [
+        {
+          model: MasterUser,
+          as: "creator",
+          attributes: ["masterUserID", "name", "email"],
+        },
+      ],
     });
 
-    const userGroups = allGroups.filter(group => {
+    const userGroups = allGroups.filter((group) => {
       const memberIdsRaw = group.memberIds;
       let groupUserIds = [];
 
       if (Array.isArray(memberIdsRaw)) {
-        groupUserIds = memberIdsRaw.map(id => parseInt(id, 10)).filter(id => !isNaN(id));
-      } else if (typeof memberIdsRaw === 'string' && memberIdsRaw.trim() !== '') {
-        groupUserIds = memberIdsRaw.split(',').map(id => parseInt(id.trim(), 10)).filter(id => !isNaN(id));
+        groupUserIds = memberIdsRaw
+          .map((id) => parseInt(id, 10))
+          .filter((id) => !isNaN(id));
+      } else if (
+        typeof memberIdsRaw === "string" &&
+        memberIdsRaw.trim() !== ""
+      ) {
+        groupUserIds = memberIdsRaw
+          .split(",")
+          .map((id) => parseInt(id.trim(), 10))
+          .filter((id) => !isNaN(id));
       }
 
       return groupUserIds.includes(parseInt(user.masterUserID, 10));
     });
 
-    const formattedGroups = userGroups.map(group => ({
+    const formattedGroups = userGroups.map((group) => ({
       groupId: group.groupId,
       groupName: group.groupName,
       description: group.description,
@@ -173,16 +205,18 @@ exports.signIn = async (req, res) => {
       Organization: group.Organization,
       group: group.group,
       createdBy: group.createdBy,
-      creator: group.creator ? {
-        masterUserID: group.creator.masterUserID,
-        firstName: group.creator.name,
-        email: group.creator.email
-      } : null,
+      creator: group.creator
+        ? {
+            masterUserID: group.creator.masterUserID,
+            firstName: group.creator.name,
+            email: group.creator.email,
+          }
+        : null,
       createdAt: group.createdAt,
-      updatedAt: group.updatedAt
+      updatedAt: group.updatedAt,
     }));
 
-    const groupIds = formattedGroups.map(group => group.groupId);
+    const groupIds = formattedGroups.map((group) => group.groupId);
 
     // Step 5: Generate JWT token (combined from both)
     const token = jwt.sign(
@@ -197,7 +231,7 @@ exports.signIn = async (req, res) => {
         organizationName: clientConfig.organizationName,
         api_key: clientConfig.api_key,
         planId: clientConfig.planId,
-        userType: user.userType
+        userType: user.userType,
       },
       process.env.JWT_SECRET,
       { expiresIn: "30d" }
@@ -207,7 +241,9 @@ exports.signIn = async (req, res) => {
     const response = {
       success: true,
       statusCode: 200,
-      message: `${user.loginType === "admin" ? "Admin" : "General User"} sign-in successful`,
+      message: `${
+        user.loginType === "admin" ? "Admin" : "General User"
+      } sign-in successful`,
       token,
       totalSessionDuration,
       userGroups: formattedGroups,
@@ -218,7 +254,7 @@ exports.signIn = async (req, res) => {
         name: user.name,
         loginType: user.loginType,
         userType: user.userType,
-        twoFactorEnabled: user.twoFactorEnabled
+        twoFactorEnabled: user.twoFactorEnabled,
       },
       clientInfo: {
         clientId: clientConfig.id,
@@ -231,13 +267,13 @@ exports.signIn = async (req, res) => {
         trialPeriodDays: clientConfig.trialPeriodDays,
         startDate: clientConfig.startDate,
         ActualStartDate: clientConfig.ActualStartDate,
-        ActualEndDate: clientConfig.ActualEndDate
+        ActualEndDate: clientConfig.ActualEndDate,
       },
       creator: {
         id: creator.masterUserID,
         email: creator.email,
         name: creator.name,
-        userType: creator.userType
+        userType: creator.userType,
       },
     };
 
@@ -253,7 +289,7 @@ exports.signIn = async (req, res) => {
         billingInterval: planDetails.billingInterval,
         trialPeriodDays: planDetails.trialPeriodDays,
         isActive: planDetails.isActive,
-        features: planDetails.features
+        features: planDetails.features,
       };
     }
 
@@ -268,7 +304,6 @@ exports.signIn = async (req, res) => {
     );
 
     res.status(200).json(response);
-
   } catch (error) {
     console.error("Error during sign-in:", error);
 
@@ -307,7 +342,7 @@ exports.signIn = async (req, res) => {
       success: false,
       statusCode,
       message,
-      error: process.env.NODE_ENV === 'development' ? error.message : undefined
+      error: process.env.NODE_ENV === "development" ? error.message : undefined,
     });
   }
 };
@@ -490,7 +525,8 @@ exports.resetPassword = async (req, res) => {
 };
 
 exports.logout = async (req, res) => {
-   const { Admin, MasterUser, AuditTrail, LoginHistory, RecentLoginHistory } = req.models;
+  const { Admin, MasterUser, AuditTrail, LoginHistory, RecentLoginHistory } =
+    req.models;
   try {
     // Extract userId (adminId) and sessionId from the middleware
     const userId = req.adminId;
@@ -500,13 +536,13 @@ exports.logout = async (req, res) => {
     let loginHistory;
     if (sessionId) {
       loginHistory = await LoginHistory.findOne({
-        where: { 
+        where: {
           id: sessionId,
-          userId: userId 
+          userId: userId,
         },
       });
     }
-    
+
     // Fallback to latest session if sessionId not found (backward compatibility)
     if (!loginHistory) {
       loginHistory = await LoginHistory.findOne({
@@ -570,7 +606,7 @@ exports.logout = async (req, res) => {
       logoutTime: logoutTimeIST, // Store logout time in IST
       duration: currentSessionDuration, // Save current session duration
       totalSessionDuration, // Save updated total session duration
-      isActive: false
+      isActive: false,
     });
 
     // Update the RecentLoginHistory record
@@ -582,7 +618,7 @@ exports.logout = async (req, res) => {
       await recentLoginHistory.update({
         logoutTime: logoutTimeIST, // Update logout time
         duration: currentSessionDuration, // Update session duration
-        totalSessionDuration:totalSessionDuration
+        totalSessionDuration: totalSessionDuration,
       });
     }
 
@@ -599,7 +635,7 @@ exports.logout = async (req, res) => {
 };
 
 exports.getLoginHistory = async (req, res) => {
-  const {  LoginHistory } = req.models;
+  const { LoginHistory } = req.models;
   const { userId } = req.params; // Get userId from query parameters
 
   try {
@@ -624,7 +660,7 @@ exports.getLoginHistory = async (req, res) => {
 };
 
 exports.getAllLoginHistory = async (req, res) => {
-  const {  LoginHistory } = req.models;
+  const { LoginHistory } = req.models;
   const { userId } = req.params; // Get userId from query parameters
 
   try {
@@ -644,7 +680,7 @@ exports.getAllLoginHistory = async (req, res) => {
 };
 
 exports.getRecentLoginHistory = async (req, res) => {
-  const {  RecentLoginHistory } = req.models;
+  const { RecentLoginHistory } = req.models;
   const { userId } = req.query; // Get userId from query parameters
 
   try {
@@ -670,31 +706,49 @@ exports.getRecentLoginHistory = async (req, res) => {
 
 // Get current settings
 exports.getMiscSettings = async (req, res) => {
-  const {  MiscSetting } = req.models;
+  const { MiscSetting } = req.models;
   try {
-    const settings = await MiscSetting.findOne({ where: {}, order: [["id", "DESC"]] });
+    const settings = await MiscSetting.findOne({
+      where: {},
+      order: [["id", "DESC"]],
+    });
     res.status(200).json({ settings });
   } catch (error) {
-    res.status(500).json({ message: "Failed to fetch settings", error: error.message });
+    res
+      .status(500)
+      .json({ message: "Failed to fetch settings", error: error.message });
   }
 };
 
 // Update settings (admin only)
 exports.updateMiscSettings = async (req, res) => {
-  const {  MiscSetting } = req.models;
+  const { MiscSetting } = req.models;
   const { maxImageSizeMB, allowedImageTypes } = req.body;
 
   // Validation for maxImageSizeMB (required)
-  if (!maxImageSizeMB || isNaN(maxImageSizeMB) || maxImageSizeMB < 1 || maxImageSizeMB > 50) {
-    return res.status(400).json({ message: "maxImageSizeMB must be a number between 1 and 50." });
+  if (
+    !maxImageSizeMB ||
+    isNaN(maxImageSizeMB) ||
+    maxImageSizeMB < 1 ||
+    maxImageSizeMB > 50
+  ) {
+    return res
+      .status(400)
+      .json({ message: "maxImageSizeMB must be a number between 1 and 50." });
   }
 
   // Validation for allowedImageTypes (optional)
   if (
     allowedImageTypes !== undefined &&
-    (typeof allowedImageTypes !== "string" || !allowedImageTypes.match(/^[a-z,]+$/i))
+    (typeof allowedImageTypes !== "string" ||
+      !allowedImageTypes.match(/^[a-z,]+$/i))
   ) {
-    return res.status(400).json({ message: "allowedImageTypes must be a comma-separated string of extensions." });
+    return res
+      .status(400)
+      .json({
+        message:
+          "allowedImageTypes must be a comma-separated string of extensions.",
+      });
   }
 
   try {
@@ -709,12 +763,17 @@ exports.updateMiscSettings = async (req, res) => {
       // If creating new, use default if not provided
       await MiscSetting.create({
         maxImageSizeMB,
-        allowedImageTypes: allowedImageTypes !== undefined ? allowedImageTypes : "jpg,jpeg,png,gif",
+        allowedImageTypes:
+          allowedImageTypes !== undefined
+            ? allowedImageTypes
+            : "jpg,jpeg,png,gif",
       });
     }
     res.status(200).json({ message: "Settings updated", settings });
   } catch (error) {
-    res.status(500).json({ message: "Failed to update settings", error: error.message });
+    res
+      .status(500)
+      .json({ message: "Failed to update settings", error: error.message });
   }
 };
 
@@ -725,20 +784,30 @@ exports.updateMiscSettings = async (req, res) => {
  * @access Private (requires authentication)
  */
 exports.changePassword = async (req, res) => {
-  const {Admin, MasterUser, AuditTrail, LoginHistory} = req.models
+  const { Admin, MasterUser, AuditTrail, LoginHistory } = req.models;
   try {
-    const { currentPassword, newPassword, confirmPassword, logOutAllDevices = false } = req.body;
+    const {
+      currentPassword,
+      newPassword,
+      confirmPassword,
+      logOutAllDevices = false,
+    } = req.body;
     const userId = req.adminId || req.user?.id; // Get user ID from authentication middleware
 
     // Input validation
     if (!currentPassword || !newPassword || !confirmPassword) {
       return res.status(400).json({
-        message: "Current password, new password, and confirm password are required",
+        message:
+          "Current password, new password, and confirm password are required",
         errors: {
-          currentPassword: !currentPassword ? "Current password is required" : null,
+          currentPassword: !currentPassword
+            ? "Current password is required"
+            : null,
           newPassword: !newPassword ? "New password is required" : null,
-          confirmPassword: !confirmPassword ? "Confirm password is required" : null
-        }
+          confirmPassword: !confirmPassword
+            ? "Confirm password is required"
+            : null,
+        },
       });
     }
 
@@ -747,8 +816,8 @@ exports.changePassword = async (req, res) => {
       return res.status(400).json({
         message: "New password and confirm password do not match",
         errors: {
-          confirmPassword: "Passwords do not match"
-        }
+          confirmPassword: "Passwords do not match",
+        },
       });
     }
 
@@ -757,19 +826,21 @@ exports.changePassword = async (req, res) => {
       return res.status(400).json({
         message: "New password must be at least 8 characters long",
         errors: {
-          newPassword: "Password must be at least 8 characters long"
-        }
+          newPassword: "Password must be at least 8 characters long",
+        },
       });
     }
 
     // Additional password strength validation
-    const passwordRegex = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&])[A-Za-z\d@$!%*?&]{8,}$/;
+    const passwordRegex =
+      /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&])[A-Za-z\d@$!%*?&]{8,}$/;
     if (!passwordRegex.test(newPassword)) {
       return res.status(400).json({
-        message: "Password must contain at least one uppercase letter, one lowercase letter, one number, and one special character",
+        message:
+          "Password must contain at least one uppercase letter, one lowercase letter, one number, and one special character",
         errors: {
-          newPassword: "Password does not meet complexity requirements"
-        }
+          newPassword: "Password does not meet complexity requirements",
+        },
       });
     }
 
@@ -778,8 +849,8 @@ exports.changePassword = async (req, res) => {
       return res.status(400).json({
         message: "New password must be different from current password",
         errors: {
-          newPassword: "New password cannot be the same as current password"
-        }
+          newPassword: "New password cannot be the same as current password",
+        },
       });
     }
 
@@ -798,21 +869,26 @@ exports.changePassword = async (req, res) => {
     }
 
     // Verify current password
-    const isCurrentPasswordValid = await bcrypt.compare(currentPassword, user.password);
+    const isCurrentPasswordValid = await bcrypt.compare(
+      currentPassword,
+      user.password
+    );
     if (!isCurrentPasswordValid) {
       await logAuditTrail(
         AuditTrail,
         PROGRAMS.AUTHENTICATION,
         "PASSWORD_CHANGE",
         "FAILED",
-        `Invalid current password for user: ${user.email} | IP: ${req.ip || req.connection.remoteAddress}`,
+        `Invalid current password for user: ${user.email} | IP: ${
+          req.ip || req.connection.remoteAddress
+        }`,
         userId
       );
       return res.status(401).json({
         message: "Current password is incorrect",
         errors: {
-          currentPassword: "Current password is incorrect"
-        }
+          currentPassword: "Current password is incorrect",
+        },
       });
     }
 
@@ -834,7 +910,9 @@ exports.changePassword = async (req, res) => {
       PROGRAMS.AUTHENTICATION,
       "PASSWORD_CHANGE",
       "SUCCESS",
-      `Password changed successfully for user: ${user.email} | IP: ${req.ip || req.connection.remoteAddress} | UserAgent: ${req.get('User-Agent') || "Unknown"}`,
+      `Password changed successfully for user: ${user.email} | IP: ${
+        req.ip || req.connection.remoteAddress
+      } | UserAgent: ${req.get("User-Agent") || "Unknown"}`,
       userId
     );
 
@@ -874,14 +952,13 @@ exports.changePassword = async (req, res) => {
         user: {
           id: user.masterUserID,
           email: user.email,
-          name: user.name
-        }
-      }
+          name: user.name,
+        },
+      },
     });
-
   } catch (error) {
     console.error("Error changing password:", error);
-    
+
     // Log error in audit trail
     await logAuditTrail(
       AuditTrail,
@@ -894,7 +971,7 @@ exports.changePassword = async (req, res) => {
 
     res.status(500).json({
       message: "Internal server error while changing password",
-      error: process.env.NODE_ENV === 'development' ? error.message : undefined
+      error: process.env.NODE_ENV === "development" ? error.message : undefined,
     });
   }
 };
@@ -906,14 +983,14 @@ exports.changePassword = async (req, res) => {
  * @access Private (requires authentication)
  */
 exports.validatePassword = async (req, res) => {
-  const {Admin, MasterUser, AuditTrail} = req.models
+  const { Admin, MasterUser, AuditTrail } = req.models;
   try {
     const { password } = req.body;
 
     if (!password) {
       return res.status(400).json({
         message: "Password is required",
-        isValid: false
+        isValid: false,
       });
     }
 
@@ -922,7 +999,7 @@ exports.validatePassword = async (req, res) => {
       hasUppercase: /[A-Z]/.test(password),
       hasLowercase: /[a-z]/.test(password),
       hasNumber: /\d/.test(password),
-      hasSpecialChar: /[@$!%*?&]/.test(password)
+      hasSpecialChar: /[@$!%*?&]/.test(password),
     };
 
     const isValid = Object.values(validations).every(Boolean);
@@ -941,17 +1018,16 @@ exports.validatePassword = async (req, res) => {
       requirements: {
         minLength: "At least 8 characters",
         hasUppercase: "At least one uppercase letter",
-        hasLowercase: "At least one lowercase letter", 
+        hasLowercase: "At least one lowercase letter",
         hasNumber: "At least one number",
-        hasSpecialChar: "At least one special character (@$!%*?&)"
-      }
+        hasSpecialChar: "At least one special character (@$!%*?&)",
+      },
     });
-
   } catch (error) {
     console.error("Error validating password:", error);
     res.status(500).json({
       message: "Internal server error while validating password",
-      error: process.env.NODE_ENV === 'development' ? error.message : undefined
+      error: process.env.NODE_ENV === "development" ? error.message : undefined,
     });
   }
 };
@@ -963,29 +1039,23 @@ exports.validatePassword = async (req, res) => {
  * @access Private (requires authentication)
  */
 exports.getPasswordHistory = async (req, res) => {
-  const {LoginHistory} = req.models
+  const { LoginHistory } = req.models;
   try {
     const userId = req.adminId || req.user?.id;
     const { page = 1, limit = 10 } = req.query;
     const offset = (parseInt(page) - 1) * parseInt(limit);
 
     // Get recent login history that might include password changes
-    // Since we simplified LoginHistory, we'll get all login records and note that 
+    // Since we simplified LoginHistory, we'll get all login records and note that
     // detailed password change info is in the audit trail
     const loginHistory = await LoginHistory.findAndCountAll({
       where: {
-        userId: userId
+        userId: userId,
       },
       order: [["loginTime", "DESC"]],
       limit: parseInt(limit),
       offset: offset,
-      attributes: [
-        "id",
-        "loginTime",
-        "ipAddress",
-        "loginType",
-        "username"
-      ]
+      attributes: ["id", "loginTime", "ipAddress", "loginType", "username"],
     });
 
     res.status(200).json({
@@ -996,24 +1066,23 @@ exports.getPasswordHistory = async (req, res) => {
           total: loginHistory.count,
           page: parseInt(page),
           limit: parseInt(limit),
-          totalPages: Math.ceil(loginHistory.count / parseInt(limit))
+          totalPages: Math.ceil(loginHistory.count / parseInt(limit)),
         },
-        note: "Detailed password change information is available in the audit trail for security purposes"
-      }
+        note: "Detailed password change information is available in the audit trail for security purposes",
+      },
     });
-
   } catch (error) {
     console.error("Error fetching password history:", error);
     res.status(500).json({
       message: "Internal server error while fetching password history",
-      error: process.env.NODE_ENV === 'development' ? error.message : undefined
+      error: process.env.NODE_ENV === "development" ? error.message : undefined,
     });
   }
 };
 
 // Google OAuth Login - Initiate
 exports.googleAuthLogin = async (req, res) => {
-   const {LoginHistory} = req.models
+  const { LoginHistory } = req.models;
   try {
     const oauth2Client = new google.auth.OAuth2(
       process.env.GOOGLE_CLIENT_ID,
@@ -1022,33 +1091,34 @@ exports.googleAuthLogin = async (req, res) => {
     );
 
     const scopes = [
-      'https://www.googleapis.com/auth/userinfo.email',
-      'https://www.googleapis.com/auth/userinfo.profile'
+      "https://www.googleapis.com/auth/userinfo.email",
+      "https://www.googleapis.com/auth/userinfo.profile",
     ];
 
     const authUrl = oauth2Client.generateAuthUrl({
-      access_type: 'offline',
+      access_type: "offline",
       scope: scopes,
-      prompt: 'consent'
+      prompt: "consent",
     });
 
-    res.json({ 
+    res.json({
       success: true,
-      authUrl: authUrl 
+      authUrl: authUrl,
     });
   } catch (error) {
     console.error("Error generating Google auth URL:", error);
-    res.status(500).json({ 
+    res.status(500).json({
       success: false,
       message: "Failed to generate Google authentication URL",
-      error: process.env.NODE_ENV === 'development' ? error.message : undefined
+      error: process.env.NODE_ENV === "development" ? error.message : undefined,
     });
   }
 };
 
 // Google OAuth Login - Callback
 exports.googleAuthCallback = async (req, res) => {
-   const {LoginHistory, MasterUser, AuditTrail, RecentLoginHistory} = req.models
+  const { LoginHistory, MasterUser, AuditTrail, RecentLoginHistory } =
+    req.models;
   // Google sends code as query parameter, but frontend can send as body
   const code = req.query.code || (req.body && req.body.code);
   const systemInfo = req.body && req.body.systemInfo;
@@ -1058,9 +1128,9 @@ exports.googleAuthCallback = async (req, res) => {
   const ipAddress = req.body && req.body.ipAddress;
 
   if (!code) {
-    return res.status(400).json({ 
+    return res.status(400).json({
       success: false,
-      message: "Authorization code is required" 
+      message: "Authorization code is required",
     });
   }
 
@@ -1080,7 +1150,7 @@ exports.googleAuthCallback = async (req, res) => {
     // Get user info from Google
     const oauth2 = google.oauth2({
       auth: oauth2Client,
-      version: 'v2'
+      version: "v2",
     });
 
     const { data } = await oauth2.userinfo.get();
@@ -1088,9 +1158,9 @@ exports.googleAuthCallback = async (req, res) => {
     const googleName = data.name;
 
     if (!googleEmail) {
-      return res.status(400).json({ 
+      return res.status(400).json({
         success: false,
-        message: "Failed to retrieve email from Google" 
+        message: "Failed to retrieve email from Google",
       });
     }
 
@@ -1101,12 +1171,34 @@ exports.googleAuthCallback = async (req, res) => {
       // User doesn't exist, create new user
       user = await MasterUser.create({
         email: googleEmail,
-        name: googleName || googleEmail.split('@')[0],
-        loginType: 'google',
+        name: googleName || googleEmail.split("@")[0],
+        loginType: "google",
         isActive: true,
         // No password needed for Google OAuth users
-        password: await bcrypt.hash(crypto.randomBytes(32).toString('hex'), 10) // Random password
+        password: await bcrypt.hash(crypto.randomBytes(32).toString("hex"), 10), // Random password
       });
+
+      const thirdPartyData = {
+        name: googleName || googleEmail.split("@")[0],
+        email: googleEmail,
+        password: await bcrypt.hash(crypto.randomBytes(32).toString("hex"), 10),
+        phone: null,
+        userType: "USER", // Map to third-party's format
+        isActive: true, // Map status to isActive
+      };
+
+      // Call third-party API
+      let thirdPartyResponse;
+      thirdPartyResponse = await axios.post(
+        `${process.env.FRONTEND_ADMIN_URL}/api/v1/public/clients/create-client`,
+        thirdPartyData,
+        {
+          headers: {
+            "x-api-key": apiKey,
+            "Content-Type": "application/json",
+          },
+        }
+      );
 
       await logAuditTrail(
         AuditTrail,
@@ -1128,9 +1220,9 @@ exports.googleAuthCallback = async (req, res) => {
         "Inactive user attempted login",
         user.masterUserID
       );
-      return res.status(403).json({ 
+      return res.status(403).json({
         success: false,
-        message: "Your account is inactive. Please contact administrator." 
+        message: "Your account is inactive. Please contact administrator.",
       });
     }
 
@@ -1156,7 +1248,8 @@ exports.googleAuthCallback = async (req, res) => {
         .replace(" minutes", "")
         .split(" ")
         .map(Number);
-      previousTotalDurationInSeconds = (hours || 0) * 3600 + (minutes || 0) * 60;
+      previousTotalDurationInSeconds =
+        (hours || 0) * 3600 + (minutes || 0) * 60;
     }
 
     // Create new login history entry
@@ -1213,10 +1306,10 @@ exports.googleAuthCallback = async (req, res) => {
 
     // Generate JWT token
     const token = jwt.sign(
-      { 
-        id: user.masterUserID, 
+      {
+        id: user.masterUserID,
         email: user.email,
-        loginType: 'google'
+        loginType: "google",
       },
       process.env.JWT_SECRET,
       { expiresIn: "24h" }
@@ -1232,13 +1325,18 @@ exports.googleAuthCallback = async (req, res) => {
     );
 
     // If this is a GET request (direct from Google), redirect to frontend with token
-    if (req.method === 'GET') {
+    if (req.method === "GET") {
       // Redirect to a success page with token and user data
       // Use localhost for development, or FRONTEND_URL for production
-      const frontendUrl = process.env.NODE_ENV === 'production' 
-        ? (process.env.FRONTEND_URL || 'http://localhost:3056')
-        : 'http://localhost:3056';
-      const redirectUrl = `${frontendUrl}/google-login-success.html?token=${encodeURIComponent(token)}&name=${encodeURIComponent(user.name)}&email=${encodeURIComponent(user.email)}`;
+      const frontendUrl =
+        process.env.NODE_ENV === "production"
+          ? process.env.FRONTEND_URL || "http://localhost:3056"
+          : "http://localhost:3056";
+      const redirectUrl = `${frontendUrl}/google-login-success.html?token=${encodeURIComponent(
+        token
+      )}&name=${encodeURIComponent(user.name)}&email=${encodeURIComponent(
+        user.email
+      )}`;
       return res.redirect(redirectUrl);
     }
 
@@ -1251,13 +1349,12 @@ exports.googleAuthCallback = async (req, res) => {
         masterUserID: user.masterUserID,
         name: user.name,
         email: user.email,
-        loginType: 'google'
+        loginType: "google",
       },
     });
-
   } catch (error) {
     console.error("Error in Google OAuth callback:", error);
-    
+
     await logAuditTrail(
       AuditTrail,
       PROGRAMS.AUTHENTICATION,
@@ -1268,20 +1365,22 @@ exports.googleAuthCallback = async (req, res) => {
     );
 
     // If GET request, redirect to error page
-    if (req.method === 'GET') {
+    if (req.method === "GET") {
       // Use localhost for development, or FRONTEND_URL for production
-      const frontendUrl = process.env.NODE_ENV === 'production' 
-        ? (process.env.FRONTEND_URL || 'http://localhost:3056')
-        : 'http://localhost:3056';
-      const redirectUrl = `${frontendUrl}/google-login-error.html?error=${encodeURIComponent(error.message)}`;
+      const frontendUrl =
+        process.env.NODE_ENV === "production"
+          ? process.env.FRONTEND_URL || "http://localhost:3056"
+          : "http://localhost:3056";
+      const redirectUrl = `${frontendUrl}/google-login-error.html?error=${encodeURIComponent(
+        error.message
+      )}`;
       return res.redirect(redirectUrl);
     }
 
     res.status(500).json({
       success: false,
       message: "Google authentication failed",
-      error: process.env.NODE_ENV === 'development' ? error.message : undefined
+      error: process.env.NODE_ENV === "development" ? error.message : undefined,
     });
   }
 };
-

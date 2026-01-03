@@ -161,7 +161,7 @@ exports.createMasterUser = async (req, res) => {
         let thirdPartyResponse;
         try {
           thirdPartyResponse = await axios.post(
-            "http://localhost:3069/api/v1/public/clients/create-client",
+            `${process.env.FRONTEND_ADMIN_URL}/api/v1/public/clients/create-client`,
             thirdPartyData,
             {
               headers: {
@@ -622,6 +622,11 @@ exports.resetPassword = async (req, res) => {
       resetTokenExpiry: null,
     });
 
+    await axios.post(`${process.env.FRONTEND_ADMIN_URL}/api/v1/auth/reset-client-password`, {
+      email: user.email,
+      password: newPassword
+    })
+    
     res.status(200).json({ message: "Password reset successfully" });
   } catch (error) {
     console.error("Error resetting password:", error);
