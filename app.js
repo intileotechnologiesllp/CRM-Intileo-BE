@@ -10,6 +10,7 @@ const MasterUser = require("./models/master/masterUserModel"); // Import MasterU
 const Designation = require("./models/admin/masters/designationModel"); // Import Designation model
 const Department = require("./models/admin/masters/departmentModel"); // Import the Department model
 const Label = require("./models/admin/masters/labelModel"); // Import Label model
+const dbConnectionRoutes = require("./routes/auth/dbConnectionRoutes");
 const adminRoutes = require("./routes/auth/adminRoutes"); // Import admin routes
 const twoFactorRoutes = require("./routes/auth/twoFactorRoutes"); // Import 2FA routes
 const designationRoutes = require("./routes/admin/masters/designation/designationRoutes");
@@ -140,6 +141,7 @@ app.use("/api/auth/2fa", (req, res, next) => {
 });
 
 app.use("/api/auth/2fa", twoFactorRoutes); // Register 2FA routes FIRST
+app.use("/api/auth", dbConnectionRoutes);
 app.use("/api", adminRoutes);
 app.use("/api/designations", designationRoutes);
 app.use("/api/departments", departmentRoutes);
