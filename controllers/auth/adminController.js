@@ -233,6 +233,13 @@ exports.signIn = async (req, res) => {
       { expiresIn: "30d" }
     );
 
+    // Store connection in session or cache (optional)
+    // if (req.session) {
+    //   req.session.clientConnection = result.clientConnection;
+    //   req.session.models = result.models;
+    //   req.session.clientConfig = result.clientConfig;
+    // }
+
     // Step 7: Prepare response
     const response = {
       success: true,

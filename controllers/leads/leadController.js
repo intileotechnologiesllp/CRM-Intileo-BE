@@ -912,7 +912,7 @@ exports.getLeads = async (req, res) => {
           : pref.columns;
 
       const leadFields = Object.keys(Lead.rawAttributes);
-      const leadDetailsFields = Object.keys(LeadDetails.rawAttributes);
+      const leadDetailsFields = Object.keys(LeadDetail.rawAttributes);
 
       // Get checked columns based on preferences
       const checkedColumns = columns.filter((col) => col.check);
@@ -986,7 +986,7 @@ exports.getLeads = async (req, res) => {
     // Always include LeadDetails but only fetch checked attributes if preferences exist
     if (leadDetailsAttributes && leadDetailsAttributes.length > 0) {
       // Ensure currency field is included if it exists in LeadDetails
-      if (!leadDetailsAttributes.includes("currency") && Object.keys(LeadDetails.rawAttributes).includes("currency")) {
+      if (!leadDetailsAttributes.includes("currency") && Object.keys(LeadDetail.rawAttributes).includes("currency")) {
         leadDetailsAttributes.push("currency");
       }
       include.push({
@@ -1159,9 +1159,9 @@ exports.getLeads = async (req, res) => {
 
       const { all = [], any = [] } = filterConfig;
       const leadFields = Object.keys(Lead.rawAttributes);
-      const leadDetailsFields = Object.keys(LeadDetails.rawAttributes);
-      const personFields = Object.keys(Person.rawAttributes);
-      const organizationFields = Object.keys(Organization.rawAttributes);
+      const leadDetailsFields = Object.keys(LeadDetail.rawAttributes);
+      const personFields = Object.keys(LeadPerson.rawAttributes);
+      const organizationFields = Object.keys(LeadOrganization.rawAttributes);
       const activityFields = Object.keys(Activity.rawAttributes);
 
       let filterWhere = {};
@@ -2233,7 +2233,7 @@ exports.getLeads = async (req, res) => {
       
       // Filter out standard Lead and LeadDetails fields to get only custom field names
       const leadFields = Object.keys(Lead.rawAttributes);
-      const leadDetailsFields = Object.keys(LeadDetails.rawAttributes);
+      const leadDetailsFields = Object.keys(LeadDetail.rawAttributes);
       const standardFields = [...leadFields, ...leadDetailsFields];
       
       // Filter for custom fields - either not in standard fields OR explicitly marked as custom field
@@ -3477,7 +3477,7 @@ exports.updateLead = async (req, res) => {
   try {
     // Get all columns for Lead, LeadDetails, Person, and Organization
     const leadFields = Object.keys(Lead.rawAttributes);
-    const leadDetailsFields = Object.keys(LeadDetails.rawAttributes);
+    const leadDetailsFields = Object.keys(LeadDetail.rawAttributes);
     const personFields = Object.keys(LeadPerson.rawAttributes);
     const organizationFields = Object.keys(LeadOrganization.rawAttributes);
     console.log("\n====== MODEL FIELDS ======");
@@ -3722,7 +3722,7 @@ exports.updateLead = async (req, res) => {
         console.log("→ Organization record NOT FOUND - attempting CREATE");
         console.log("→ Data to create with:", organizationData);
         
-        orgRecord = await Organization.create(organizationData);
+        orgRecord = await LeadOrganization.create(organizationData);
         
         console.log("→ After create - orgRecord:", orgRecord.toJSON());
         console.log("✅ Organization CREATED successfully in LeadOrganization table");
@@ -7322,9 +7322,9 @@ exports.bulkEditLeads = async (req, res) => {
 
     // Get all columns for different models
     const leadFields = Object.keys(Lead.rawAttributes);
-    const leadDetailsFields = Object.keys(LeadDetails.rawAttributes);
-    const personFields = Object.keys(Person.rawAttributes);
-    const organizationFields = Object.keys(Organization.rawAttributes);
+    const leadDetailsFields = Object.keys(LeadDetail.rawAttributes);
+    const personFields = Object.keys(LeadPerson.rawAttributes);
+    const organizationFields = Object.keys(LeadOrganization.rawAttributes);
 
     // Split the update data by model
     const leadData = {};
@@ -7436,7 +7436,7 @@ exports.bulkEditLeads = async (req, res) => {
           if (leadDetails) {
             await leadDetails.update(leadDetailsData);
           } else {
-            await LeadDetails.create({
+            await LeadDetail.create({
               leadId: lead.leadId,
               ...leadDetailsData,
             });
@@ -9738,7 +9738,7 @@ async function processLeadImport(data, options) {
                   createdBy: masterUserID
                 };
 
-                const newPerson = await Person.create(personPayload, { transaction });
+                const newPerson = await LeadPerson.create(personPayload, { transaction });
 
                 // Link person to lead
                 await newLead.update({ personId: newPerson.personId }, { transaction });

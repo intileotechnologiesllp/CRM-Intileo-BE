@@ -6,8 +6,9 @@ const { verifyToken } = require("../../middlewares/authMiddleware");
 const dbContextMiddleware = require("../../middlewares/dbContext");
 
 // All routes require authentication
-router.use(verifyToken);
 router.use(dbContextMiddleware);
+router.use(verifyToken);
+
 // =============== NOTIFICATION ROUTES ===============
 
 /**

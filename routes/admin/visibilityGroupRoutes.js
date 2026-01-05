@@ -23,8 +23,9 @@ const requireRole = (roles) => {
 };
 
 // Apply authentication middleware to all routes
-router.use(verifyToken);
 router.use(dbContextMiddleware);
+router.use(verifyToken);
+
 
 // ===========================================
 // VISIBILITY GROUPS ROUTES

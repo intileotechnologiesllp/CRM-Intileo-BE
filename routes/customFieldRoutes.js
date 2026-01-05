@@ -5,8 +5,9 @@ const { verifyToken } = require("../middlewares/authMiddleware");
 const dbContextMiddleware = require("../middlewares/dbContext");
 
 // Apply authentication middleware to all routes
-router.use(verifyToken);
 router.use(dbContextMiddleware);
+router.use(verifyToken);
+
 
 // Custom Field Management Routes
 router.post("/", customFieldController.createCustomField);

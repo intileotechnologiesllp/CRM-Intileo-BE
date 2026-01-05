@@ -6,8 +6,9 @@ const dbContextMiddleware = require("../middlewares/dbContext");
 // Apply authentication middleware to all routes
 
 
-router.use(verifyToken);
+
 router.use(dbContextMiddleware);
+router.use(verifyToken);
 /**
  * @route   GET /api/company-settings
  * @desc    Get company settings

@@ -8,7 +8,7 @@ const PROGRAMS = require("../../utils/programConstants");
  * Add a user to favorites
  */
 exports.addUserToFavorites = async (req, res) => {
-  const { MasterUser, UserFavorites, AuditTrail, History } = req.models;
+  const { MasterUser, UserFavorite, AuditTrail, History } = req.models;
 
   try {
     const { favoriteUserId, nickname } = req.body;
@@ -37,7 +37,7 @@ exports.addUserToFavorites = async (req, res) => {
     }
 
     // Check if already in favorites (including inactive ones)
-    const existingFavorite = await UserFavorites.findOne({
+    const existingFavorite = await UserFavorite.findOne({
       where: {
         userId: userId,
         favoriteUserId: favoriteUserId
@@ -86,7 +86,7 @@ exports.addUserToFavorites = async (req, res) => {
     }
 
     // Create the favorite
-    const newFavorite = await UserFavorites.create({
+    const newFavorite = await UserFavorite.create({
       userId: userId,
       favoriteUserId: favoriteUserId,
       nickname: nickname || userToFavorite.name,
@@ -127,13 +127,13 @@ exports.addUserToFavorites = async (req, res) => {
  * Remove a user from favorites
  */
 exports.removeUserFromFavorites = async (req, res) => {
-  const { MasterUser, UserFavorites, AuditTrail, History } = req.models;
+  const { MasterUser, UserFavorite, AuditTrail, History } = req.models;
   try {
     const { favoriteUserId } = req.params;
     const userId = req.adminId;
 
     // Find the favorite
-    const favorite = await UserFavorites.findOne({
+    const favorite = await UserFavorite.findOne({
       where: {
         userId: userId,
         favoriteUserId: favoriteUserId,
@@ -182,12 +182,12 @@ exports.removeUserFromFavorites = async (req, res) => {
  * Get all favorite users for current user
  */
 exports.getFavoriteUsers = async (req, res) => {
-  const { MasterUser, UserFavorites, AuditTrail, History } = req.models;
+  const { MasterUser, UserFavorite, AuditTrail, History } = req.models;
   try {
     const userId = req.adminId;
 
     // Get favorites with user details
-    const favorites = await UserFavorites.findAll({
+    const favorites = await UserFavorite.findAll({
       where: {
         userId: userId,
         isActive: true
@@ -240,14 +240,14 @@ exports.getFavoriteUsers = async (req, res) => {
  * Update favorite user nickname
  */
 exports.updateFavoriteNickname = async (req, res) => {
-  const { MasterUser, UserFavorites, AuditTrail, History } = req.models;
+  const { MasterUser, UserFavorite, AuditTrail, History } = req.models;
   try {
     const { favoriteId } = req.params;
     const { nickname } = req.body;
     const userId = req.adminId;
 
     // Find the favorite
-    const favorite = await UserFavorites.findOne({
+    const favorite = await UserFavorite.findOne({
       where: {
         favoriteId: favoriteId,
         userId: userId,

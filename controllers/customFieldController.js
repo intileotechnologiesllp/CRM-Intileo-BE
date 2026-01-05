@@ -14,8 +14,7 @@ const historyLogger = require("../utils/historyLogger").logHistory;
 
 // Helper function to extract default fields from Sequelize model
 // Helper function to extract specific default fields from database models
-const getDefaultFieldsFromModels = async (entityType, masterUserID = null) => {
-  const { Lead, Deal, CustomField, CustomFieldValue, Pipeline, PipelineStage, Label, } = req.models;
+const getDefaultFieldsFromModels = async (entityType, masterUserID = null, Pipeline, PipelineStage, Label,) => {
   // Get pipeline options if dealing with deals
   let pipelineOptions = [];
   let stageOptions = [];
@@ -764,7 +763,7 @@ exports.createCustomField = async (req, res) => {
     }
 
     // Check against default fields to prevent conflicts
-    const defaultFields = await getDefaultFieldsFromModels(entityType);
+    const defaultFields = await getDefaultFieldsFromModels(entityType, masterUserID, Pipeline, PipelineStage, Label,);
     const conflictingDefaultField = defaultFields.find(
       (field) => field.fieldName.toLowerCase() === normalizedFieldName
     );
@@ -1068,7 +1067,8 @@ exports.getCustomFields = async (req, res) => {
         case "deals":
           defaultFields = await getDefaultFieldsFromModels(
             "deals",
-            masterUserID
+            masterUserID,
+            Pipeline, PipelineStage, Label,
           );
           break;
         case "lead":
@@ -1077,11 +1077,13 @@ exports.getCustomFields = async (req, res) => {
           // But deduplicate by fieldName, giving priority to leads fields
           const leadsFields = await getDefaultFieldsFromModels(
             "leads",
-            masterUserID
+            masterUserID,
+            Pipeline, PipelineStage, Label,
           );
           const dealsFields = await getDefaultFieldsFromModels(
             "deals",
-            masterUserID
+            masterUserID,
+            Pipeline, PipelineStage, Label,
           );
 
           // Create a map to track fields by fieldName to avoid duplicates
@@ -1106,20 +1108,22 @@ exports.getCustomFields = async (req, res) => {
         case "persons":
           defaultFields = await getDefaultFieldsFromModels(
             "person",
-            masterUserID
+            masterUserID,
+            Pipeline, PipelineStage, Label,
           );
           break;
         case "organization":
         case "organizations":
           defaultFields = await getDefaultFieldsFromModels(
             "organization",
-            masterUserID
+            masterUserID,
+            Pipeline, PipelineStage, Label,
           );
           break;
         case "both":
           defaultFields = [
-            ...(await getDefaultFieldsFromModels("deals", masterUserID)),
-            ...(await getDefaultFieldsFromModels("leads", masterUserID)),
+            ...(await getDefaultFieldsFromModels("deals", masterUserID, Pipeline, PipelineStage, Label,)),
+            ...(await getDefaultFieldsFromModels("leads", masterUserID, Pipeline, PipelineStage, Label,)),
           ];
           break;
       }
@@ -2260,8 +2264,17 @@ exports.getCustomFieldsWithStats = async (req, res) => {
 
 // Get all available field groups for an entity type
 exports.getFieldGroups = async (req, res) => {
-   const { Lead, Deal, CustomField, CustomFieldValue, Pipeline, PipelineStage, Label, History, AuditTrail} = req.models;
+  const { Lead, Deal, CustomField, CustomFieldValue, Pipeline, PipelineStage, Label, History, AuditTrail} = req.models;
   const { entityType } = req.params;
+
+  // Get the client connection from request (attached by middleware)
+  const clientConnection = req.clientConnection;
+  
+  if (!clientConnection) {
+    return res.status(500).json({
+      message: "No database connection available. Please login again.",
+    });
+  }
 
   try {
     // Show all field groups to all users (remove masterUserID from where)
@@ -2274,7 +2287,7 @@ exports.getFieldGroups = async (req, res) => {
       },
       attributes: ["fieldGroup"],
       group: ["fieldGroup"],
-      having: sequelize.where(sequelize.col("fieldGroup"), "IS NOT", null),
+      having: clientConnection.where(clientConnection.col("fieldGroup"), "IS NOT", null),
     });
 
     const groups = fieldGroups.map((field) => field.fieldGroup).filter(Boolean);
@@ -3065,6 +3078,15 @@ exports.createEntityWithCustomFields = async (req, res) => {
   const { entityType, customFields } = req.body;
   const masterUserID = req.adminId;
 
+  // Get the client connection from request (attached by middleware)
+  const clientConnection = req.clientConnection;
+  
+  if (!clientConnection) {
+    return res.status(500).json({
+      message: "No database connection available. Please login again.",
+    });
+  }
+
   try {
     if (!entityType || !customFields) {
       return res.status(400).json({
@@ -3073,7 +3095,7 @@ exports.createEntityWithCustomFields = async (req, res) => {
     }
 
     // Start a transaction
-    const transaction = await sequelize.transaction();
+    const transaction = await clientConnection.transaction();
 
     try {
       // Create a temporary entity ID (in a real scenario, this would be your actual entity creation)
@@ -3232,15 +3254,25 @@ exports.createPersonWithCustomFields = async (req, res) => {
   const masterUserID = req.adminId;
   const entityType = "person";
 
+  // Get the client connection from request (attached by middleware)
+  const clientConnection = req.clientConnection;
+  
+  if (!clientConnection) {
+    return res.status(500).json({
+      message: "No database connection available. Please login again.",
+    });
+  }
+
+
   try {
     if (!customFields) {
       return res.status(400).json({
         message: "customFields are required.",
       });
     }
-
+    
     // Start a transaction
-    const transaction = await sequelize.transaction();
+    const transaction = await clientConnection.transaction();
 
     try {
       // Create a temporary entity ID (in a real scenario, this would be your actual entity creation)
@@ -3397,6 +3429,14 @@ exports.createOrganizationWithCustomFields = async (req, res) => {
   const { customFields } = req.body;
   const masterUserID = req.adminId;
   const entityType = "organization";
+  // Get the client connection from request (attached by middleware)
+  const clientConnection = req.clientConnection;
+  
+  if (!clientConnection) {
+    return res.status(500).json({
+      message: "No database connection available. Please login again.",
+    });
+  }
 
   try {
     if (!customFields) {
@@ -3406,7 +3446,7 @@ exports.createOrganizationWithCustomFields = async (req, res) => {
     }
 
     // Start a transaction
-    const transaction = await sequelize.transaction();
+    const transaction = await clientConnection.transaction();
 
     try {
       // Create a temporary entity ID (in a real scenario, this would be your actual entity creation)

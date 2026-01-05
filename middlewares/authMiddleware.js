@@ -6,7 +6,7 @@ const LoginHistory = require("../models/reports/loginHistoryModel");
 exports.verifyToken = async (req, res, next) => {
   const authHeader = req.headers["authorization"];
   console.log("Authorization Header:", authHeader); // Debug log
-
+  const {LoginHistory} = req.models;
   if (!authHeader) {
     // await logAuditTrail(
     //   PROGRAMS.JWT_VERIFICATION, // Program ID for authentication

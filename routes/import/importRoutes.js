@@ -12,8 +12,8 @@ const dbContextMiddleware = require("../../middlewares/dbContext");
 const validatePrivilege = require('../../middlewares/validatePrivilege');
 
 // Apply authentication to all routes
-router.use(verifyToken);
 router.use(dbContextMiddleware);
+router.use(verifyToken);
 router.use(validatePrivilege(5, "create")); // Assuming import requires create privileges
 
 // ===== FILE UPLOAD & ANALYSIS ROUTES =====
