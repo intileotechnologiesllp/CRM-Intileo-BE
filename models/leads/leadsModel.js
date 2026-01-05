@@ -250,6 +250,10 @@ const Lead = sequelize.define("Lead", {
     type: DataTypes.STRING,
     allowNull: true, // Visible group for the lead
   },
+  eventSource: {
+    type: DataTypes.STRING,
+    allowNull: true, // Source of the event leading to lead creation
+  }
 });
 // 
 Lead.sync({})

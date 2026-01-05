@@ -119,6 +119,11 @@ activitiesTodoCount:{
   type: DataTypes.INTEGER,
   allowNull: true, // Count of activities to do
   defaultValue:0
+},
+marketingStatus:{
+  type: DataTypes.STRING,
+  allowNull: true, // Marketing status of the person
+  enum: ['Subscribed', 'Unsubscribed', 'Archived']
 }
   
 // visibilityGroupId: {
