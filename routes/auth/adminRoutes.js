@@ -19,8 +19,8 @@ router.post(
 
 router.get(
   "/profile",
-  verifyToken,
   dbContextMiddleware,
+  verifyToken,
   async (req, res) => {
     try {
       // Use models from middleware

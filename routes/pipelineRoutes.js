@@ -5,9 +5,8 @@ const { verifyToken } = require("../middlewares/authMiddleware");
 const dbContextMiddleware = require("../middlewares/dbContext");
 
 // All pipeline routes require authentication
-router.use(verifyToken);
 router.use(dbContextMiddleware);
-
+router.use(verifyToken);
 
 // Simple admin validation middleware (only admins can manage pipelines)
 const validateAdmin = (req, res, next) => {
