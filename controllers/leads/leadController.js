@@ -783,7 +783,7 @@ exports.unarchiveLead = async (req, res) => {
 
 
 exports.getLeads = async (req, res) => {
-  const { Email, MasterUser, Activity,  LeadPerson, CustomField, CustomFieldValue, Lead, LeadOrganization, AuditTrail, GroupMembership, VisibilityGroup, ItemVisibilityRule, LeadDetail, History, UserFavorite, LeadFilter, LeadColumnPreference, Label, GroupVisibility, Currency } = req.models;
+ const { Email, MasterUser, Activity,  LeadPerson, CustomField, CustomFieldValue, Lead, LeadOrganization, AuditTrail, GroupMembership, VisibilityGroup, ItemVisibilityRule, LeadDetail, History, UserFavorite, LeadFilter, LeadColumnPreference, Label, GroupVisibility, Currency } = req.models;
   const {
     isArchived,
     search,
@@ -801,6 +801,11 @@ exports.getLeads = async (req, res) => {
   console.log(req.role, "role of the user............");
 
   try {
+    // Initialize leadAttributes with default values
+    let leadAttributes = [];
+    let leadDetailsAttributes = [];
+    let checkedColumnKeys = [];
+
     // Get user's visibility group and rules
     let userGroup = null;
     let leadVisibilityRule = null;
@@ -903,7 +908,7 @@ exports.getLeads = async (req, res) => {
 
     const pref = await LeadColumnPreference.findOne();
 
-    let leadAttributes, leadDetailsAttributes, checkedColumnKeys = [];
+    // Always initialize leadAttributes even if no preferences found
     if (pref && pref.columns) {
       // Parse columns if it's a string
       const columns =
@@ -959,6 +964,24 @@ exports.getLeads = async (req, res) => {
       leadDetailsAttributes = columns
         .filter((col) => col.check && leadDetailsFields.includes(col.key) && !col.isCustomField)
         .map((col) => col.key);
+    } else {
+      // If no preferences found, set default attributes
+      leadAttributes = [
+        'leadId', 
+        'contactPerson', 
+        'organization', 
+        'title', 
+        'email', 
+        'phone', 
+        'leadOrganizationId', 
+        'personId', 
+        'ownerId', 
+        'masterUserID', 
+        'valueLabels', 
+        'createdAt', 
+        'updatedAt',
+        sortBy // Include sortBy field for ordering
+      ];
     }
     
     // Debug: Check if currency fields are included
@@ -967,7 +990,9 @@ exports.getLeads = async (req, res) => {
         attr.includes('Currency') || attr.includes('currency')
       );
     }
-    leadAttributes.push('visibleGroup')
+    
+    // Now it's safe to push 'visibleGroup' since leadAttributes is initialized
+    leadAttributes.push('visibleGroup');
     let whereClause = {};
     let hasActivityFiltering = false; // Initialize early for use throughout the function
     let hasPersonFiltering = false; // Initialize for Person filtering
