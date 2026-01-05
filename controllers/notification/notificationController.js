@@ -5,7 +5,10 @@ const { PushSubscription } = require("../../models/notification");
  * Get user's notifications with pagination and filters
  */
 exports.getNotifications = async (req, res) => {
-  const { PushSubscription,  MasterUser } = req.models;
+  const { Notification, MasterUser } = req.models;
+  console.log('🔍 [NotificationController] Notification model:', typeof Notification, Notification ? 'EXISTS' : 'UNDEFINED');
+  console.log('🔍 [NotificationController] MasterUser model:', typeof MasterUser, MasterUser ? 'EXISTS' : 'UNDEFINED');
+  
   try {
     const userId = req.user?.userId || req.adminId; // Support both auth formats
     const { page, limit, isRead, type, priority, startDate, endDate } =
@@ -19,7 +22,7 @@ exports.getNotifications = async (req, res) => {
       priority,
       startDate,
       endDate,
-    });
+    }, Notification, MasterUser);
 
     res.status(200).json({
       success: true,

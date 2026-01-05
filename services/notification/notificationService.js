@@ -1,19 +1,18 @@
-const {
-  Notification,
-  NotificationPreference,
-  PushSubscription,
-} = require("../../models/notification");
+// REFACTORED: Models now passed as parameters to support dynamic databases
 const { emitToUser, emitToUsers } = require("../../config/socket");
-const MasterUser = require("../../models/master/masterUserModel");
 const { Op } = require("sequelize");
 
 class NotificationService {
   /**
    * Create and send a notification
    * @param {Object} data - Notification data
+   * @param {Object} Notification - Notification model
+   * @param {Object} NotificationPreference - NotificationPreference model
+   * @param {Object} PushSubscription - PushSubscription model
+   * @param {Object} MasterUser - MasterUser model
    * @returns {Promise<Object>} Created notification
    */
-  static async createNotification(data) {
+  static async createNotification(data, Notification, NotificationPreference, PushSubscription, MasterUser) {
     console.log('🔔 [NotificationService.createNotification] Called with data:', data);
     
     try {
@@ -134,9 +133,11 @@ class NotificationService {
    * Get user's notifications with pagination
    * @param {Number} userId - User ID
    * @param {Object} options - Query options
+   * @param {Object} Notification - Notification model
+   * @param {Object} MasterUser - MasterUser model
    * @returns {Promise<Object>} Notifications and metadata
    */
-  static async getUserNotifications(userId, options = {},PushSubscription,  MasterUser) {
+  static async getUserNotifications(userId, options = {}, Notification, MasterUser) {
     try {
       const {
         page = 1,
@@ -182,7 +183,7 @@ class NotificationService {
           offset,
         });
 
-      const unreadCount = await this.getUnreadCount(userId);
+      const unreadCount = await this.getUnreadCount(userId, Notification);
 
       return {
         notifications,
@@ -322,9 +323,10 @@ class NotificationService {
   /**
    * Get unread notification count
    * @param {Number} userId - User ID
+   * @param {Object} Notification - Notification model
    * @returns {Promise<Number>} Unread count
    */
-  static async getUnreadCount(userId) {
+  static async getUnreadCount(userId, Notification) {
     try {
       return await Notification.count({
         where: {

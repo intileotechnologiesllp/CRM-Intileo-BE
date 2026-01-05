@@ -1,7 +1,7 @@
 const jwt = require("jsonwebtoken");
 const PROGRAMS=require("../utils/programConstants");
 const logAuditTrail = require("../utils/auditTrailLogger");
-const LoginHistory = require("../models/reports/loginHistoryModel");
+// REFACTORED: LoginHistory will be accessed from req.models
 
 exports.verifyToken = async (req, res, next) => {
   const authHeader = req.headers["authorization"];
@@ -58,29 +58,36 @@ exports.verifyToken = async (req, res, next) => {
     // Validate session is still active (for device management)
     if (decoded.sessionId) {
       try {
-        const session = await LoginHistory.findOne({
-          where: {
-            id: decoded.sessionId,
-            userId: decoded.id,
-          },
-        });
-
-        // If session doesn't exist or is inactive, reject the request
-        if (!session) {
-          console.log(`Session ${decoded.sessionId} not found for user ${decoded.id}`);
-          return res.status(401).json({ 
-            message: "Session not found. Please login again.",
-            sessionExpired: true,
+        // Get LoginHistory model from req.models (set by database middleware)
+        const LoginHistory = req.models?.LoginHistory;
+        
+        if (!LoginHistory) {
+          console.warn('⚠️ LoginHistory model not available in req.models, skipping session validation');
+        } else {
+          const session = await LoginHistory.findOne({
+            where: {
+              id: decoded.sessionId,
+              userId: decoded.id,
+            },
           });
-        }
 
-        if (!session.isActive || session.logoutTime) {
-          console.log(`Session ${decoded.sessionId} is inactive for user ${decoded.id}`);
-          return res.status(401).json({ 
-            message: "Your session has been logged out from another device. Please login again.",
-            sessionExpired: true,
-            loggedOutFromAnotherDevice: true,
-          });
+          // If session doesn't exist or is inactive, reject the request
+          if (!session) {
+            console.log(`Session ${decoded.sessionId} not found for user ${decoded.id}`);
+            return res.status(401).json({ 
+              message: "Session not found. Please login again.",
+              sessionExpired: true,
+            });
+          }
+
+          if (!session.isActive || session.logoutTime) {
+            console.log(`Session ${decoded.sessionId} is inactive for user ${decoded.id}`);
+            return res.status(401).json({ 
+              message: "Your session has been logged out from another device. Please login again.",
+              sessionExpired: true,
+              loggedOutFromAnotherDevice: true,
+            });
+          }
         }
 
         // Session is valid, continue

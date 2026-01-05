@@ -7618,7 +7618,7 @@ exports.createTemplate = async (req, res) => {
 
 exports.getTemplates = async (req, res) => {
   const masterUserID = req.adminId; // Assuming `adminId` is set in middleware
-  const { Template } = models;
+  const { Template } = req.models;
   try {
     // Fetch templates for the specific user
     const templates = await Template.findAll({
@@ -7942,7 +7942,7 @@ exports.addUserCredential = async (req, res) => {
 
 exports.getUserCredential = async (req, res) => {
   const masterUserID = req.adminId; // Assuming `adminId` is passed in the request (e.g., from middleware)
-  const {  UserCredential } = models;
+  const {  UserCredential } = req.models;
   try {
     // Fetch the user credentials
     const userCredential = await UserCredential.findOne({

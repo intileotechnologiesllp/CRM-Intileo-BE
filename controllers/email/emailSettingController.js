@@ -177,7 +177,7 @@ exports.createOrUpdateDefaultEmail = async (req, res) => {
 
 exports.getDefaultEmail = async (req, res) => {
   const masterUserID = req.adminId; // Assuming adminId is set in middleware
-  const { DefaultEmail  } = require.models;
+  const { DefaultEmail  } = req.models;
   try {
     // Fetch the default email for the user
     const defaultEmail = await DefaultEmail.findOne({

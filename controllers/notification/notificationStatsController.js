@@ -1,5 +1,5 @@
 const { Op } = require('sequelize');
-const sequelize = require('../../config/db');
+// REFACTORED: Use sequelize instance from req.models instead of direct require
 
 /**
  * Get user's daily and monthly progress stats for notification panel
@@ -7,6 +7,13 @@ const sequelize = require('../../config/db');
 exports.getUserProgress = async (req, res) => {
   try {
     const userId = req.user?.userId || req.adminId;
+    
+    // Get sequelize instance from the connection associated with this request
+    const sequelize = req.models?.Activity?.sequelize || req.models?.Deal?.sequelize;
+    
+    if (!sequelize) {
+      throw new Error('Database connection not available');
+    }
 
     // Get today's date range
     const today = new Date();

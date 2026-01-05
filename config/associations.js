@@ -355,6 +355,57 @@ GroupVisibility.belongsTo(MasterUser, {
   as: "creator",
 });
 
+// Notification associations
+Notification.belongsTo(MasterUser, {
+  foreignKey: "userId",
+  targetKey: "masterUserID",
+  as: "recipient",
+});
+
+Notification.belongsTo(MasterUser, {
+  foreignKey: "actionBy",
+  targetKey: "masterUserID",
+  as: "actor",
+});
+
+MasterUser.hasMany(Notification, {
+  foreignKey: "userId",
+  sourceKey: "masterUserID",
+  as: "receivedNotifications",
+});
+
+MasterUser.hasMany(Notification, {
+  foreignKey: "actionBy",
+  sourceKey: "masterUserID",
+  as: "sentNotifications",
+});
+
+// NotificationPreference associations
+NotificationPreference.belongsTo(MasterUser, {
+  foreignKey: "userId",
+  targetKey: "masterUserID",
+  as: "user",
+});
+
+MasterUser.hasOne(NotificationPreference, {
+  foreignKey: "userId",
+  sourceKey: "masterUserID",
+  as: "notificationPreferences",
+});
+
+// PushSubscription associations
+PushSubscription.belongsTo(MasterUser, {
+  foreignKey: "userId",
+  targetKey: "masterUserID",
+  as: "user",
+});
+
+MasterUser.hasMany(PushSubscription, {
+  foreignKey: "userId",
+  sourceKey: "masterUserID",
+  as: "pushSubscriptions",
+});
+
 
 console.log("✅ Associations set up successfully");
   
