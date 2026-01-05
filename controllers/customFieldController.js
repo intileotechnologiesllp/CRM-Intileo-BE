@@ -1324,6 +1324,7 @@ exports.getCustomFields = async (req, res) => {
     ];
 
     res.status(200).json({
+      statusCode: 200,
       message: "Custom fields retrieved successfully.",
       customFields: organizedFields.summary.concat(
         organizedFields.ungroupedCustomFields,
@@ -1350,6 +1351,7 @@ exports.getCustomFields = async (req, res) => {
   } catch (error) {
     console.error("Error fetching custom fields:", error);
     res.status(500).json({
+      statusCode: 500,
       message: "Failed to fetch custom fields.",
       error: error.message,
     });
