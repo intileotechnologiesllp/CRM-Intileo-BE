@@ -65,6 +65,7 @@ exports.createLeadPerformReport = async (req, res) => {
       { label: "Conversion Date", value: "conversionDate", type: "Date" },
       { label: "Add on", value: "createdAt", type: "Date" },
       { label: "Update on", value: "updatedAt", type: "Date" },
+      { label: "Event Source", value: "eventSource", type: "Lead" },
     ];
 
     const segmentedByOptions = [
@@ -99,6 +100,7 @@ exports.createLeadPerformReport = async (req, res) => {
     const availableFilterColumns = {
       Lead: [
         { label: "ESPL Proposal No", value: "esplProposalNo", type: "number" },
+        { label: "Event Source", value: "eventSource", type: "text" },
         {
           label: "No of Reports",
           value: "numberOfReportsPrepared",

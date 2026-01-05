@@ -118,4 +118,6 @@ router.post("/import/excel", verifyToken, validatePrivilege(7, "create"), leadCo
 // Download Excel import template
 router.get("/import/template", verifyToken, leadController.getExcelImportTemplate);
 
+router.get("/master-user", verifyToken, leadController.getContactPerson);
+
 module.exports = router;

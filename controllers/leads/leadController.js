@@ -42,6 +42,7 @@ const fs = require('fs');
 const path = require('path');
 const multer = require('multer');
 const GroupVisibility = require("../../models/admin/groupVisibilityModel");
+const LeadPerson = require("../../models/leads/leadPersonModel");
 
 // Configure multer for file uploads
 const upload = multer({
@@ -9864,3 +9865,18 @@ exports.getExcelImportTemplate = async (req, res) => {
     });
   }
 };
+
+exports.getContactPerson = async (req, res) =>{
+  try{
+    const contantPersons = await LeadPerson.findAll({
+      attributes: ['marketingStatus', 'email', 'contactPerson', 'phone'],
+    });
+    res.status(200).json({
+      message: "Contact persons fetched successfully",
+      data: contantPersons
+    });
+  }catch(e){
+    console.log("Error in getting contact person", e);
+    res.status(500).json({message: "Internal server error", error: e.message});
+  }
+}
