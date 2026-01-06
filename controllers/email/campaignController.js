@@ -97,7 +97,8 @@ exports.getCampaign = async (req, res) => {
 
     res.status(200).json({
       success: true,
-      message: `Manual flag sync queued for user`,
+      message: `fetch successfully`,
+      data:campaign
     });
   } catch (error) {
     console.error("Manual flag sync error:", error);
