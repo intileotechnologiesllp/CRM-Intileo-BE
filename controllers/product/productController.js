@@ -95,7 +95,15 @@ exports.uploadProductImage = (req, res, next) => {
 
 // Create a new product
 exports.createProduct = async (req, res) => {
-  const { ProductColumn, Product, ProductVariation, DealProduct,  Deal, MasterUser, GroupVisibility} = req.models;
+  const {
+    ProductColumn,
+    Product,
+    ProductVariation,
+    DealProduct,
+    Deal,
+    MasterUser,
+    GroupVisibility,
+  } = req.models;
   try {
     const {
       name,
@@ -216,7 +224,15 @@ exports.createProduct = async (req, res) => {
 
 // Get all products with filtering and pagination
 exports.getProducts = async (req, res) => {
-  const { ProductColumn, Product, ProductVariation, DealProduct,  Deal, MasterUser, GroupVisibility} = req.models;
+  const {
+    ProductColumn,
+    Product,
+    ProductVariation,
+    DealProduct,
+    Deal,
+    MasterUser,
+    GroupVisibility,
+  } = req.models;
   try {
     const {
       page = 1,
@@ -234,30 +250,65 @@ exports.getProducts = async (req, res) => {
     const pref = await ProductColumn.findOne();
     let attributes = [];
 
+    // Always include these essential columns
+    const essentialColumns = [
+      "productId",
+      "ownerId",
+      "name",
+      "createdAt",
+      "updatedAt",
+    ];
+
     if (pref) {
       const columns =
         typeof pref.columns === "string"
           ? JSON.parse(pref.columns)
           : pref.columns;
 
-      const activityFields = Object.keys(Product.rawAttributes);
-      const dealFields = Object.keys(Product.rawAttributes);
+      const productFields = Object.keys(Product.rawAttributes);
 
-      // Filter Activity columns that are checked
+      // Start with essential columns
+      attributes = [...essentialColumns];
+
+      // Add checked columns from preferences (excluding already added essentials)
       columns
         .filter(
           (col) =>
             col.check &&
-            col.entityType === "Activity" &&
-            activityFields.includes(col.key)
+            (col.entityType === "Product" || col.entityType === "product") &&
+            productFields.includes(col.key) &&
+            !essentialColumns.includes(col.key) // Don't add duplicates
         )
         .forEach((col) => {
           attributes.push(col.key);
         });
 
-     
+      // Remove duplicates (just in case)
+      attributes = [...new Set(attributes)];
 
-      if (attributes.length === 0) attributes = undefined;
+      // Always include the sortBy column if specified
+      if (
+        sortBy &&
+        !attributes.includes(sortBy) &&
+        productFields.includes(sortBy)
+      ) {
+        attributes.push(sortBy);
+      }
+    } else {
+      // No preferences found, use default columns
+      attributes = [
+        "productId",
+        "name",
+        "code",
+        "description",
+        "category",
+        "prices",
+        "cost",
+        "isActive",
+        "ownerId",
+        "createdAt",
+        "updatedAt",
+      ];
     }
 
     // Build where clause
@@ -308,15 +359,15 @@ exports.getProducts = async (req, res) => {
       order: [[sortBy, sortOrder.toUpperCase()]],
     });
 
-    if(groupId){
+    if (groupId) {
       const findGroup = await GroupVisibility.findOne({
         where: {
           groupId: groupId,
         },
       });
-  
+
       let filterProducts = [];
-  
+
       if (findGroup?.lead?.toLowerCase() == "visibilitygroup") {
         let findParentGroup = null;
         if (findGroup?.parentGroupId) {
@@ -326,13 +377,15 @@ exports.getProducts = async (req, res) => {
             },
           });
         }
-  
+
         const Filter = products.filter(
           (idx) =>
             idx?.ownerId == req.adminId ||
             idx?.visibilityGroupId == groupId ||
             idx?.visibilityGroup == findGroup?.parentGroupId ||
-            findParentGroup.memberIds?.split(",").includes(req.adminId.toString())
+            findParentGroup.memberIds
+              ?.split(",")
+              .includes(req.adminId.toString())
         );
         filterProducts = Filter;
       } else if (findGroup?.lead?.toLowerCase() == "owner") {
@@ -344,14 +397,16 @@ exports.getProducts = async (req, res) => {
             },
           });
         }
-  
+
         const Filter = products.filter(
           (idx) =>
             idx?.ownerId == req.adminId ||
             idx?.visibilityGroup == findGroup?.parentGroupId ||
-            findParentGroup.memberIds?.split(",").includes(req.adminId.toString())
+            findParentGroup.memberIds
+              ?.split(",")
+              .includes(req.adminId.toString())
         );
-  
+
         filterProducts = Filter;
       } else {
         filterProducts = products;
@@ -381,7 +436,15 @@ exports.getProducts = async (req, res) => {
 
 // Get single product by ID
 exports.getProductById = async (req, res) => {
-  const { ProductColumn, Product, ProductVariation, DealProduct,  Deal, MasterUser, GroupVisibility,} = req.models;
+  const {
+    ProductColumn,
+    Product,
+    ProductVariation,
+    DealProduct,
+    Deal,
+    MasterUser,
+    GroupVisibility,
+  } = req.models;
   try {
     const { id } = req.params;
 
@@ -424,48 +487,52 @@ exports.getProductById = async (req, res) => {
             "pipelineStage",
             "ownerId",
             "createdAt",
-            "expectedCloseDate"
+            "expectedCloseDate",
           ],
           include: [
             {
               model: MasterUser,
               as: "DealOwner",
               attributes: ["masterUserID", "name", "email"],
-              required: false
-            }
-          ]
+              required: false,
+            },
+          ],
         },
         {
           model: ProductVariation,
           as: "variation",
           attributes: ["variationId", "name", "sku"],
-          required: false
-        }
+          required: false,
+        },
       ],
-      order: [["createdAt", "DESC"]]
+      order: [["createdAt", "DESC"]],
     });
 
     // Format connected deals with summary
-    const formattedDeals = connectedDeals.map(dp => ({
+    const formattedDeals = connectedDeals.map((dp) => ({
       dealProductId: dp.dealProductId,
       dealId: dp.dealId,
-      deal: dp.deal ? {
-        dealId: dp.deal.dealId,
-        title: dp.deal.title,
-        value: dp.deal.value,
-        currency: dp.deal.currency,
-        status: dp.deal.status,
-        pipelineStage: dp.deal.pipelineStage,
-        ownerId: dp.deal.ownerId,
-        ownerName: dp.deal.DealOwner ? dp.deal.DealOwner.name : null,
-        createdAt: dp.deal.createdAt,
-        expectedCloseDate: dp.deal.expectedCloseDate
-      } : null,
-      variation: dp.variation ? {
-        variationId: dp.variation.variationId,
-        name: dp.variation.name,
-        sku: dp.variation.sku
-      } : null,
+      deal: dp.deal
+        ? {
+            dealId: dp.deal.dealId,
+            title: dp.deal.title,
+            value: dp.deal.value,
+            currency: dp.deal.currency,
+            status: dp.deal.status,
+            pipelineStage: dp.deal.pipelineStage,
+            ownerId: dp.deal.ownerId,
+            ownerName: dp.deal.DealOwner ? dp.deal.DealOwner.name : null,
+            createdAt: dp.deal.createdAt,
+            expectedCloseDate: dp.deal.expectedCloseDate,
+          }
+        : null,
+      variation: dp.variation
+        ? {
+            variationId: dp.variation.variationId,
+            name: dp.variation.name,
+            sku: dp.variation.sku,
+          }
+        : null,
       quantity: dp.quantity,
       unitPrice: dp.unitPrice,
       currency: dp.currency,
@@ -477,17 +544,24 @@ exports.getProductById = async (req, res) => {
       billingStartDate: dp.billingStartDate,
       billingEndDate: dp.billingEndDate,
       notes: dp.notes,
-      createdAt: dp.createdAt
+      createdAt: dp.createdAt,
     }));
 
     // Calculate deal summary
     const dealSummary = {
       totalDeals: formattedDeals.length,
-      activeDeals: formattedDeals.filter(d => d.deal?.status === 'open').length,
-      wonDeals: formattedDeals.filter(d => d.deal?.status === 'won').length,
-      lostDeals: formattedDeals.filter(d => d.deal?.status === 'lost').length,
-      totalRevenue: formattedDeals.reduce((sum, d) => sum + parseFloat(d.total || 0), 0),
-      totalQuantitySold: formattedDeals.reduce((sum, d) => sum + parseFloat(d.quantity || 0), 0)
+      activeDeals: formattedDeals.filter((d) => d.deal?.status === "open")
+        .length,
+      wonDeals: formattedDeals.filter((d) => d.deal?.status === "won").length,
+      lostDeals: formattedDeals.filter((d) => d.deal?.status === "lost").length,
+      totalRevenue: formattedDeals.reduce(
+        (sum, d) => sum + parseFloat(d.total || 0),
+        0
+      ),
+      totalQuantitySold: formattedDeals.reduce(
+        (sum, d) => sum + parseFloat(d.quantity || 0),
+        0
+      ),
     };
 
     res.status(200).json({
@@ -495,8 +569,8 @@ exports.getProductById = async (req, res) => {
       data: {
         product,
         connectedDeals: formattedDeals,
-        dealSummary
-      }
+        dealSummary,
+      },
     });
   } catch (error) {
     console.error("Error fetching product:", error);
@@ -510,7 +584,15 @@ exports.getProductById = async (req, res) => {
 
 // Update product
 exports.updateProduct = async (req, res) => {
-  const { ProductColumn, Product, ProductVariation, DealProduct,  Deal, MasterUser, GroupVisibility} = req.models;
+  const {
+    ProductColumn,
+    Product,
+    ProductVariation,
+    DealProduct,
+    Deal,
+    MasterUser,
+    GroupVisibility,
+  } = req.models;
   try {
     const { id } = req.params;
     const updateData = req.body;
@@ -623,7 +705,15 @@ exports.updateProduct = async (req, res) => {
 
 // Delete product (soft delete)
 exports.deleteProduct = async (req, res) => {
-  const { ProductColumn, Product, ProductVariation, DealProduct,  Deal, MasterUser, GroupVisibility} = req.models;
+  const {
+    ProductColumn,
+    Product,
+    ProductVariation,
+    DealProduct,
+    Deal,
+    MasterUser,
+    GroupVisibility,
+  } = req.models;
   try {
     const { id } = req.params;
 
@@ -655,7 +745,15 @@ exports.deleteProduct = async (req, res) => {
 
 // Get product categories (unique list)
 exports.getCategories = async (req, res) => {
-  const { ProductColumn, Product, ProductVariation, DealProduct,  Deal, MasterUser, GroupVisibility} = req.models;
+  const {
+    ProductColumn,
+    Product,
+    ProductVariation,
+    DealProduct,
+    Deal,
+    MasterUser,
+    GroupVisibility,
+  } = req.models;
   try {
     const categories = await Product.findAll({
       attributes: ["category"],
@@ -685,7 +783,15 @@ exports.getCategories = async (req, res) => {
 
 // Add product to deal
 exports.addProductToDeal = async (req, res) => {
-  const { ProductColumn, Product, ProductVariation, DealProduct,  Deal, MasterUser, GroupVisibility} = req.models;
+  const {
+    ProductColumn,
+    Product,
+    ProductVariation,
+    DealProduct,
+    Deal,
+    MasterUser,
+    GroupVisibility,
+  } = req.models;
   try {
     console.log("🔵 [ADD PRODUCT TO DEAL] Request received");
     console.log("🔵 Request body:", JSON.stringify(req.body, null, 2));
@@ -817,7 +923,15 @@ exports.addProductToDeal = async (req, res) => {
 
 // Get products for a deal
 exports.getDealProducts = async (req, res) => {
-  const { ProductColumn, Product, ProductVariation, DealProduct,  Deal, MasterUser, GroupVisibility} = req.models;
+  const {
+    ProductColumn,
+    Product,
+    ProductVariation,
+    DealProduct,
+    Deal,
+    MasterUser,
+    GroupVisibility,
+  } = req.models;
   try {
     const { dealId } = req.params;
 
@@ -943,7 +1057,15 @@ exports.getDealProducts = async (req, res) => {
 
 // Update deal product
 exports.updateDealProduct = async (req, res) => {
-  const { ProductColumn, Product, ProductVariation, DealProduct,  Deal, MasterUser, GroupVisibility} = req.models;
+  const {
+    ProductColumn,
+    Product,
+    ProductVariation,
+    DealProduct,
+    Deal,
+    MasterUser,
+    GroupVisibility,
+  } = req.models;
   try {
     const { id } = req.params;
     const updateData = req.body;
@@ -1035,7 +1157,15 @@ exports.updateDealProduct = async (req, res) => {
 
 // Remove product from deal
 exports.removeDealProduct = async (req, res) => {
-  const { ProductColumn, Product, ProductVariation, DealProduct,  Deal, MasterUser, GroupVisibility} = req.models;
+  const {
+    ProductColumn,
+    Product,
+    ProductVariation,
+    DealProduct,
+    Deal,
+    MasterUser,
+    GroupVisibility,
+  } = req.models;
   try {
     const { id } = req.params;
 
@@ -1066,7 +1196,15 @@ exports.removeDealProduct = async (req, res) => {
 
 // Update deal-level tax settings (applies to all products in deal)
 exports.updateDealTaxSettings = async (req, res) => {
-  const { ProductColumn, Product, ProductVariation, DealProduct,  Deal, MasterUser, GroupVisibility} = req.models;
+  const {
+    ProductColumn,
+    Product,
+    ProductVariation,
+    DealProduct,
+    Deal,
+    MasterUser,
+    GroupVisibility,
+  } = req.models;
   try {
     const { dealId } = req.params;
     const { taxType, taxPercentage } = req.body;
@@ -1120,7 +1258,15 @@ exports.updateDealTaxSettings = async (req, res) => {
 
 // Search products (for autocomplete in deal product form)
 exports.searchProducts = async (req, res) => {
-  const { ProductColumn, Product, ProductVariation, DealProduct,  Deal, MasterUser, GroupVisibility} = req.models;
+  const {
+    ProductColumn,
+    Product,
+    ProductVariation,
+    DealProduct,
+    Deal,
+    MasterUser,
+    GroupVisibility,
+  } = req.models;
   try {
     const { query, limit = 10 } = req.query;
 
@@ -1167,7 +1313,15 @@ exports.searchProducts = async (req, res) => {
 
 // Delete product variation (soft delete)
 exports.deleteProductVariation = async (req, res) => {
-  const { ProductColumn, Product, ProductVariation, DealProduct,  Deal, MasterUser, GroupVisibility} = req.models;
+  const {
+    ProductColumn,
+    Product,
+    ProductVariation,
+    DealProduct,
+    Deal,
+    MasterUser,
+    GroupVisibility,
+  } = req.models;
   try {
     const { variationId } = req.params;
     const ownerId = req.adminId;
@@ -1212,52 +1366,73 @@ exports.deleteProductVariation = async (req, res) => {
 };
 
 exports.getProductsFields = async (req, res) => {
-  const { ProductColumn, Product, ProductVariation, DealProduct,  Deal, MasterUser, GroupVisibility} = req.models;
+  const {
+    ProductColumn,
+    Product,
+    ProductVariation,
+    DealProduct,
+    Deal,
+    MasterUser,
+    GroupVisibility,
+  } = req.models;
   try {
     // Fetch data from ActivityColumnPreference table
     const pref = await ProductColumn.findOne();
-    
+
     if (!pref || !pref.columns) {
-      return res.status(404).json({ 
+      return res.status(404).json({
         message: "No column preferences found",
-        fields: []
+        fields: [],
       });
     }
 
     // Parse columns data if it's stored as JSON string
-    const columns = typeof pref.columns === "string" 
-      ? JSON.parse(pref.columns) 
-      : pref.columns;
+    const columns =
+      typeof pref.columns === "string"
+        ? JSON.parse(pref.columns)
+        : pref.columns;
 
     // Transform the data to include labels for better display
-    const fieldsWithLabels = columns.map(column => ({
-      key: column.entityType === 'Deal' ? `deal_${column.key}` : column.key, // Add deal_ prefix for Deal fields
+    const fieldsWithLabels = columns.map((column) => ({
+      key: column.entityType === "Deal" ? `deal_${column.key}` : column.key, // Add deal_ prefix for Deal fields
       label: column.key
         .replace(/([A-Z])/g, " $1") // Add space before capital letters
-        .replace(/^./, str => str.toUpperCase()), // Capitalize first letter
+        .replace(/^./, (str) => str.toUpperCase()), // Capitalize first letter
       check: column.check,
-      entityType: column.entityType
+      entityType: column.entityType,
     }));
 
-    res.status(200).json({ 
+    res.status(200).json({
       success: true,
       fields: fieldsWithLabels,
       totalFields: fieldsWithLabels.length,
-      activityFields: fieldsWithLabels.filter(field => field.entityType === 'Activity').length,
-      dealFields: fieldsWithLabels.filter(field => field.entityType === 'Deal').length
+      activityFields: fieldsWithLabels.filter(
+        (field) => field.entityType === "Activity"
+      ).length,
+      dealFields: fieldsWithLabels.filter(
+        (field) => field.entityType === "Deal"
+      ).length,
     });
   } catch (error) {
     console.error("Error fetching activity fields:", error);
-    res.status(500).json({ 
+    res.status(500).json({
       success: false,
       message: "Error fetching activity fields",
-      error: error.message 
+      error: error.message,
     });
   }
 };
 
 exports.updateProductColumnChecks = async (req, res) => {
-  const { ProductColumn, Product, ProductVariation, DealProduct,  Deal, MasterUser, GroupVisibility} = req.models;
+  const {
+    ProductColumn,
+    Product,
+    ProductVariation,
+    DealProduct,
+    Deal,
+    MasterUser,
+    GroupVisibility,
+  } = req.models;
   // Expecting: { columns: [ { key: "columnName", check: true/false }, ... ] }
   const { columns } = req.body;
 

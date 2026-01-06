@@ -406,6 +406,25 @@ MasterUser.hasMany(PushSubscription, {
   as: "pushSubscriptions",
 });
 
+ProductVariation.belongsTo(Product, {
+  foreignKey: "productId",
+  as: "product",
+});
+
+Product.hasMany(ProductVariation, {
+  foreignKey: "productId",
+  as: "variations",
+});
+
+Product.belongsTo(MasterUser, {
+  foreignKey: "ownerId",
+  as: "owner",
+});
+
+MasterUser.hasMany(Product, {
+  foreignKey: "ownerId",
+  as: "masterproduct",
+});
 
 console.log("✅ Associations set up successfully");
   

@@ -1666,7 +1666,7 @@ exports.getOrganizationsAndPersons = async (req, res) => {
     console.log("[DEBUG] filterConfig:", JSON.stringify(filterConfig, null, 2));
     console.log("[DEBUG] Available model fields:");
     console.log("[DEBUG] - Lead fields:", Object.keys(Lead.rawAttributes));
-    console.log("[DEBUG] - Person fields:", Object.keys(Person.rawAttributes));
+    console.log("[DEBUG] - Person fields:", Object.keys(LeadPerson.rawAttributes));
     console.log(
       "[DEBUG] - Organization fields:",
       Object.keys(LeadOrganization.rawAttributes)
@@ -1807,10 +1807,10 @@ exports.getOrganizationsAndPersons = async (req, res) => {
     }
 
     // Get model field names for validation
-    const personFields = Object.keys(Person.rawAttributes);
+    const personFields = Object.keys(LeadPerson.rawAttributes);
     const leadFields = Object.keys(Lead.rawAttributes);
     const dealFields = Object.keys(Deal.rawAttributes);
-    const organizationFields = Object.keys(Organization.rawAttributes);
+    const organizationFields = Object.keys(LeadOrganization.rawAttributes);
 
     let activityFields = [];
     try {
@@ -3240,7 +3240,7 @@ exports.createPerson = async (req, res) => {
     }
 
     // Get all person model fields
-    const personFields = Object.keys(Person.rawAttributes);
+    const personFields = Object.keys(LeadPerson.rawAttributes);
 
     // Split custom fields from standard fields
     const customFields = {};

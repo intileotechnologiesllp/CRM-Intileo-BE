@@ -1494,15 +1494,16 @@ function getDateGroupExpression(dateField, durationUnit) {
 
     case "weekly":
       return Sequelize.literal(
-        `CONCAT('w', WEEK(${field}), ' ', YEAR(${field}))`
+         `CONCAT('w', LPAD(WEEK(${field}, 3), 2, '0'), ' ', YEAR(${field}))`
       );
 
     case "monthly":
       return Sequelize.literal(`
-            CONCAT(
-              ELT(MONTH(${field}), 'Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'),
-              ' ',
-              YEAR(${field})
+        CONCAT(
+          ELT(MONTH(${field}), 'Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'),
+          ' ',
+          YEAR(${field})
+        )
      `);
 
     case "quarterly":

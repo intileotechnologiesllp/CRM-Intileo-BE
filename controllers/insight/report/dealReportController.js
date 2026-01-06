@@ -1493,15 +1493,16 @@ function getDateGroupExpression(dateField, durationUnit) {
 
     case "weekly":
       return Sequelize.literal(
-        `CONCAT('w', WEEK(${field}), ' ', YEAR(${field}))`
+         `CONCAT('w', LPAD(WEEK(${field}, 3), 2, '0'), ' ', YEAR(${field}))`
       );
 
     case "monthly":
       return Sequelize.literal(`
-            CONCAT(
-              ELT(MONTH(${field}), 'Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'),
-              ' ',
-              YEAR(${field})
+        CONCAT(
+          ELT(MONTH(${field}), 'Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'),
+          ' ',
+          YEAR(${field})
+        )
      `);
 
     case "quarterly":
@@ -3133,18 +3134,33 @@ exports.saveDealPerformReport = async (req, res) => {
       ? dashboardIds
       : [dashboardIds];
 
-    for (const dashboardId of dashboardIdsArray) {
-      // Verify dashboard ownership
-      const dashboard = await Dashboard.findOne({
-        where: { dashboardId, ownerId },
-      });
-      if (!dashboard) {
-        return res.status(404).json({
-          success: false,
-          message: `Dashboard ${dashboardId} not found or access denied`,
+    if (role !== 'admin') {
+      for (const dashboardId of dashboardIdsArray) {
+        const dashboard = await Dashboard.findOne({
+          where: { dashboardId, ownerId },
         });
+        if (!dashboard) {
+          return res.status(404).json({
+            success: false,
+            message: `Dashboard ${dashboardId} not found or access denied`,
+          });
+        }
+      }
+    } else {
+      // For admin role, check if dashboard exists without owner validation
+      for (const dashboardId of dashboardIdsArray) {
+        const dashboard = await Dashboard.findOne({
+          where: { dashboardId },
+        });
+        if (!dashboard) {
+          return res.status(404).json({
+            success: false,
+            message: `Dashboard ${dashboardId} not found`,
+          });
+        }
       }
     }
+    
     // Find next position
     const lastReport = await Report.findOne({
       where: { ownerId },
@@ -5977,18 +5993,33 @@ exports.saveDealConversionReport = async (req, res) => {
       ? dashboardIds
       : [dashboardIds];
 
-    for (const dashboardId of dashboardIdsArray) {
-      // Verify dashboard ownership
-      const dashboard = await Dashboard.findOne({
-        where: { dashboardId, ownerId },
-      });
-      if (!dashboard) {
-        return res.status(404).json({
-          success: false,
-          message: `Dashboard ${dashboardId} not found or access denied`,
+    if (role !== 'admin') {
+      for (const dashboardId of dashboardIdsArray) {
+        const dashboard = await Dashboard.findOne({
+          where: { dashboardId, ownerId },
         });
+        if (!dashboard) {
+          return res.status(404).json({
+            success: false,
+            message: `Dashboard ${dashboardId} not found or access denied`,
+          });
+        }
+      }
+    } else {
+      // For admin role, check if dashboard exists without owner validation
+      for (const dashboardId of dashboardIdsArray) {
+        const dashboard = await Dashboard.findOne({
+          where: { dashboardId },
+        });
+        if (!dashboard) {
+          return res.status(404).json({
+            success: false,
+            message: `Dashboard ${dashboardId} not found`,
+          });
+        }
       }
     }
+
     // Find next position
     const lastReport = await Report.findOne({
       where: { ownerId },
@@ -8317,18 +8348,33 @@ exports.saveDealProgressReport = async (req, res) => {
       ? dashboardIds
       : [dashboardIds];
 
-    for (const dashboardId of dashboardIdsArray) {
-      // Verify dashboard ownership
-      const dashboard = await Dashboard.findOne({
-        where: { dashboardId, ownerId },
-      });
-      if (!dashboard) {
-        return res.status(404).json({
-          success: false,
-          message: `Dashboard ${dashboardId} not found or access denied`,
+    if (role !== 'admin') {
+      for (const dashboardId of dashboardIdsArray) {
+        const dashboard = await Dashboard.findOne({
+          where: { dashboardId, ownerId },
         });
+        if (!dashboard) {
+          return res.status(404).json({
+            success: false,
+            message: `Dashboard ${dashboardId} not found or access denied`,
+          });
+        }
+      }
+    } else {
+      // For admin role, check if dashboard exists without owner validation
+      for (const dashboardId of dashboardIdsArray) {
+        const dashboard = await Dashboard.findOne({
+          where: { dashboardId },
+        });
+        if (!dashboard) {
+          return res.status(404).json({
+            success: false,
+            message: `Dashboard ${dashboardId} not found`,
+          });
+        }
       }
     }
+
     // Find next position
     const lastReport = await Report.findOne({
       where: { ownerId },
@@ -12211,16 +12257,30 @@ exports.saveDealDurationReport = async (req, res) => {
       ? dashboardIds
       : [dashboardIds];
 
-    for (const dashboardId of dashboardIdsArray) {
-      // Verify dashboard ownership
-      const dashboard = await Dashboard.findOne({
-        where: { dashboardId, ownerId },
-      });
-      if (!dashboard) {
-        return res.status(404).json({
-          success: false,
-          message: `Dashboard ${dashboardId} not found or access denied`,
+    if (role !== 'admin') {
+      for (const dashboardId of dashboardIdsArray) {
+        const dashboard = await Dashboard.findOne({
+          where: { dashboardId, ownerId },
         });
+        if (!dashboard) {
+          return res.status(404).json({
+            success: false,
+            message: `Dashboard ${dashboardId} not found or access denied`,
+          });
+        }
+      }
+    } else {
+      // For admin role, check if dashboard exists without owner validation
+      for (const dashboardId of dashboardIdsArray) {
+        const dashboard = await Dashboard.findOne({
+          where: { dashboardId },
+        });
+        if (!dashboard) {
+          return res.status(404).json({
+            success: false,
+            message: `Dashboard ${dashboardId} not found`,
+          });
+        }
       }
     }
 
@@ -13874,16 +13934,30 @@ exports.saveFunnelDealConversionReport = async (req, res) => {
       ? dashboardIds
       : [dashboardIds];
 
-    // Verify dashboard ownership for all dashboards
-    for (const dashboardId of dashboardIdsArray) {
-      const dashboard = await Dashboard.findOne({
-        where: { dashboardId, ownerId },
-      });
-      if (!dashboard) {
-        return res.status(404).json({
-          success: false,
-          message: `Dashboard ${dashboardId} not found or access denied`,
+    if (role !== 'admin') {
+      for (const dashboardId of dashboardIdsArray) {
+        const dashboard = await Dashboard.findOne({
+          where: { dashboardId, ownerId },
         });
+        if (!dashboard) {
+          return res.status(404).json({
+            success: false,
+            message: `Dashboard ${dashboardId} not found or access denied`,
+          });
+        }
+      }
+    } else {
+      // For admin role, check if dashboard exists without owner validation
+      for (const dashboardId of dashboardIdsArray) {
+        const dashboard = await Dashboard.findOne({
+          where: { dashboardId },
+        });
+        if (!dashboard) {
+          return res.status(404).json({
+            success: false,
+            message: `Dashboard ${dashboardId} not found`,
+          });
+        }
       }
     }
 
