@@ -134,7 +134,7 @@ exports.getSingleCampaign = async (req, res) => {
         {
           model: EmailTemplate,
           as: "template",
-          attributes: ["html", "body"], // choose fields you want
+          attributes: ["html", "body", "templateName", "createdAt"], // choose fields you want
         },
       ],
     });
