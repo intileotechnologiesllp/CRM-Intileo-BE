@@ -143,7 +143,7 @@ exports.getSingleCampaign = async (req, res) => {
       success: true,
       message: `fetch successfully`,
       data: {
-        campaign,
+        ...campaign.dataValues,
         sendingTime: JSON.parse(campaign.sendingTime),
         Engagement: campaign.Engagement ? JSON.parse(campaign.Engagement) : null,
       },
