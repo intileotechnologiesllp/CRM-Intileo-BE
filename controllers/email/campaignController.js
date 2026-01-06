@@ -3,15 +3,17 @@ const Campaigns = require("../../models/email/campaignsModel");
 // Manual flag sync trigger for specific user
 exports.createCampaign = async (req, res) => {
   try {
-    const { to, from, subject, templateId, sendingTime, engagement } = req.body;
+    const { receivers, sender, subject, emailContent, sendingTime, engagement,campaignName, createdBy } = req.body;
 
     await Campaigns.create({
-      to,
-      from,
+      campaignName,
+      receivers,
+      sender,
       subject,
-      templateId,
+      emailContent,
       sendingTime,
       engagement,
+      createdBy
     });
 
     res.status(200).json({
