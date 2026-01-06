@@ -99,7 +99,36 @@ exports.getCampaign = async (req, res) => {
         {
           model: MasterUser,
           as: "creator",
-          attributes: [ "name", "email"], // choose fields you want
+          attributes: ["name", "email"], // choose fields you want
+        },
+      ],
+    });
+
+    res.status(200).json({
+      success: true,
+      message: `fetch successfully`,
+      data: campaign,
+    });
+  } catch (error) {
+    console.error("Manual flag sync error:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to queue manual flag sync",
+      error: error.message,
+    });
+  }
+};
+exports.getSingleCampaign = async (req, res) => {
+  try {
+    const campaign = await Campaigns.findOne({
+      where: {
+        campaignId: req.params.id,
+      },
+      include: [
+        {
+          model: MasterUser,
+          as: "creator",
+          attributes: ["name", "email"], // choose fields you want
         },
       ],
     });

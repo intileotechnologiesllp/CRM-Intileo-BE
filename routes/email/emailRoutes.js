@@ -3,7 +3,7 @@ const router = express.Router();
 const emailController = require("../../controllers/email/emailController");
 const imapTestController = require("../../controllers/email/imapTestController");
 const { verifyToken } = require("../../middlewares/authMiddleware");
-const { createCampaign, editCampaign, getCampaign, deleteCampaign } = require("../../controllers/email/campaignController");
+const { createCampaign, editCampaign, getCampaign, deleteCampaign, getSingleCampaign } = require("../../controllers/email/campaignController");
 // const validatePrivilege = require("../../middlewares/validatePrivilege");
 
 // Fetch inbox emails
@@ -144,6 +144,7 @@ router.delete("/delete-campaign-template/:id", verifyToken, emailController.dele
 router.post("/create-campaign", verifyToken, createCampaign);
 router.put("/update-campaign/:id", verifyToken, editCampaign);
 router.get("/get-campaign", verifyToken, getCampaign);
+router.get("/get-campaign/:id", verifyToken, getSingleCampaign);
 router.delete("/delete-campaign/:id", verifyToken, deleteCampaign);
 
 router.post("/create-campaign-sender", verifyToken, emailController.createCampaignSender);
