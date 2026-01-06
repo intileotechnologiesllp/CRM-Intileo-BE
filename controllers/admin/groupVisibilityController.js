@@ -325,7 +325,17 @@ exports.getVisibilityGroupsWithId = async (req, res) => {
 // Create a new visibility group
 exports.createVisibilityGroup = async (req, res) => {
   const { GroupVisibility, Pipeline, MasterUser } = req.models;
-  const transaction = await sequelize.transaction();
+
+  // Get the client connection from request (attached by middleware)
+  const clientConnection = req.clientConnection;
+  
+  if (!clientConnection) {
+    return res.status(500).json({
+      message: "No database connection available. Please login again.",
+    });
+  }
+
+  const transaction = await clientConnection.transaction();
   
   try {
     const {
@@ -446,7 +456,17 @@ exports.createVisibilityGroup = async (req, res) => {
 // Update a visibility group
 exports.updateVisibilityGroup = async (req, res) => {
   const { GroupVisibility, Pipeline, MasterUser } = req.models;
-  const transaction = await sequelize.transaction();
+
+  // Get the client connection from request (attached by middleware)
+  const clientConnection = req.clientConnection;
+  
+  if (!clientConnection) {
+    return res.status(500).json({
+      message: "No database connection available. Please login again.",
+    });
+  }
+
+  const transaction = await clientConnection.transaction();
 
   try {
     const { groupId } = req.params;

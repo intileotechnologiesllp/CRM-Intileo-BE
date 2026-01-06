@@ -40,7 +40,7 @@ exports.mergeEntitiesSequelize = ({
   strategy = "FILL_EMPTY",
   reason = null,
   mergedBy,
-  Lead, Deal, Activity, Email, MergeMap, TagMap
+  Lead, Deal, Activity, Email, MergeMap, TagMap, clientConnection
 }) => {
   try {
     console.log("HERE STEP 1")
@@ -53,7 +53,7 @@ exports.mergeEntitiesSequelize = ({
   
     const Model = entityType === "deal" ? Deal : Lead;
     const id = entityType === "deal" ? "dealId" : "leadId";
-    return sequelize.transaction(async (t) => {
+    return clientConnection.transaction(async (t) => {
       // 1) Lock primary row
       const primary = await Model.findOne({
         where: { [id]: primaryId },

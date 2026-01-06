@@ -1664,6 +1664,16 @@ exports.deleteActivity = async (req, res) => {
   const role = req.role;
   const entityType = "activity";
   const { LeadOrganization, LeadPerson, Activity, Lead, Deal, MasterUser, ActivityColumn, LeadFilter, Product, DealProduct, CustomField, CustomFieldValue } = req.models;
+
+  // Get the client connection from request (attached by middleware)
+  const clientConnection = req.clientConnection;
+  
+  if (!clientConnection) {
+    return res.status(500).json({
+      message: "No database connection available. Please login again.",
+    });
+  }
+
   try {
     // Build the where condition based on role
     const whereCondition = { activityId : activityId };
@@ -1685,7 +1695,7 @@ exports.deleteActivity = async (req, res) => {
     }
 
     // Start a transaction
-    const transaction = await sequelize.transaction();
+    const transaction = await clientConnection.transaction();
 
     try {
       // Build where condition for custom field values deletion

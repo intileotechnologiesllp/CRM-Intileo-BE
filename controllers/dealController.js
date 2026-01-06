@@ -15,6 +15,15 @@ exports.createDeal = async (req, res) => {
   const masterUserID = req.adminId;
   const entityType = "deal";
 
+    // Get the client connection from request (attached by middleware)
+  const clientConnection = req.clientConnection;
+  
+  if (!clientConnection) {
+    return res.status(500).json({
+      message: "No database connection available. Please login again.",
+    });
+  }
+
   try {
     if (!customFields) {
       return res.status(400).json({
@@ -23,7 +32,7 @@ exports.createDeal = async (req, res) => {
     }
 
     // Start a transaction
-    const transaction = await sequelize.transaction();
+    const transaction = await clientConnection.transaction();
 
     try {
       // Create the deal in the database first
@@ -403,6 +412,15 @@ exports.updateDeal = async (req, res) => {
   const masterUserID = req.adminId;
   const entityType = "deal";
 
+    // Get the client connection from request (attached by middleware)
+  const clientConnection = req.clientConnection;
+  
+  if (!clientConnection) {
+    return res.status(500).json({
+      message: "No database connection available. Please login again.",
+    });
+  }
+
   try {
     // Check if deal exists
     const deal = await Deal.findOne({
@@ -422,7 +440,7 @@ exports.updateDeal = async (req, res) => {
     }
 
     // Start a transaction
-    const transaction = await sequelize.transaction();
+    const transaction = await clientConnection.transaction();
 
     try {
       const updatedValues = [];
@@ -613,6 +631,15 @@ exports.deleteDeal = async (req, res) => {
   const masterUserID = req.adminId;
   const entityType = "deal";
 
+  // Get the client connection from request (attached by middleware)
+  const clientConnection = req.clientConnection;
+  
+  if (!clientConnection) {
+    return res.status(500).json({
+      message: "No database connection available. Please login again.",
+    });
+  }
+
   try {
     // Check if deal exists
     const deal = await Deal.findOne({
@@ -626,7 +653,7 @@ exports.deleteDeal = async (req, res) => {
     }
 
     // Start a transaction
-    const transaction = await sequelize.transaction();
+    const transaction = await clientConnection.transaction();
 
     try {
       // Delete all custom field values

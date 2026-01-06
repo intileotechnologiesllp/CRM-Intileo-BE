@@ -8211,6 +8211,15 @@ exports.convertBulkLeadsToDeals = async (req, res) => {
     });
   }
 
+  // Get the client connection from request (attached by middleware)
+  const clientConnection = req.clientConnection;
+  
+  if (!clientConnection) {
+    return res.status(500).json({
+      message: "No database connection available. Please login again.",
+    });
+  }
+
   try {
     // Check if user has permission to convert leads
     if (!["admin", "general", "master"].includes(req.role)) {
@@ -8304,7 +8313,7 @@ exports.convertBulkLeadsToDeals = async (req, res) => {
 
     const convertedDeals = [];
     const failedConversions = [];
-    const transaction = await sequelize.transaction();
+    const transaction = await clientConnection.transaction();
 
     try {
       // Process each lead conversion
@@ -9410,6 +9419,16 @@ exports.getLeadLabelsWithStats = async (req, res) => {
 // Excel Import API for Leads
 exports.importLeadsFromExcel = async (req, res) => {
   const { AuditTrail, LeadPerson, Lead, LeadDetail } = req.models;
+
+  // Get the client connection from request (attached by middleware)
+  const clientConnection = req.clientConnection;
+  
+  if (!clientConnection) {
+    return res.status(500).json({
+      message: "No database connection available. Please login again.",
+    });
+  }
+
   try {
     // Use multer middleware to handle file upload
     upload.single('excelFile')(req, res, async (err) => {
@@ -9489,6 +9508,7 @@ exports.importLeadsFromExcel = async (req, res) => {
           LeadPerson,
           Lead,
           LeadDetail,
+          clientConnection
         });
 
         // Clean up uploaded file
@@ -9612,6 +9632,7 @@ async function processLeadImport(data, options) {
     LeadPerson,
     Lead,
     LeadDetail,
+    clientConnection
   } = options;
 
   let successful = 0;
@@ -9637,7 +9658,7 @@ async function processLeadImport(data, options) {
   // Process data in batches
   for (let i = 0; i < dataRows.length; i += batchSize) {
     const batch = dataRows.slice(i, i + batchSize);
-    const transaction = await sequelize.transaction();
+    const transaction = await clientConnection.transaction();
 
     try {
       for (let rowIndex = 0; rowIndex < batch.length; rowIndex++) {

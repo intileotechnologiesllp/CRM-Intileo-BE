@@ -73,6 +73,15 @@ exports.createcurrency = async (req, res) => {
   const { History, AuditTrail, Currency } = req.models;
   const { currency_desc, symbol, decimalPoints = 2, code, isActive = true } = req.body;
 
+  // Get the client connection from request (attached by middleware)
+  const clientConnection = req.clientConnection;
+  
+  if (!clientConnection) {
+    return res.status(500).json({
+      message: "No database connection available. Please login again.",
+    });
+  }
+
   // Validate the request body
   const { error, value } = currencySchema.validate({ 
     currency_desc, 
@@ -113,9 +122,9 @@ exports.createcurrency = async (req, res) => {
 
     // Check if currency with same description already exists
     const existingCurrency = await Currency.findOne({
-      where: sequelize.where(
-        sequelize.fn('LOWER', sequelize.col('currency_desc')),
-        sequelize.fn('LOWER', currency_desc)
+      where: clientConnection.where(
+        clientConnection.fn('LOWER', clientConnection.col('currency_desc')),
+        clientConnection.fn('LOWER', currency_desc)
       )
     });
 
@@ -245,9 +254,9 @@ exports.editcurrency = async (req, res) => {
       const existingCurrency = await Currency.findOne({
         where: {
           [Op.and]: [
-            sequelize.where(
-              sequelize.fn('LOWER', sequelize.col('currency_desc')),
-              sequelize.fn('LOWER', currency_desc)
+            clientConnection.where(
+              clientConnection.fn('LOWER', clientConnection.col('currency_desc')),
+              clientConnection.fn('LOWER', currency_desc)
             ),
             { currencyId: { [Op.ne]: currencyId } }
           ]

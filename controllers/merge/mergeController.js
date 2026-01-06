@@ -3,6 +3,16 @@ const { mergeEntitiesSequelize } = require("./mergeServices");
 
 exports.mergeDealsHandler = async (req, res) => {
   const {Lead, Deal, Activity, Email, MergeMap, TagMap} = req.models;
+    
+  // Get the client connection from request (attached by middleware)
+  const clientConnection = req.clientConnection;
+  
+  if (!clientConnection) {
+    return res.status(500).json({
+      message: "No database connection available. Please login again.",
+    });
+  }
+
   try {
     const primaryId = Number(req.params.primaryId);
     const { secondaryIds, strategy, reason } = req.body;
@@ -14,7 +24,7 @@ exports.mergeDealsHandler = async (req, res) => {
       strategy,
       reason,
       mergedBy: req.user.id,
-      Lead, Deal, Activity, Email, MergeMap, TagMap
+      Lead, Deal, Activity, Email, MergeMap, TagMap, clientConnection
     });
 
     res.json({ success: true, ...result });

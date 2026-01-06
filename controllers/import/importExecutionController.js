@@ -265,6 +265,16 @@ function analyzeColumnMappingEntities(columnMapping) {
  */
 async function processMultiEntityImportInBackground(importRecord, options) {
   const { duplicateHandling, batchSize, continueOnError, entityTypes } = options;
+
+  // Get the client connection from request (attached by middleware)
+  const clientConnection = req.clientConnection;
+  
+  if (!clientConnection) {
+    return res.status(500).json({
+      message: "No database connection available. Please login again.",
+    });
+  }
+
   let transaction;
 
   try {
@@ -298,7 +308,7 @@ async function processMultiEntityImportInBackground(importRecord, options) {
       const batch = fileData.slice(i, i + batchSize);
       
       // Start transaction for this batch
-      transaction = await sequelize.transaction();
+      transaction = await clientConnection.transaction();
 
       try {
         const batchResult = await processBatch(batch, importRecord, duplicateHandling, transaction);
@@ -421,6 +431,16 @@ async function processMultiEntityImportInBackground(importRecord, options) {
  */
 async function processImportInBackground(importRecord, options) {
   const { duplicateHandling, batchSize, continueOnError } = options;
+
+  // Get the client connection from request (attached by middleware)
+  const clientConnection = req.clientConnection;
+  
+  if (!clientConnection) {
+    return res.status(500).json({
+      message: "No database connection available. Please login again.",
+    });
+  }
+
   let transaction;
 
   try {
@@ -442,7 +462,7 @@ async function processImportInBackground(importRecord, options) {
       const batch = fileData.slice(i, i + batchSize);
       
       // Start transaction for this batch
-      transaction = await sequelize.transaction();
+      transaction = await clientConnection.transaction();
 
       try {
         const batchResult = await processBatch(batch, importRecord, duplicateHandling, transaction);

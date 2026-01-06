@@ -1,6 +1,6 @@
 const Card  = require("../../models/insight/cardModel"); // Adjust path as needed
 const { Op, Sequelize } = require("sequelize");
-const {defaultSequelize : sequelize} = require("../../config/db");
+// const {defaultSequelize : sequelize, clientConnections} = require("../../config/db");
 
 exports.createCard = async (req, res) => {
   const {Card} = req.models;
@@ -216,6 +216,16 @@ exports.getCardById = async (req, res) => {
 
 exports.deleteCardFromDashboard = async (req, res) => {
   const {Card} = req.models;
+
+    // Get the client connection from request (attached by middleware)
+  const clientConnection = req.clientConnection;
+  
+  if (!clientConnection) {
+    return res.status(500).json({
+      message: "No database connection available. Please login again.",
+    });
+  }
+
   try {
     const { cardId } = req.params;
     const ownerId = req.adminId;
@@ -241,7 +251,7 @@ exports.deleteCardFromDashboard = async (req, res) => {
 
     // Reorder remaining cards in the same dashboard
     await Card.update(
-      { position: sequelize.literal('position - 1') },
+      { position: clientConnection.literal('position - 1') },
       {
         where: {
           dashboardId: cardDashboardId,
@@ -266,6 +276,16 @@ exports.deleteCardFromDashboard = async (req, res) => {
 
 exports.deleteCard = async (req, res) => {
   const {Card} = req.models;
+
+  // Get the client connection from request (attached by middleware)
+  const clientConnection = req.clientConnection;
+  
+  if (!clientConnection) {
+    return res.status(500).json({
+      message: "No database connection available. Please login again.",
+    });
+  }
+
   try {
     const { dashboardId, uniqueId, type } = req.body;
     const ownerId = req.adminId;
@@ -303,7 +323,7 @@ exports.deleteCard = async (req, res) => {
 
     // Reorder remaining cards in the same dashboard
     await Card.update(
-      { position: sequelize.literal('position - 1') },
+      { position: clientConnections.literal('position - 1') },
       {
         where: {
           dashboardId: cardDashboardId,
@@ -329,6 +349,16 @@ exports.deleteCard = async (req, res) => {
 // Bulk update positions for reordering
 exports.updateCardPositions = async (req, res) => {
   const {Card} = req.models;
+
+    // Get the client connection from request (attached by middleware)
+  const clientConnection = req.clientConnection;
+  
+  if (!clientConnection) {
+    return res.status(500).json({
+      message: "No database connection available. Please login again.",
+    });
+  }
+
   try {
     const { cards } = req.body; // Array of { cardId, position }
     const ownerId = req.adminId;
@@ -341,7 +371,7 @@ exports.updateCardPositions = async (req, res) => {
     }
 
     // Update positions in transaction
-    const transaction = await sequelize.transaction();
+    const transaction = await clientConnection.transaction();
 
     try {
       for (const cardData of cards) {

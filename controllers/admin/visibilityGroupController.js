@@ -320,6 +320,15 @@ exports.createVisibilityGroup = async (req, res) => {
   const masterUserID = req.adminId;
   const createdBy = req.adminId;
 
+  // Get the client connection from request (attached by middleware)
+  const clientConnection = req.clientConnection;
+  
+  if (!clientConnection) {
+    return res.status(500).json({
+      message: "No database connection available. Please login again.",
+    });
+  }
+
   try {
     // Validate required fields
     if (!groupName || groupName.trim().length === 0) {
@@ -380,7 +389,7 @@ exports.createVisibilityGroup = async (req, res) => {
     }
 
     // Start transaction
-    const transaction = await sequelize.transaction();
+    const transaction = await clientConnection.transaction();
 
     try {
       // Create the visibility group

@@ -14,6 +14,15 @@ exports.createOrganization = async (req, res) => {
   const masterUserID = req.adminId;
   const entityType = "organization";
 
+  // Get the client connection from request (attached by middleware)
+  const clientConnection = req.clientConnection;
+  
+  if (!clientConnection) {
+    return res.status(500).json({
+      message: "No database connection available. Please login again.",
+    });
+  }
+
   try {
     if (!customFields) {
       return res.status(400).json({
@@ -22,7 +31,7 @@ exports.createOrganization = async (req, res) => {
     }
 
     // Start a transaction
-    const transaction = await sequelize.transaction();
+    const transaction = await clientConnection.transaction();
 
     try {
       // Create the organization in the database first
@@ -379,6 +388,15 @@ exports.updateOrganization = async (req, res) => {
   const masterUserID = req.adminId;
   const entityType = "organization";
 
+  // Get the client connection from request (attached by middleware)
+  const clientConnection = req.clientConnection;
+  
+  if (!clientConnection) {
+    return res.status(500).json({
+      message: "No database connection available. Please login again.",
+    });
+  }
+
   try {
     // Check if organization exists
     const organization = await LeadOrganization.findOne({
@@ -398,7 +416,7 @@ exports.updateOrganization = async (req, res) => {
     }
 
     // Start a transaction
-    const transaction = await sequelize.transaction();
+    const transaction = await clientConnection.transaction();
 
     try {
       const updatedValues = [];
@@ -555,6 +573,15 @@ exports.deleteOrganization = async (req, res) => {
   const role = req.role;
   const entityType = "organization";
 
+  // Get the client connection from request (attached by middleware)
+  const clientConnection = req.clientConnection;
+  
+  if (!clientConnection) {
+    return res.status(500).json({
+      message: "No database connection available. Please login again.",
+    });
+  }
+
   try {
     // Build the where condition based on role
     const whereCondition = { leadOrganizationId : organizationId };
@@ -576,7 +603,7 @@ exports.deleteOrganization = async (req, res) => {
     }
 
     // Start a transaction
-    const transaction = await sequelize.transaction();
+    const transaction = await clientConnection.transaction();
 
     try {
       // Build where condition for custom field values deletion

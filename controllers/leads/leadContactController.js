@@ -1118,7 +1118,15 @@ exports.bulkUpdateOrganizations = async (req, res) => {
   const { leadOrganizationId, updateData } = req.body; // { leadOrganizationId: [1,2,3], updateData: { field1: value1, ... } }
   const adminId = req.adminId;
   const entityType = "organization";
-  const sequelize = require("../../config/db");
+  
+  // Get the client connection from request (attached by middleware)
+  const clientConnection = req.clientConnection;
+  
+  if (!clientConnection) {
+    return res.status(500).json({
+      message: "No database connection available. Please login again.",
+    });
+  }
 
   if (
     !Array.isArray(leadOrganizationId) ||
@@ -1138,7 +1146,7 @@ exports.bulkUpdateOrganizations = async (req, res) => {
   const orgFields = Object.keys(LeadOrganization.rawAttributes);
   for (const orgId of leadOrganizationId) {
     const fields = { ...updateData };
-    const transaction = await sequelize.transaction();
+    const transaction = await clientConnection.transaction();
     try {
       // Admins can update any organization, others only their own
       let organization;
@@ -1320,7 +1328,15 @@ exports.bulkUpdatePersons = async (req, res) => {
   const { personId, updateData } = req.body; // { personId: [1,2,3], updateData: { field1: value1, ... } }
   const adminId = req.adminId;
   const entityType = "person";
-  const sequelize = require("../../config/db");
+
+  // Get the client connection from request (attached by middleware)
+  const clientConnection = req.clientConnection;
+  
+  if (!clientConnection) {
+    return res.status(500).json({
+      message: "No database connection available. Please login again.",
+    });
+  }
 
   if (
     !Array.isArray(personId) ||
@@ -1339,7 +1355,7 @@ exports.bulkUpdatePersons = async (req, res) => {
   const personFields = Object.keys(LeadPerson.rawAttributes);
   for (const pId of personId) {
     const fields = { ...updateData };
-    const transaction = await sequelize.transaction();
+    const transaction = await clientConnection.transaction();
     try {
       // Admins can update any person, others only their own
       let person;
@@ -8202,7 +8218,17 @@ exports.getPersonsAndOrganizations = async (req, res) => {
 
 exports.deleteOrganization = async (req, res) => {
   const {Activity, Email, Deal, ActivityType, Lead, MasterUser, PersonColumnPreference, OrganizationColumnPreference, LeadPerson : Person, LeadOrganization : Organization, Product, DealProduct, LeadFilter, GroupVisibility, CustomFieldValue, CustomField} = req.models;
-  const transaction = await sequelize.transaction(); // Start a transaction
+
+  // Get the client connection from request (attached by middleware)
+  const clientConnection = req.clientConnection;
+  
+  if (!clientConnection) {
+    return res.status(500).json({
+      message: "No database connection available. Please login again.",
+    });
+  }
+
+  const transaction = await clientConnection.transaction(); // Start a transaction
 
   try {
     const { leadOrganizationId } = req.params;
@@ -8294,7 +8320,17 @@ exports.deleteOrganization = async (req, res) => {
 
 exports.deletePerson = async (req, res) => {
   const {Activity, Email, Deal, ActivityType, Lead, MasterUser, PersonColumnPreference, OrganizationColumnPreference, LeadPerson : Person, LeadOrganization : Organization, Product, DealProduct, LeadFilter, GroupVisibility, CustomFieldValue, CustomField} = req.models;
-  const transaction = await sequelize.transaction(); // Start a transaction
+
+  // Get the client connection from request (attached by middleware)
+  const clientConnection = req.clientConnection;
+  
+  if (!clientConnection) {
+    return res.status(500).json({
+      message: "No database connection available. Please login again.",
+    });
+  }
+
+  const transaction = await clientConnection.transaction(); // Start a transaction
 
   try {
     const { personId } = req.params;
@@ -8391,7 +8427,16 @@ exports.updatePersonOwner = async (req, res) => {
     });
   }
 
-  const transaction = await sequelize.transaction();
+  // Get the client connection from request (attached by middleware)
+  const clientConnection = req.clientConnection;
+  
+  if (!clientConnection) {
+    return res.status(500).json({
+      message: "No database connection available. Please login again.",
+    });
+  }
+
+  const transaction = await clientConnection.transaction();
 
   try {
     // Check if the new owner exists
@@ -8474,7 +8519,17 @@ exports.updateOrganizationOwner = async (req, res) => {
     });
   }
 
-  const transaction = await sequelize.transaction();
+  // Get the client connection from request (attached by middleware)
+  const clientConnection = req.clientConnection;
+  
+  if (!clientConnection) {
+    return res.status(500).json({
+      message: "No database connection available. Please login again.",
+    });
+  }
+
+
+  const transaction = await clientConnection.transaction();
 
   try {
     // Check if the new owner exists
@@ -8557,6 +8612,15 @@ exports.bulkUpdatePersonOwners = async (req, res) => {
     });
   }
 
+  // Get the client connection from request (attached by middleware)
+  const clientConnection = req.clientConnection;
+  
+  if (!clientConnection) {
+    return res.status(500).json({
+      message: "No database connection available. Please login again.",
+    });
+  }
+
   const results = [];
 
   try {
@@ -8570,7 +8634,7 @@ exports.bulkUpdatePersonOwners = async (req, res) => {
     }
 
     for (const personId of personIds) {
-      const transaction = await sequelize.transaction();
+      const transaction = await clientConnection.transaction();
 
       try {
         // Find the person
@@ -8669,6 +8733,15 @@ exports.bulkUpdateOrganizationOwners = async (req, res) => {
     });
   }
 
+  // Get the client connection from request (attached by middleware)
+  const clientConnection = req.clientConnection;
+  
+  if (!clientConnection) {
+    return res.status(500).json({
+      message: "No database connection available. Please login again.",
+    });
+  }
+
   const results = [];
 
   try {
@@ -8682,7 +8755,7 @@ exports.bulkUpdateOrganizationOwners = async (req, res) => {
     }
 
     for (const orgId of leadOrganizationIds) {
-      const transaction = await sequelize.transaction();
+      const transaction = await clientConnection.transaction();
 
       try {
         // Find the organization

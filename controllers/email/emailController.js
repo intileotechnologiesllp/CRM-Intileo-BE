@@ -8206,9 +8206,19 @@ exports.deleteAllEmailsForUser = async (req, res) => {
   const BATCH_SIZE = 1000;
   let totalEmailsDeleted = 0;
   let totalAttachmentsDeleted = 0;
-  const { Email, Attachment } = models;
+  const { Email, Attachment } =  req.models;
+
+  // Get the client connection from request (attached by middleware)
+  const clientConnection = req.clientConnection;
+  
+  if (!clientConnection) {
+    return res.status(500).json({
+      message: "No database connection available. Please login again.",
+    });
+  }
+
   // Use transaction to ensure data consistency
-  const transaction = await Email.sequelize.transaction();
+  const transaction = await clientConnection.transaction();
 
   try {
     // First, get the total count for verification
