@@ -142,4 +142,7 @@ router.put("/update-campaign-template/:id", verifyToken, emailController.updateT
 router.delete("/delete-campaign-template/:id", verifyToken, emailController.deleteCampaignTemplate);
 
 router.post("/create-campaign", verifyToken, createCampaign);
+
+router.post("/create-campaign-sender", verifyToken, emailController.createCampaignSender);
+router.get("/get-campaign-sender", verifyToken, emailController.getAllCampaignSenders);
 module.exports = router;
