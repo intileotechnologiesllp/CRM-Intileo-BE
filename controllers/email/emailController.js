@@ -12213,14 +12213,13 @@ exports.deleteCampaignTemplate = async (req, res) => {
 
 exports.createCampaignSender = async (req,res) =>{
   try{
-    const { senderName, senderEmail, replyToMail,campaignId,createdBy } = req.body;
+    const { senderName, senderEmail, replyToMail,createdBy } = req.body;
 
     await CampaignsSender.create({
       createdBy,
-      campaignId,
-      senderName, 
-      senderEmail,
-      replyToMail
+      name: senderName, 
+      email: senderEmail,
+      replyToMail: replyToMail
     });
 
     res.status(201).json({
