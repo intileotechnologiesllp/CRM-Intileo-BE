@@ -39,6 +39,7 @@ const WebFormTracking = require("./webForm/webFormTrackingModel");
 const Automation = require("./automation/automation");
 const StartupQuestion = require("./startupQuestionModel");
 const LeadCaptureAnalytics = require("./leads/leadCaptureAnalytics");
+const CampaignsSender = require("./email/campaignSenderModel");
 
 // GroupVisibility.belongsTo(Person, { as: "GroupPerson", foreignKey: "personId" });
 // Person.hasMany(GroupVisibility, { foreignKey: "personId", as: "GroupVisibility" });
@@ -386,5 +387,6 @@ module.exports = {
   WebFormTracking,
   Automation,
   StartupQuestion,
-  LeadCaptureAnalytics
+  LeadCaptureAnalytics,
+  CampaignsSender
 };
