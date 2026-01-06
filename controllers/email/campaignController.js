@@ -1,4 +1,5 @@
 const Campaigns = require("../../models/email/campaignsModel");
+const EmailTemplate = require("../../models/email/emailTemplateModel");
 const MasterUser = require("../../models/master/masterUserModel");
 
 // Manual flag sync trigger for specific user
@@ -10,7 +11,7 @@ exports.createCampaign = async (req, res) => {
       subject,
       emailContent,
       sendingTime,
-      engagement,
+      Engagement,
       campaignName,
       createdBy,
     } = req.body;
@@ -22,7 +23,7 @@ exports.createCampaign = async (req, res) => {
       subject,
       emailContent,
       sendingTime,
-      engagement,
+      Engagement,
       createdBy,
     });
 
@@ -130,13 +131,22 @@ exports.getSingleCampaign = async (req, res) => {
           as: "creator",
           attributes: ["name", "email"], // choose fields you want
         },
+        {
+          model: EmailTemplate,
+          as: "template",
+          attributes: ["html", "body"], // choose fields you want
+        },
       ],
     });
 
     res.status(200).json({
       success: true,
       message: `fetch successfully`,
-      data: campaign,
+      data: {
+        campaign,
+        sendingTime: JSON.parse(campaign.sendingTime),
+        Engagement: campaign.Engagement ? JSON.parse(campaign.Engagement) : null,
+      },
     });
   } catch (error) {
     console.error("Manual flag sync error:", error);
