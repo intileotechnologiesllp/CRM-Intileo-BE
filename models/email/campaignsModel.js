@@ -78,4 +78,9 @@ Campaigns.belongsTo(MasterUser, {
   as: "creator"
 });
 
+Campaigns.belongsTo(EmailTemplate, {
+  foreignKey: "emailContent",
+  as: "template"
+});
+
 module.exports = Campaigns;
