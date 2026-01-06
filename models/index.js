@@ -40,6 +40,11 @@ const Automation = require("./automation/automation");
 const StartupQuestion = require("./startupQuestionModel");
 const LeadCaptureAnalytics = require("./leads/leadCaptureAnalytics");
 const CampaignsSender = require("./email/campaignSenderModel");
+const Tenant = require("./chatbot/tenantModel");
+const TenantUser = require("./chatbot/tenantUserModel");
+const ChatbotConfig = require("./chatbot/chatbotConfigModel");
+const KnowledgeBase = require("./chatbot/knowledgeBaseModel");
+const ChatSession = require("./chatbot/chatSessionModel");
 
 // GroupVisibility.belongsTo(Person, { as: "GroupPerson", foreignKey: "personId" });
 // Person.hasMany(GroupVisibility, { foreignKey: "personId", as: "GroupVisibility" });
@@ -388,5 +393,10 @@ module.exports = {
   Automation,
   StartupQuestion,
   LeadCaptureAnalytics,
-  CampaignsSender
+  CampaignsSender,
+  Tenant,
+  TenantUser,
+  ChatbotConfig,
+  KnowledgeBase,
+  ChatSession,
 };

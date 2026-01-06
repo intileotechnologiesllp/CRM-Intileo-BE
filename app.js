@@ -72,6 +72,8 @@ const mergeRoutes = require('./routes/merge/mergeRoute.js'); // Import schedulin
 const webFormRoutes = require('./routes/webForm/webFormRoutes.js'); // Import web form routes
 const webFormPublicRoutes = require('./routes/webForm/webFormPublicRoutes.js'); // Import web form public routes
 const leadAnalyticsRoutes = require("./routes/leads/leadCaptureRoutes.js");
+const chatbotRoutes = require("./routes/chatbot/chatbotRoutes");
+const chatbotWebhookRoutes = require("./routes/chatbot/webhookRoutes");
 
 const { loadPrograms } = require("./utils/programCache");
 const imapIdleManager = require('./services/imapIdleManager'); // IMAP IDLE for real-time sync
@@ -107,7 +109,13 @@ console.log(
 const cors = require("cors");
 app.use(cors());
 // Middleware
-app.use(express.json());
+app.use(
+  express.json({
+    verify: (req, _res, buf) => {
+      req.rawBody = buf;
+    },
+  })
+);
 
 // 🔐 ONLY allow iframe embedding for /embed-form routes (not all routes)
 app.use("/embed-form", (req, res, next) => {
@@ -201,6 +209,8 @@ app.use('/api/public/webforms', webFormPublicRoutes); // Register web form publi
 app.use('/embed-form', webFormPublicRoutes); // Register embed form route (for iframe embedding)
 app.use('/api/merge', mergeRoutes); // Register merge routes
 app.use("/api/lead-analytics", leadAnalyticsRoutes);
+app.use("/api/chatbot", chatbotRoutes);
+app.use("/api/webhooks/chatbot", chatbotWebhookRoutes);
 // Public scheduling link routes (must be registered separately for public access)
 const schedulingLinkController = require('./controllers/meeting/schedulingLinkController');
 app.get('/api/meetings/scheduling/:token', schedulingLinkController.getLinkDetailsPublic);
