@@ -1,6 +1,7 @@
 const { DataTypes } = require("sequelize");
 const sequelize = require("../../config/db");
 const EmailTemplate = require("./emailTemplateModel");
+const MasterUser = require("../master/masterUserModel");
 
 const Campaigns = sequelize.define(
   "Campaigns",
@@ -71,5 +72,10 @@ const Campaigns = sequelize.define(
     ],
   }
 );
+
+Campaigns.belongsTo(MasterUser, {
+  foreignKey: "createdBy",
+  as: "creator"
+});
 
 module.exports = Campaigns;

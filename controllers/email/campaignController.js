@@ -1,4 +1,5 @@
 const Campaigns = require("../../models/email/campaignsModel");
+const MasterUser = require("../../models/master/masterUserModel");
 
 // Manual flag sync trigger for specific user
 exports.createCampaign = async (req, res) => {
@@ -93,12 +94,20 @@ exports.editCampaign = async (req, res) => {
 
 exports.getCampaign = async (req, res) => {
   try {
-    const campaign = await Campaigns.findAll({});
+    const campaign = await Campaigns.findAll({
+      include: [
+        {
+          model: MasterUser,
+          as: "creator",
+          attributes: [ "name", "email"], // choose fields you want
+        },
+      ],
+    });
 
     res.status(200).json({
       success: true,
       message: `fetch successfully`,
-      data:campaign
+      data: campaign,
     });
   } catch (error) {
     console.error("Manual flag sync error:", error);
