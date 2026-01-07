@@ -120,4 +120,7 @@ router.get("/import/template", verifyToken, leadController.getExcelImportTemplat
 
 router.get("/master-user", verifyToken, leadController.getContactPerson);
 
+router.get("/lead-analytics", verifyToken, leadController.getLeadStats);
+
+
 module.exports = router;
