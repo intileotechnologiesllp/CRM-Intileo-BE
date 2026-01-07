@@ -9883,7 +9883,7 @@ exports.getContactPerson = async (req, res) =>{
 
 exports.getLeadStats = async (req, res) => {
   try {
-    const { masterUserID } = req.user || req.query; // adapt based on auth
+    const masterUserID  = req.adminId; // adapt based on auth
 
     if (!masterUserID) {
       return res.status(400).json({
