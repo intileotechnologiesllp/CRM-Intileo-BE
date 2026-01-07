@@ -867,7 +867,7 @@ exports.updateMasterUser = async (req, res) => {
 };
 // Get Profile of Current Master User
 exports.getProfile = async (req, res) => {
-  const { MasterUser, AuditTrail, History } = req.models;
+  const { MasterUser, AuditTrail, History, PermissionSet } = req.models;
   const masterUserID = req.adminId; // Assuming adminId is set in middleware
 
   try {
@@ -900,7 +900,7 @@ exports.getProfile = async (req, res) => {
     let permission = []
     let globalPermission = []
     if(masterUser?.permissionSetId){
-      permission = await permissionSet.findOne({
+      permission = await PermissionSet.findOne({
         where: {
           permissionSetId: masterUser?.permissionSetId
         }
@@ -908,7 +908,7 @@ exports.getProfile = async (req, res) => {
     }
     if(masterUser?.globalPermissionSetId){
       console.log(masterUser?.globalPermissionSetId, "masterUser?.globalPermissionSetId")
-      globalPermission = await permissionSet.findOne({
+      globalPermission = await PermissionSet.findOne({
         where: {
           permissionSetId: masterUser?.globalPermissionSetId
         }

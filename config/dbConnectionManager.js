@@ -131,6 +131,7 @@ const {
 } = require("../models");
 
 const { setupAssociations } = require("./associations");
+const { Organizations } = require("aws-sdk");
 
 class DatabaseConnectionManager {
   static modelInstances = new Map();
@@ -878,6 +879,10 @@ class DatabaseConnectionManager {
       console.log("✅ StartupQuestion table synced");
 
       console.log("✅ All models synced successfully");
+
+
+      await this.ensureDefaultPermissionSet(models);
+      await this.ensureDefaultGroupVisibility(models);
       
     } catch (error) {
       console.error("❌ Error syncing models:", error);
@@ -1007,142 +1012,306 @@ class DatabaseConnectionManager {
     }
   }
   
+
+  static async ensureDefaultGroupVisibility(models) {
+  try {
+    const { GroupVisibility } = models;
+    
+    // Check if default permission set already exists
+    const existingGroupVisibility = await GroupVisibility.findOne({
+      where: { isDefault: 1 }
+    });
+    
+    if (existingGroupVisibility) {
+      console.log("✅ Default GroupVisibility already exists, skipping creation");
+      return existingGroupVisibility;
+    }
+
+    
+    const defaultGroupVisibility = await GroupVisibility.create({
+      groupName: 'Default',
+      description: 'should add by default to all created users',
+      isDefault : 1,
+      isActive : 1,
+      lead : "everyone",
+      deal : "everyone",
+      person : "everyone",
+      Organization : "everyone",
+    });
+    
+    console.log(`✅ Default PermissionSet created with ID: ${defaultGroupVisibility.groupId}`);
+    
+    return defaultGroupVisibility;
+  } catch (error) {
+    console.error("❌ Error creating default permission set:", error);
+    throw error;
+  }
+  }
+
+
+  static async ensureDefaultPermissionSet(models) {
+  try {
+    const { PermissionSet } = models;
+    
+    // Check if default permission set already exists
+    const existingPermissionSet = await PermissionSet.findOne({
+      where: { name: 'Default' }
+    });
+    
+    if (existingPermissionSet) {
+      console.log("✅ Default PermissionSet already exists, skipping creation");
+      return existingPermissionSet;
+    }
+    
+    // Create default permission set
+    const defaultPermissions = {
+      "0": true, "1": true, "2": true, "3": true, "4": true, "5": true,
+      "6": true, "7": true, "8": true, "9": true, "10": true, "11": true,
+      "12": true, "13": true, "14": true, "15": true, "16": true, "17": true,
+      "18": false, "19": true, "20": true, "21": true, "22": true, "23": true,
+      "24": true, "25": true, "26": true, "27": true, "28": true, "29": true,
+      "30": true
+    };
+    
+    const defaultPermissionSet = await PermissionSet.create({
+      name: 'Default',
+      groupName: 'Deal',
+      description: 'should add by default to all created users',
+      permissions: defaultPermissions
+    });
+    
+    console.log(`✅ Default PermissionSet created with ID: ${defaultPermissionSet.permissionSetId}`);
+    
+    return defaultPermissionSet;
+  } catch (error) {
+    console.error("❌ Error creating default permission set:", error);
+    throw error;
+  }
+  }
+
   /**
     * Connect to client database and ensure user exists
     */
-   static async connectAndEnsureUser(email, password) {
-     try {
-       // Step 1: Get client configuration
-       const client = await getClientConfig(email, password);
-       
-       // Step 2: Connect to client's database
-       const clientConnection = await getClientDbConnection(client);
-       
-       // Step 3: Get all models with associations
-       const models = this.getAllModels(clientConnection);
-       
-       // Step 4: Sync all models in correct order
-       await this.syncModels(clientConnection, models);
-       
-       // Step 5: Check if user exists, create if not
-       const userInfo = await this.ensureUserExists(models.MasterUser, email, password, client);
-       
-       return {
-         clientConnection,
-         clientConfig: client,
-         user: userInfo.user,
-         isNewUser: userInfo.isNew,
-         models
-       };
-       
-     } catch (error) {
-       console.error("Error in connectAndEnsureUser:", error);
-       throw error;
-     }
-   }
+  static async connectAndEnsureUser(email, password) {
+  try {
+    // Step 1: Get client configuration
+    const client = await getClientConfig(email, password);
+    
+    // Step 2: Connect to client's database
+    const clientConnection = await getClientDbConnection(client);
+    
+    // Step 3: Get all models with associations
+    const models = this.getAllModels(clientConnection);
+    
+    // Step 4: Sync all models in correct order
+    await this.syncModels(clientConnection, models);
+    
+    // Step 5: Create default permission set if it doesn't exist
+    await this.ensureDefaultPermissionSet(models);
+
+    // Step 6: Create default permission set if it doesn't exist
+    await this.ensureDefaultGroupVisibility(models);
+    
+    // Step 7: Check if user exists, create if not (with permission set assignment)
+    const userInfo = await this.ensureUserExists(
+      models.MasterUser, 
+      models.PermissionSet,
+      models.GroupVisibility,
+      email, 
+      password, 
+      client
+    );
+    
+    return {
+      clientConnection,
+      clientConfig: client,
+      user: userInfo.user,
+      isNewUser: userInfo.isNew,
+      models
+    };
+    
+  } catch (error) {
+    console.error("Error in connectAndEnsureUser:", error);
+    throw error;
+  }
+  }
    
    /**
     * Ensure user exists in MasterUsers table
     */
-   static async ensureUserExists(MasterUserModel, email, password, clientConfig) {
-     try {
-       const user = await MasterUserModel.findOne({ 
-         where: { email } 
-       });
-       
-       if (user) {
-         return {
-           user: user.toJSON(),
-           isNew: false
-         };
-       }
-       
-       const hashedPassword = await bcrypt.hash(password, 10);
-       
-       const newUser = await MasterUserModel.create({
-         name: clientConfig.name || 'Admin',
-         email: email,
-         password: hashedPassword,
-         creatorId: 1,
-         createdBy: 'System',
-         loginType: 'admin',
-         userType: 'admin',
-         mobileNumber: '0000000000',
-         isActive: true
-       });
-       
-       return {
-         user: newUser.toJSON(),
-         isNew: true
-       };
-       
-     } catch (error) {
-       console.error("Error ensuring user exists:", error);
-       throw error;
-     }
-   }
+  static async ensureUserExists(MasterUserModel, PermissionSetModel, GroupVisibilityModel, email, password, clientConfig) {
+  try {
+    const user = await MasterUserModel.findOne({ 
+      where: { email } 
+    });
+    
+    if (user) {
+      return {
+        user: user.toJSON(),
+        isNew: false
+      };
+    }
+    
+    // Get default permission set
+    const defaultPermissionSet = await PermissionSetModel.findOne({
+      where: { name: 'Default' }
+    });
+    
+    if (!defaultPermissionSet) {
+      throw new Error("Default permission set not found");
+    }
+
+    // Get default group visibility
+    const defaultGroupVisibility = await GroupVisibilityModel.findOne({
+      where: { isDefault: 1 }
+    });
+    
+    if (!defaultGroupVisibility) {
+      throw new Error("Default group visibility not found");
+    }
+    
+    const hashedPassword = await bcrypt.hash(password, 10);
+    
+    const newUser = await MasterUserModel.create({
+      name: clientConfig.name || 'Admin',
+      email: email,
+      password: hashedPassword,
+      creatorId: 1,
+      createdBy: 'System',
+      loginType: 'admin',
+      userType: 'admin',
+      mobileNumber: '0000000000',
+      isActive: true,
+      permissionSetId: defaultPermissionSet.permissionSetId,
+      globalPermissionSetId: defaultPermissionSet.permissionSetId,
+      groupId : defaultGroupVisibility.groupId
+    });
+    
+    console.log(`✅ New user created with permissionSetId: ${defaultPermissionSet.permissionSetId}`);
+    
+    return {
+      user: newUser.toJSON(),
+      isNew: true
+    };
+    
+  } catch (error) {
+    console.error("Error ensuring user exists:", error);
+    throw error;
+  }
+  }
    
    /**
     * Verify user in client database (for signin)
     */
   static async verifyUserInDatabase(email, password) {
-   try {
-     const { centralSequelize } = require("./db");
-     
-     // Get client with plan details
-     const [client] = await centralSequelize.query(
-       `SELECT * FROM client WHERE email = ? LIMIT 1`,
-       {
-         replacements: [email],
-         type: centralSequelize.QueryTypes.SELECT
-       }
-     );
-     
-     if (!client) {
-       throw new Error("Client not found");
-     }
-     // Get plan details with features
-     let planDetails = null;
-     if (client.planId) {
-       planDetails = await this.getPlanWithFeatures(client.planId, centralSequelize);
-     }
-     
-     const clientConnection = await getClientDbConnection(client);
-     const models = this.getAllModels(clientConnection);
-     
-     await this.syncModels(clientConnection, models);
-     
-     const user = await models.MasterUser.findOne({ 
-       where: { email } 
-     });
-     
-     if (!user) {
-       throw new Error("User not found in client database");
-     }
-     
-     const creator = await models.MasterUser.findOne({ 
-       where: { masterUserID: user.creatorId } 
-     });
- 
-     const isPasswordValid = await bcrypt.compare(password, user.password);
-     if (!isPasswordValid) {
-       throw new Error("Invalid password");
-     }
-     
-     return {
-       user: user.toJSON(),
-       creator: creator ? creator.toJSON() : null,
-       clientConfig: client,
-       planDetails, // Add plan details here
-       clientConnection,
-       models
-     };
-     
-   } catch (error) {
-     console.error("Error verifying user:", error);
-     throw error;
-   }
- }
+  try {
+    const { centralSequelize } = require("./db");
+    
+    // Get client with plan details
+    const [client] = await centralSequelize.query(
+      `SELECT * FROM client WHERE email = ? LIMIT 1`,
+      {
+        replacements: [email],
+        type: centralSequelize.QueryTypes.SELECT
+      }
+    );
+    
+    if (!client) {
+      throw new Error("Client not found");
+    }
+    
+    // Get plan details with features
+    let planDetails = null;
+    if (client.planId) {
+      planDetails = await this.getPlanWithFeatures(client.planId, centralSequelize);
+    }
+    
+    const clientConnection = await getClientDbConnection(client);
+    const models = this.getAllModels(clientConnection);
+    
+    await this.syncModels(clientConnection, models);
+    
+    // Ensure default permission set exists
+    await this.ensureDefaultPermissionSet(models);
+
+    // Ensure default group visibility exists
+    await this.ensureDefaultGroupVisibility(models);
+    
+    const user = await models.MasterUser.findOne({ 
+      where: { email } 
+    });
+    
+    if (!user) {
+      // User doesn't exist - create new user with default permission set
+      const defaultPermissionSet = await models.PermissionSet.findOne({
+        where: { name: 'Default' }
+      });
+      
+      if (!defaultPermissionSet) {
+        throw new Error("Default permission set not found");
+      }
+
+      // User doesn't exist - create new user with default group visibility
+      const defaultGroupVisibility = await models.GroupVisibilityModel.findOne({
+        where: { isDefault: 1 }
+      });
+      
+      if (!defaultGroupVisibility) {
+        throw new Error("Default group visibility not found");
+      }
+      
+      const hashedPassword = await bcrypt.hash(password, 10);
+      
+      const newUser = await models.MasterUser.create({
+        name: client.name || 'Admin',
+        email: email,
+        password: hashedPassword,
+        creatorId: 1,
+        createdBy: 'System',
+        loginType: 'admin',
+        userType: 'admin',
+        mobileNumber: '0000000000',
+        isActive: true,
+        permissionSetId: defaultPermissionSet.permissionSetId,
+        globalPermissionSetId: defaultPermissionSet.permissionSetId,
+        groupId : defaultGroupVisibility.groupId
+      });
+      
+      console.log(`✅ New user created during signin with permissionSetId: ${defaultPermissionSet.permissionSetId}`);
+      
+      return {
+        user: newUser.toJSON(),
+        creator: null, // First user doesn't have a creator
+        clientConfig: client,
+        planDetails,
+        clientConnection,
+        models
+      };
+    }
+    
+    const creator = await models.MasterUser.findOne({ 
+      where: { masterUserID: user.creatorId } 
+    });
+
+    const isPasswordValid = await bcrypt.compare(password, user.password);
+    if (!isPasswordValid) {
+      throw new Error("Invalid password");
+    }
+    
+    return {
+      user: user.toJSON(),
+      creator: creator ? creator.toJSON() : null,
+      clientConfig: client,
+      planDetails,
+      clientConnection,
+      models
+    };
+    
+  } catch (error) {
+    console.error("Error verifying user:", error);
+    throw error;
+  }
+  }
  
  // New method to get plan with features
  static async getPlanWithFeatures(planId, centralSequelize) {

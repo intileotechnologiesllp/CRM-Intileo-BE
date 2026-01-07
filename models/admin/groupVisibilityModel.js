@@ -54,11 +54,7 @@ const GroupVisibility = sequelizeInstance.define("GroupVisibility", {
   },
   createdBy: {
     type: DataTypes.INTEGER,
-    allowNull: false,
-    references: {
-      model: "MasterUsers",
-      key: "masterUserID",
-    },
+    allowNull: true,
   },
 },
   {
