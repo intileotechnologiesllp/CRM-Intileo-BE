@@ -136,7 +136,7 @@ const createCustomFieldModel = (sequelizeInstance) => {
       type: DataTypes.INTEGER,
       allowNull: false,
       references: {
-        model: "masterusers",
+        model: "MasterUsers",
         key: "masterUserID",
       },
     },

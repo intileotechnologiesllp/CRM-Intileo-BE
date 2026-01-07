@@ -26,7 +26,7 @@ const Lead = sequelizeInstance.define("Lead", {
   personId: {
     type: DataTypes.INTEGER,
     references: {
-      model: "LeadPerson",
+      model: "LeadPersons",
       key: "personId",
     },
     allowNull: true,

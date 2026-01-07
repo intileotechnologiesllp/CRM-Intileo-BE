@@ -11,6 +11,9 @@ const { Op } = require("sequelize");
  */
 const checkPipelineAccess = (requiredPermission = "canView") => {
   return async (req, res, next) => {
+
+    const {GroupMembership, VisibilityGroup, PipelineVisibilityRule, } = req.models;
+
     try {
       const userId = req.adminId;
       const userRole = req.role;
@@ -87,6 +90,7 @@ const checkPipelineAccess = (requiredPermission = "canView") => {
  */
 const applyVisibilityFilter = (entityType) => {
   return async (req, res, next) => {
+    const {GroupMembership, VisibilityGroup, PipelineVisibilityRule, ItemVisibilityRule} = req.models;
     try {
       const userId = req.adminId;
       const userRole = req.role;
@@ -195,6 +199,7 @@ const applyVisibilityFilter = (entityType) => {
  */
 const checkItemPermission = (requiredPermission) => {
   return (req, res, next) => {
+    const {GroupMembership, VisibilityGroup, PipelineVisibilityRule, ItemVisibilityRule} = req.models;
     const userRole = req.role;
 
     // Admin users bypass all restrictions

@@ -50,7 +50,8 @@ const validatePrivilege = (permissionIdOrProgramId, requestType, options = {}) =
   console.log(`📌 Request Type: ${requestType}`);
   console.log(`📌 User ID (req.adminId): ${req.adminId}`);
   console.log(`📌 Options:`, options);
-  
+  const {MasterUser, PermissionSet} = req.models;
+
   try {
     const masterUserID = req.adminId;
     const { checkOwnership = false, ownershipModel = null } = options;
@@ -119,7 +120,7 @@ const validatePrivilege = (permissionIdOrProgramId, requestType, options = {}) =
 
     // Fetch the user's permission set
     console.log(`🔎 Fetching permission set ${permissionSetId}...`);
-    const userPermissionSet = await permissionSet.findByPk(permissionSetId);
+    const userPermissionSet = await PermissionSet.findByPk(permissionSetId);
 
     if (!userPermissionSet || !userPermissionSet.permissions) {
       console.log(`❌ FAILED: Permission set ${permissionSetId} not found or has no permissions`);

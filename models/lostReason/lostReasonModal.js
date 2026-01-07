@@ -13,7 +13,7 @@ const createLostReasonModel = (sequelizeInstance) => {
       isActive: { type: DataTypes.BOOLEAN, defaultValue: true },
     },
     {
-      tableName: "lost_reasons",
+      tableName: "LostReasons",
       timestamps: true,
     }
   );

@@ -12,7 +12,7 @@ const OrganizationNote = sequelizeInstance.define(
     leadOrganizationId: {
       type: DataTypes.INTEGER,
       allowNull: false,
-      references: { model: "LeadOrganization", key: "leadOrganizationId" },
+      references: { model: "LeadOrganizations", key: "leadOrganizationId" },
       onDelete: "CASCADE",
     },
     masterUserID: {

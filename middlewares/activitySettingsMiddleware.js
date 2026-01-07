@@ -8,6 +8,7 @@ const ActivitySetting = require('../models/activity/activitySettingModel'); // Y
  * Usage: Add to routes where activity completion is handled
  */
 module.exports = async function activitySettingsMiddleware(req, res, next) {
+  const {ActivitySetting} = req.models
   try {
     // You may want to scope this by masterUserID or adminId
     const masterUserID = req.masterUserID || req.adminId; // Adjust as needed

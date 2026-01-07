@@ -1,5 +1,5 @@
 const Joi = require("joi");
-const { Op } = require("sequelize");
+const { Op, Sequelize } = require("sequelize");
 const sequelize = require("../../../../config/db");
 const Currency = require("../../../../models/admin/masters/currencyModel");
 const logAuditTrail = require("../../../../utils/auditTrailLogger").logAuditTrail;
@@ -112,19 +112,20 @@ exports.createcurrency = async (req, res) => {
   try {
     // Generate code if not provided
     let finalCode = code;
+    let excludeId;
     if (!finalCode) {
       const baseCode = generateCurrencyCode(currency_desc);
-      finalCode = await ensureUniqueCode(baseCode, Currency);
+      finalCode = await ensureUniqueCode(baseCode, excludeId,  Currency);
     } else {
       // Ensure provided code is unique
-      finalCode = await ensureUniqueCode(code, Currency);
+      finalCode = await ensureUniqueCode(code, excludeId, Currency);
     }
 
     // Check if currency with same description already exists
     const existingCurrency = await Currency.findOne({
-      where: clientConnection.where(
-        clientConnection.fn('LOWER', clientConnection.col('currency_desc')),
-        clientConnection.fn('LOWER', currency_desc)
+      where: Sequelize.where(
+        Sequelize.fn('LOWER', Sequelize.col('currency_desc')),
+        Sequelize.fn('LOWER', currency_desc)
       )
     });
 
@@ -254,9 +255,9 @@ exports.editcurrency = async (req, res) => {
       const existingCurrency = await Currency.findOne({
         where: {
           [Op.and]: [
-            clientConnection.where(
-              clientConnection.fn('LOWER', clientConnection.col('currency_desc')),
-              clientConnection.fn('LOWER', currency_desc)
+             Sequelize.where(
+              Sequelize.fn('LOWER', Sequelize.col('currency_desc')),
+              Sequelize.fn('LOWER', currency_desc)
             ),
             { currencyId: { [Op.ne]: currencyId } }
           ]
@@ -540,22 +541,22 @@ exports.getDifferentCode = async (req, res) => {
     // Generate multiple code options
     const baseCode = generateCurrencyCode(currency_desc);
     const codeOptions = [];
-
+    let excludeId;
     // Option 1: Standard 3-letter code
-    codeOptions.push(await ensureUniqueCode(baseCode, Currency));
+    codeOptions.push(await ensureUniqueCode(baseCode, excludeId, Currency));
 
     // Option 2: First 2 letters + first letter of second word
     const words = currency_desc.split(' ');
     if (words.length > 1) {
       const altCode = (words[0].substring(0, 2) + words[1].substring(0, 1)).toUpperCase();
-      codeOptions.push(await ensureUniqueCode(altCode, Currency));
+      codeOptions.push(await ensureUniqueCode(altCode, excludeId, Currency));
     }
 
     // Option 3: Random 3-letter combination from currency description
     const letters = currency_desc.replace(/[^a-zA-Z]/g, '').toUpperCase();
     if (letters.length >= 3) {
       const randomCode = letters[0] + letters[Math.floor(letters.length/2)] + letters[letters.length-1];
-      codeOptions.push(await ensureUniqueCode(randomCode, Currency));
+      codeOptions.push(await ensureUniqueCode(randomCode, excludeId, Currency));
     }
 
     // Remove duplicates
