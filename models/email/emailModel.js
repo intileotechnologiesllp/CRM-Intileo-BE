@@ -184,7 +184,4 @@ const Email = sequelizeInstance.define(
 return Email
 }
 
-// Email.hasMany(Attachment, { foreignKey: "emailID", as: "attachments" });
-// Attachment.belongsTo(Email, { foreignKey: "emailID" });
-
 module.exports = createEmailModel;

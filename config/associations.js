@@ -7,6 +7,32 @@ const setupAssociations = (models) => {
   const { MasterUser, AuditTrail, History, LoginHistory, RecentLoginHistory, Admin, CustomField, CustomFieldValue, PermissionSet, RecentSearch, UserInterfacePreference, Country, Currency, Department, Designation, Label, Organization, Program, Region, Scope, Sectoralscope, Status, GroupVisibility, ItemVisibilityRule, GroupMembership, VisibilityGroup, Pipeline, PipelineStage, PipelineVisibilityRule, LeadColumn, LeadOrganization, OrganizationColumnPreference, OrganizationFile, OrganizationNote, OrganizationSidebarPreference, LeadPerson, PersonColumnPreference, PersonFile, PersonNote, PersonSidebarPreference, Lead, LeadNote, LeadFilter, LeadDetail, LeadColumnPreference, EntityFile, Dashboard, Card, Goal, ReportFolder, Report, ImportData, UserGoogleToken, UserFavorite, Email, Attachment, DefaultEmail, Template, UserCredential, DeviceActivity, LostReason, LostReasonSetting, Deal, DealStageHistory, DealNote, DealDetail, DealParticipant, DealFile, DealColumn, ContactChangeLog, ContactSyncHistory, ContactSyncConfig, ContactSyncMapping, CompanySetting, Activity, ActivityColumn, ActivitySetting, ActivityType, Meeting, SchedulingLink, MiscSetting, Notification, NotificationPreference, PushSubscription, MasterUserPrivileges, Product, ProductVariation, DealProduct, ProductColumn } = models;
   
 
+Region.belongsTo(Country, { foreignKey: "countryId", as: "country" });
+Country.hasMany(Region, { foreignKey: "countryId", as: "regions" });
+
+
+DealParticipant.belongsTo(Deal, { foreignKey: "dealId", as: "Deal" });
+DealParticipant.belongsTo(LeadPerson, { foreignKey: "personId", as: "Person" });
+DealParticipant.belongsTo(LeadOrganization, { foreignKey: "leadOrganizationId", as: "Organization" });
+
+
+DealDetail.belongsTo(Deal, { foreignKey: "dealId", as: "Deal" });
+Deal.hasOne(DealDetail, { foreignKey: "dealId", as: "details" });
+
+
+DealStageHistory.belongsTo(Deal, { foreignKey: "dealId", as: "Deal" });
+DealNote.belongsTo(Deal, { foreignKey: "dealId", as: "Deal" });
+DealNote.belongsTo(MasterUser, { foreignKey: "createdBy", as: "Author" });
+EntityFile.belongsTo(MasterUser, { foreignKey: 'uploadedBy', as: 'uploader' });
+
+
+OrganizationFile.belongsTo(LeadOrganization, { foreignKey: 'leadOrganizationId', as: 'organization' });
+OrganizationFile.belongsTo(MasterUser, { foreignKey: 'uploadedBy', as: 'uploader' });
+
+
+PersonFile.belongsTo(LeadPerson, { foreignKey: 'personId', as: 'person' });
+PersonFile.belongsTo(MasterUser, { foreignKey: 'uploadedBy', as: 'uploader' });
+
 
 GroupVisibility.belongsTo(LeadPerson, { as: "GroupPerson", foreignKey: "personId" });
 LeadPerson.hasMany(GroupVisibility, { foreignKey: "personId", as: "GroupVisibility" });
@@ -27,6 +53,46 @@ Deal.hasMany(GroupVisibility, { foreignKey: "dealId", as: "GroupVisibility" });
 GroupVisibility.belongsTo(Pipeline, { as: "GroupPipeline", foreignKey: "pipelineId" });
 Pipeline.hasMany(GroupVisibility, { foreignKey: "pipelineId", as: "GroupVisibility" });
 
+MasterUserPrivileges.belongsTo(MasterUser, {
+  foreignKey: "masterUserID",
+  as: "privileges",
+});
+
+MasterUser.hasOne(MasterUserPrivileges, {
+  foreignKey: "masterUserID",
+  as: "privileges",
+});
+
+Meeting.belongsTo(Activity, {
+  foreignKey: "activityId",
+  as: "activity",
+});
+
+Activity.hasOne(Meeting, {
+  foreignKey: "activityId",
+  as: "meeting",
+});
+
+Meeting.belongsTo(MasterUser, {
+  foreignKey: "masterUserID",
+  as: "owner",
+});
+
+Meeting.belongsTo(MasterUser, {
+  foreignKey: "cancelledBy",
+  as: "cancelledByUser",
+});
+
+
+SchedulingLink.belongsTo(MasterUser, {
+  foreignKey: "masterUserID",
+  as: "owner",
+});
+
+MasterUser.hasMany(SchedulingLink, {
+  foreignKey: "masterUserID",
+  as: "schedulingLinks",
+});
 
 // VisibilityGroup associations
 VisibilityGroup.hasMany(GroupMembership, {
@@ -222,6 +288,10 @@ Lead.hasMany(Email, { foreignKey: "leadId", as: "Emails" });
 // // Email-Label associations
 Email.belongsTo(Label, { foreignKey: "labelId", as: "Label" });
 Label.hasMany(Email, { foreignKey: "labelId", as: "Emails" });
+
+// // Email-Attachment associations
+Email.hasMany(Attachment, { foreignKey: "emailID", as: "attachments" });
+Attachment.belongsTo(Email, { foreignKey: "emailID" });
 
 
 // // Ensure Deal has the inverse belongsTo associations so includes work correctly
@@ -424,6 +494,32 @@ Product.belongsTo(MasterUser, {
 MasterUser.hasMany(Product, {
   foreignKey: "ownerId",
   as: "masterproduct",
+});
+
+
+DealProduct.belongsTo(Deal, {
+  foreignKey: "dealId",
+  as: "deal",
+});
+
+DealProduct.belongsTo(Product, {
+  foreignKey: "productId",
+  as: "product",
+});
+
+DealProduct.belongsTo(ProductVariation, {
+  foreignKey: "variationId",
+  as: "variation",
+});
+
+Deal.hasMany(DealProduct, {
+  foreignKey: "dealId",
+  as: "dealProducts",
+});
+
+Product.hasMany(DealProduct, {
+  foreignKey: "productId",
+  as: "dealProducts",
 });
 
 console.log("✅ Associations set up successfully");

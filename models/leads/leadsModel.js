@@ -253,7 +253,12 @@ const Lead = sequelizeInstance.define("Lead", {
     type: DataTypes.STRING,
     allowNull: true, // Visible group for the lead
   },
-});
+},
+{
+  tableName: "Leads",
+  timestamps: true,
+}
+);
 return Lead
 }
 // 

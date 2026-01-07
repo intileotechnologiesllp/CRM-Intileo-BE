@@ -45,6 +45,7 @@ const EmailTemplate = sequelizeInstance.define(
     },
   },
   {
+    tableName: "EmailTemplates",
     indexes: [
       {
         fields: ["templateId"], // Composite unique index

@@ -1,11 +1,13 @@
-const { google } = require('googleapis');
+const { google } = require("googleapis");
 
 // Start Google OAuth flow for calendar sync
 exports.startGoogleOAuth = async (req, res) => {
   const { email } = req.body;
   const masterUserID = req.body.masterUserID || req.adminId;
   if (!email || !masterUserID) {
-    return res.status(400).json({ message: 'Email and masterUserID are required.' });
+    return res
+      .status(400)
+      .json({ message: "Email and masterUserID are required." });
   }
   const oauth2Client = new google.auth.OAuth2(
     process.env.GOOGLE_CLIENT_ID,
@@ -13,21 +15,21 @@ exports.startGoogleOAuth = async (req, res) => {
     process.env.GOOGLE_REDIRECT_URI // e.g. https://yourdomain.com/api/master-user/google-auth/callback
   );
   const scopes = [
-    'https://www.googleapis.com/auth/calendar',
-    'https://www.googleapis.com/auth/userinfo.email'
+    "https://www.googleapis.com/auth/calendar",
+    "https://www.googleapis.com/auth/userinfo.email",
   ];
   const url = oauth2Client.generateAuthUrl({
-    access_type: 'offline',
+    access_type: "offline",
     scope: scopes,
-    prompt: 'consent',
-    state: JSON.stringify({ email, masterUserID })
+    prompt: "consent",
+    state: JSON.stringify({ email, masterUserID }),
   });
   res.json({ url });
 };
 
 // Handle Google OAuth callback and save token
 exports.handleGoogleOAuthCallback = async (req, res) => {
-  const {MasterUser} = req.models
+  const { MasterUser } = req.models;
   const code = req.query.code;
   let state = req.query.state;
   let email, masterUserID;
@@ -38,10 +40,12 @@ exports.handleGoogleOAuthCallback = async (req, res) => {
       masterUserID = parsed.masterUserID || req.adminId;
     }
   } catch (err) {
-    return res.status(400).json({ message: 'Invalid state parameter.' });
+    return res.status(400).json({ message: "Invalid state parameter." });
   }
   if (!code || !email || !masterUserID) {
-    return res.status(400).json({ message: 'Missing code, email, or masterUserID.' });
+    return res
+      .status(400)
+      .json({ message: "Missing code, email, or masterUserID." });
   }
   const oauth2Client = new google.auth.OAuth2(
     process.env.GOOGLE_CLIENT_ID,
@@ -55,10 +59,10 @@ exports.handleGoogleOAuthCallback = async (req, res) => {
       { googleOAuthToken: JSON.stringify(tokens) },
       { where: { masterUserID, email } }
     );
-    res.json({ message: 'Google Calendar connected successfully.' });
+    res.json({ message: "Google Calendar connected successfully." });
   } catch (err) {
-    console.error('OAuth error:', err);
-    res.status(500).json({ message: 'Failed to connect Google Calendar.' });
+    console.error("OAuth error:", err);
+    res.status(500).json({ message: "Failed to connect Google Calendar." });
   }
 };
 const MasterUser = require("../../models/master/masterUserModel");
@@ -73,14 +77,21 @@ const { Op } = require("sequelize");
 const { log } = require("console");
 const Program = require("../../models/admin/masters/programModel");
 const MasterUserPrivileges = require("../../models/privileges/masterUserPrivilegesModel"); // Import the MasterUserPrivileges model
-const { permissionSet } = require('../../models');
-const GroupVisibility = require('../../models/admin/groupVisibilityModel');
+const { permissionSet } = require("../../models");
+const GroupVisibility = require("../../models/admin/groupVisibilityModel");
+const axios = require("axios");
 // const path = require("path");
-
 
 // Create a Master User
 exports.createMasterUser = async (req, res) => {
-  const { MasterUser, AuditTrail, History, Program, MasterUserPrivileges, GroupVisibility } = req.models;
+  const {
+    MasterUser,
+    AuditTrail,
+    History,
+    Program,
+    MasterUserPrivileges,
+    GroupVisibility,
+  } = req.models;
   const {
     name,
     email,
@@ -127,7 +138,7 @@ exports.createMasterUser = async (req, res) => {
       } else {
         message = "Email, mobile number, or name already exists";
       }
-      
+
       await logAuditTrail(
         AuditTrail,
         PROGRAMS.MASTER_USER_MANAGEMENT,
@@ -136,65 +147,70 @@ exports.createMasterUser = async (req, res) => {
         message,
         req.adminId
       );
-      
+
       return res.status(400).json({ message });
     }
 
-     // Step 1: Call third-party API to create client
-        const apiKey = req.api_key; // API key from token (you'll need to set this in middleware)
-        
-        if (!apiKey) {
-          return res.status(400).json({ message: "API key not found in token" });
+    // Step 1: Call third-party API to create client
+    const apiKey = req.api_key; // API key from token (you'll need to set this in middleware)
+
+    if (!apiKey) {
+      return res.status(400).json({ message: "API key not found in token" });
+    }
+
+    // Prepare data for third-party API
+    const thirdPartyData = {
+      name: name,
+      email: email,
+      password: password,
+      phone: mobileNumber,
+      userType: userType === "admin" ? "ADMIN" : "USER", // Map to third-party's format
+      isActive: status !== "inactive", // Map status to isActive
+    };
+
+    // Call third-party API
+    let thirdPartyResponse;
+    try {
+      thirdPartyResponse = await axios.post(
+        `${process.env.FRONTEND_ADMIN_URL}/api/v1/public/clients/create-client`,
+        thirdPartyData,
+        {
+          headers: {
+            "x-api-key": apiKey,
+            "Content-Type": "application/json",
+          },
         }
-    
-        // Prepare data for third-party API
-        const thirdPartyData = {
-          name: name,
-          email: email,
-          password: password,
-          phone: mobileNumber,
-          userType: userType === "admin" ? "ADMIN" : "USER", // Map to third-party's format
-          isActive: status !== "inactive" // Map status to isActive
-        };
-    
-        // Call third-party API
-        let thirdPartyResponse;
-        try {
-          thirdPartyResponse = await axios.post(
-            `${process.env.FRONTEND_ADMIN_URL}/api/v1/public/clients/create-client`,
-            thirdPartyData,
-            {
-              headers: {
-                "x-api-key": apiKey,
-                "Content-Type": "application/json"
-              }
-            }
-          );
-        } catch (thirdPartyError) {
-          console.error("Third-party API error:", thirdPartyError.response?.data || thirdPartyError.message);
-          
-          // Return appropriate error message
-          let errorMessage = "Failed to create client in third-party system";
-          if (thirdPartyError.response?.status === 429) {
-            errorMessage = "Rate limit exceeded. Please try again later.";
-          } else if (thirdPartyError.response?.data?.message) {
-            errorMessage = thirdPartyError.response.data.message;
-          }
-          
-          return res.status(thirdPartyError.response?.status || 500).json({ 
-            message: errorMessage 
-          });
-        }
-    
-        // Check if third-party API was successful
-        if (!thirdPartyResponse.data.success) {
-          return res.status(thirdPartyResponse.status || 400).json({
-            message: thirdPartyResponse.data.message || "Failed to create client in third-party system"
-          });
-        }
-    
-        // Extract data from third-party response
-        const thirdPartyClient = thirdPartyResponse.data.data;
+      );
+    } catch (thirdPartyError) {
+      console.error(
+        "Third-party API error:",
+        thirdPartyError.response?.data || thirdPartyError.message
+      );
+
+      // Return appropriate error message
+      let errorMessage = "Failed to create client in third-party system";
+      if (thirdPartyError.response?.status === 429) {
+        errorMessage = "Rate limit exceeded. Please try again later.";
+      } else if (thirdPartyError.response?.data?.message) {
+        errorMessage = thirdPartyError.response.data.message;
+      }
+
+      return res.status(thirdPartyError.response?.status || 500).json({
+        message: errorMessage,
+      });
+    }
+
+    // Check if third-party API was successful
+    if (!thirdPartyResponse.data.success) {
+      return res.status(thirdPartyResponse.status || 400).json({
+        message:
+          thirdPartyResponse.data.message ||
+          "Failed to create client in third-party system",
+      });
+    }
+
+    // Extract data from third-party response
+    const thirdPartyClient = thirdPartyResponse.data.data;
 
     let resetToken = null; // Initialize reset token
     let resetTokenExpiry = null; // Initialize reset token expiry
@@ -204,6 +220,12 @@ exports.createMasterUser = async (req, res) => {
       resetToken = crypto.randomBytes(32).toString("hex");
       resetTokenExpiry = Date.now() + 5 * 60 * 1000; // Token valid for 5 minutes
     }
+
+    const group = await GroupVisibility.findOne({
+      where: {
+        isDefault: true,
+      },
+    });
 
     // Create a new master user
     const masterUser = await MasterUser.create({
@@ -220,34 +242,9 @@ exports.createMasterUser = async (req, res) => {
       createdBy: adminName,
       userType: userType === "admin" ? "admin" : "general", // Set userType based on the userType
       status, // Use status from req.body or default to "active"
+      groupId: group.groupId,
     });
-    // Fetch all programs from the Program table
-    const programs = await Program.findAll({
-      attributes: ["programId", "program_desc"],
-    });
-    if (!programs || programs.length === 0) {
-      return res.status(404).json({
-        message: "No programs found in the system.",
-      });
-    }
-    // Generate default permissions for all programs
-    const defaultPermissions = programs.map((program) => ({
-      programId: program.programId,
-      program_desc: program.program_desc,
-      view: false,
-      edit: false,
-      delete: false,
-      create: false,
-    }));
 
-    // Create default privileges for the new master user
-    await MasterUserPrivileges.create({
-      masterUserID: masterUser.masterUserID,
-      permissions: defaultPermissions,
-      createdById: adminId,
-      createdBy: adminName,
-      mode: "create",
-    });
     // If the userType is "general", send a password reset email
     if (userType === "general") {
       const resetLink = `${process.env.FRONTEND_URL}/api/master-user/reset-password?token=${resetToken}`;
@@ -329,7 +326,15 @@ exports.createMasterUser = async (req, res) => {
 
 // Get All Master Users
 exports.getMasterUsers = async (req, res) => {
-  const { MasterUser, AuditTrail, History, Program, MasterUserPrivileges, GroupVisibility, LoginHistory } = req.models;
+  const {
+    MasterUser,
+    AuditTrail,
+    History,
+    Program,
+    MasterUserPrivileges,
+    GroupVisibility,
+    LoginHistory,
+  } = req.models;
   const {
     page = 1,
     limit = 100,
@@ -340,7 +345,6 @@ exports.getMasterUsers = async (req, res) => {
   } = req.query;
 
   try {
-
     // Calculate offset for pagination
     const offset = (page - 1) * limit;
 
@@ -377,9 +381,9 @@ exports.getMasterUsers = async (req, res) => {
 
     // Get all active and deactive users separately (without pagination)
     const allActiveUsers = await MasterUser.findAll({
-      where: { 
+      where: {
         ...whereClause,
-        isActive: true // Use isActive column instead of status
+        isActive: true, // Use isActive column instead of status
       },
       include: [
         {
@@ -387,15 +391,15 @@ exports.getMasterUsers = async (req, res) => {
           as: "privileges",
           required: false,
         },
-         { model: GroupVisibility, as: "groupVisibility", required: false },
+        { model: GroupVisibility, as: "groupVisibility", required: false },
       ],
-      order: [['name', 'ASC']]
+      order: [["name", "ASC"]],
     });
 
     const allInactiveUsers = await MasterUser.findAll({
-      where: { 
+      where: {
         ...whereClause,
-        isActive: false // Use isActive column instead of status
+        isActive: false, // Use isActive column instead of status
       },
       include: [
         {
@@ -403,35 +407,37 @@ exports.getMasterUsers = async (req, res) => {
           as: "privileges",
           required: false,
         },
-        { model: GroupVisibility, as: "groupVisibility", required: false }
+        { model: GroupVisibility, as: "groupVisibility", required: false },
       ],
-      order: [['name', 'ASC']]
+      order: [["name", "ASC"]],
     });
 
     // Function to get last login data for a user
-    const getLastLoginData = async (userId) => {
+    const getLastLoginData = async (userId, LoginHistory) => {
       try {
         const lastLogin = await LoginHistory.findOne({
           where: { userId: userId },
-          order: [['loginTime', 'DESC']],
-          limit: 1
+          order: [["loginTime", "DESC"]],
+          limit: 1,
         });
-        return lastLogin ? {
-          lastLoginTime: lastLogin.loginTime,
-          lastLoginIpAddress: lastLogin.ipAddress,
-          lastLoginDuration: lastLogin.duration,
-          lastLogoutTime: lastLogin.logoutTime,
-          lastLoginLocation: {
-            latitude: lastLogin.latitude,
-            longitude: lastLogin.longitude
-          }
-        } : {
-          lastLoginTime: null,
-          lastLoginIpAddress: null,
-          lastLoginDuration: null,
-          lastLogoutTime: null,
-          lastLoginLocation: null
-        };
+        return lastLogin
+          ? {
+              lastLoginTime: lastLogin.loginTime,
+              lastLoginIpAddress: lastLogin.ipAddress,
+              lastLoginDuration: lastLogin.duration,
+              lastLogoutTime: lastLogin.logoutTime,
+              lastLoginLocation: {
+                latitude: lastLogin.latitude,
+                longitude: lastLogin.longitude,
+              },
+            }
+          : {
+              lastLoginTime: null,
+              lastLoginIpAddress: null,
+              lastLoginDuration: null,
+              lastLogoutTime: null,
+              lastLoginLocation: null,
+            };
       } catch (error) {
         console.error(`Error fetching last login for user ${userId}:`, error);
         return {
@@ -439,7 +445,7 @@ exports.getMasterUsers = async (req, res) => {
           lastLoginIpAddress: null,
           lastLoginDuration: null,
           lastLogoutTime: null,
-          lastLoginLocation: null
+          lastLoginLocation: null,
         };
       }
     };
@@ -456,33 +462,42 @@ exports.getMasterUsers = async (req, res) => {
           }
         : null;
 
-      const lastLoginData = await getLastLoginData(user.masterUserID);
+      const lastLoginData = await getLastLoginData(
+        user.masterUserID,
+        LoginHistory
+      );
 
       // Fetch permission sets if they exist
       let permission = null;
       let globalPermission = null;
-      
+
       if (user.permissionSetId) {
         try {
           permission = await permissionSet.findOne({
             where: {
-              permissionSetId: user.permissionSetId
-            }
+              permissionSetId: user.permissionSetId,
+            },
           });
         } catch (error) {
-          console.error(`Error fetching permission set for user ${user.masterUserID}:`, error);
+          console.error(
+            `Error fetching permission set for user ${user.masterUserID}:`,
+            error
+          );
         }
       }
-      
+
       if (user.globalPermissionSetId) {
         try {
           globalPermission = await permissionSet.findOne({
             where: {
-              permissionSetId: user.globalPermissionSetId
-            }
+              permissionSetId: user.globalPermissionSetId,
+            },
           });
         } catch (error) {
-          console.error(`Error fetching global permission set for user ${user.masterUserID}:`, error);
+          console.error(
+            `Error fetching global permission set for user ${user.masterUserID}:`,
+            error
+          );
         }
       }
 
@@ -491,7 +506,7 @@ exports.getMasterUsers = async (req, res) => {
         privileges,
         permission,
         globalPermission,
-        ...lastLoginData
+        ...lastLoginData,
       };
     };
 
@@ -499,10 +514,14 @@ exports.getMasterUsers = async (req, res) => {
     const mappedUsers = await Promise.all(rows.map(formatUserData));
 
     // Format active users with last login data
-    const formattedActiveUsers = await Promise.all(allActiveUsers.map(formatUserData));
+    const formattedActiveUsers = await Promise.all(
+      allActiveUsers.map(formatUserData)
+    );
 
     // Format inactive users with last login data
-    const formattedInactiveUsers = await Promise.all(allInactiveUsers.map(formatUserData));
+    const formattedInactiveUsers = await Promise.all(
+      allInactiveUsers.map(formatUserData)
+    );
 
     // Return paginated response with separate arrays
     res.status(200).json({
@@ -513,13 +532,13 @@ exports.getMasterUsers = async (req, res) => {
       counts: {
         active: allActiveUsers.length,
         inactive: allInactiveUsers.length,
-        total: allActiveUsers.length + allInactiveUsers.length
+        total: allActiveUsers.length + allInactiveUsers.length,
       },
       // Original paginated response (unchanged)
       masterUsers: mappedUsers,
       // Separate arrays for active and inactive users based on isActive column
       activeUsers: formattedActiveUsers,
-      inactiveUsers: formattedInactiveUsers
+      inactiveUsers: formattedInactiveUsers,
     });
   } catch (error) {
     console.error("Error fetching master users:", error);
@@ -527,20 +546,20 @@ exports.getMasterUsers = async (req, res) => {
   }
 };
 
-exports.updateMasterGroupId = async (req, res) =>{
+exports.updateMasterGroupId = async (req, res) => {
   const { MasterUser } = req.models;
-  try{
+  try {
     const { userId, newGroupId } = req.body;
     await MasterUser.update(
       { groupId: newGroupId },
       { where: { masterUserID: userId } }
     );
 
-  res.status(200).json({ message: "Group ID updated successfully" });
-  }catch(e){
+    res.status(200).json({ message: "Group ID updated successfully" });
+  } catch (e) {
     res.status(500).json({ message: "Internal server error" });
   }
-}
+};
 
 // Delete a Master User
 exports.deleteMasterUser = async (req, res) => {
@@ -622,11 +641,14 @@ exports.resetPassword = async (req, res) => {
       resetTokenExpiry: null,
     });
 
-    await axios.post(`${process.env.FRONTEND_ADMIN_URL}/api/v1/auth/reset-client-password`, {
-      email: user.email,
-      password: newPassword
-    })
-    
+    await axios.post(
+      `${process.env.FRONTEND_ADMIN_URL}/api/v1/auth/reset-client-password`,
+      {
+        email: user.email,
+        password: newPassword,
+      }
+    );
+
     res.status(200).json({ message: "Password reset successfully" });
   } catch (error) {
     console.error("Error resetting password:", error);
@@ -886,10 +908,10 @@ exports.getProfile = async (req, res) => {
         "email",
         "loginType",
         "userType", // Include userType in the response
-        "createdAt",   // Add this line
+        "createdAt", // Add this line
         "updatedAt",
         "permissionSetId",
-        "globalPermissionSetId"
+        "globalPermissionSetId",
       ],
     });
 
@@ -897,28 +919,31 @@ exports.getProfile = async (req, res) => {
       return res.status(404).json({ message: "Profile not found." });
     }
 
-    let permission = []
-    let globalPermission = []
-    if(masterUser?.permissionSetId){
+    let permission = [];
+    let globalPermission = [];
+    if (masterUser?.permissionSetId) {
       permission = await PermissionSet.findOne({
         where: {
-          permissionSetId: masterUser?.permissionSetId
-        }
-      })
+          permissionSetId: masterUser?.permissionSetId,
+        },
+      });
     }
-    if(masterUser?.globalPermissionSetId){
-      console.log(masterUser?.globalPermissionSetId, "masterUser?.globalPermissionSetId")
+    if (masterUser?.globalPermissionSetId) {
+      console.log(
+        masterUser?.globalPermissionSetId,
+        "masterUser?.globalPermissionSetId"
+      );
       globalPermission = await PermissionSet.findOne({
         where: {
-          permissionSetId: masterUser?.globalPermissionSetId
-        }
-      })
+          permissionSetId: masterUser?.globalPermissionSetId,
+        },
+      });
     }
     res.status(200).json({
       message: "Profile fetched successfully.",
       profile: masterUser,
       permission: permission,
-      globalPermission: globalPermission
+      globalPermission: globalPermission,
     });
   } catch (error) {
     console.error("Error fetching profile:", error);
@@ -983,36 +1008,51 @@ exports.updateProfile = async (req, res) => {
 exports.setMasterUserPermissions = async (req, res) => {
   const { MasterUser, AuditTrail, History } = req.models;
   // const masterUserID = req.adminId; // Get from authenticated user context
-  const { permissionSetId, masterUserID, globalPermissionSetId, groupId } = req.body;
+  const { permissionSetId, masterUserID, globalPermissionSetId, groupId } =
+    req.body;
 
   try {
-    console.log(`[setMasterUserPermissions] 🔍 Setting permissions for authenticated user: ${masterUserID}`);
-    console.log(`[setMasterUserPermissions] 📝 Request body:`, { permissionSetId, globalPermissionSetId });
+    console.log(
+      `[setMasterUserPermissions] 🔍 Setting permissions for authenticated user: ${masterUserID}`
+    );
+    console.log(`[setMasterUserPermissions] 📝 Request body:`, {
+      permissionSetId,
+      globalPermissionSetId,
+    });
 
     // Validate that masterUserID exists (should always exist if user is authenticated)
     if (!masterUserID) {
       return res.status(401).json({
-        message: "User not authenticated. Please login again."
+        message: "User not authenticated. Please login again.",
       });
     }
 
     // Validate that at least one permission set ID is provided
     if (permissionSetId === undefined && globalPermissionSetId === undefined) {
       return res.status(400).json({
-        message: "At least one permission set ID (permissionSetId or globalPermissionSetId) is required in the request body."
+        message:
+          "At least one permission set ID (permissionSetId or globalPermissionSetId) is required in the request body.",
       });
     }
 
     // Find the master user
-    console.log(`[setMasterUserPermissions] 🔍 Looking for masterUserID: ${masterUserID}`);
-    
+    console.log(
+      `[setMasterUserPermissions] 🔍 Looking for masterUserID: ${masterUserID}`
+    );
+
     const masterUser = await MasterUser.findOne({
-      where: { masterUserID: masterUserID }
+      where: { masterUserID: masterUserID },
     });
 
-    console.log(`[setMasterUserPermissions] 👤 Found user:`, masterUser ? 
-      { id: masterUser.masterUserID, name: masterUser.name, email: masterUser.email } : 
-      'User not found'
+    console.log(
+      `[setMasterUserPermissions] 👤 Found user:`,
+      masterUser
+        ? {
+            id: masterUser.masterUserID,
+            name: masterUser.name,
+            email: masterUser.email,
+          }
+        : "User not found"
     );
 
     if (!masterUser) {
@@ -1024,9 +1064,9 @@ exports.setMasterUserPermissions = async (req, res) => {
         `Master user not found for authenticated user ID: ${masterUserID}`,
         req.adminId
       );
-      return res.status(404).json({ 
+      return res.status(404).json({
         message: `Your user profile was not found. Please contact support.`,
-        authenticatedUserId: masterUserID
+        authenticatedUserId: masterUserID,
       });
     }
 
@@ -1037,29 +1077,37 @@ exports.setMasterUserPermissions = async (req, res) => {
 
     if (permissionSetId) {
       validationPromises.push(
-        permissionSet.findOne({
-          where: { permissionSetId }
-        }).then(result => {
-          if (!result) {
-            throw new Error(`Permission set with ID ${permissionSetId} not found`);
-          }
-          permissionSetData = result;
-          return result;
-        })
+        permissionSet
+          .findOne({
+            where: { permissionSetId },
+          })
+          .then((result) => {
+            if (!result) {
+              throw new Error(
+                `Permission set with ID ${permissionSetId} not found`
+              );
+            }
+            permissionSetData = result;
+            return result;
+          })
       );
     }
 
     if (globalPermissionSetId) {
       validationPromises.push(
-        permissionSet.findOne({
-          where: { permissionSetId: globalPermissionSetId }
-        }).then(result => {
-          if (!result) {
-            throw new Error(`Global permission set with ID ${globalPermissionSetId} not found`);
-          }
-          globalPermissionSetData = result;
-          return result;
-        })
+        permissionSet
+          .findOne({
+            where: { permissionSetId: globalPermissionSetId },
+          })
+          .then((result) => {
+            if (!result) {
+              throw new Error(
+                `Global permission set with ID ${globalPermissionSetId} not found`
+              );
+            }
+            globalPermissionSetData = result;
+            return result;
+          })
       );
     }
 
@@ -1096,7 +1144,9 @@ exports.setMasterUserPermissions = async (req, res) => {
         newPermissionSetId: permissionSetId,
         newGlobalPermissionSetId: globalPermissionSetId,
         permissionSetName: permissionSetData ? permissionSetData.name : null,
-        globalPermissionSetName: globalPermissionSetData ? globalPermissionSetData.name : null
+        globalPermissionSetName: globalPermissionSetData
+          ? globalPermissionSetData.name
+          : null,
       }
     );
 
@@ -1108,8 +1158,8 @@ exports.setMasterUserPermissions = async (req, res) => {
         "email",
         "permissionSetId",
         "globalPermissionSetId",
-        "updatedAt"
-      ]
+        "updatedAt",
+      ],
     });
 
     // Fetch permission set details for response
@@ -1118,13 +1168,13 @@ exports.setMasterUserPermissions = async (req, res) => {
 
     if (updatedUser.permissionSetId) {
       responsePermissionSet = await permissionSet.findOne({
-        where: { permissionSetId: updatedUser.permissionSetId }
+        where: { permissionSetId: updatedUser.permissionSetId },
       });
     }
 
     if (updatedUser.globalPermissionSetId) {
       responseGlobalPermissionSet = await permissionSet.findOne({
-        where: { permissionSetId: updatedUser.globalPermissionSetId }
+        where: { permissionSetId: updatedUser.globalPermissionSetId },
       });
     }
 
@@ -1136,25 +1186,28 @@ exports.setMasterUserPermissions = async (req, res) => {
         email: updatedUser.email,
         permissionSetId: updatedUser.permissionSetId,
         globalPermissionSetId: updatedUser.globalPermissionSetId,
-        updatedAt: updatedUser.updatedAt
+        updatedAt: updatedUser.updatedAt,
       },
       permissionSets: {
-        permission: responsePermissionSet ? {
-          permissionSetId: responsePermissionSet.permissionSetId,
-          name: responsePermissionSet.name,
-          description: responsePermissionSet.description
-        } : null,
-        globalPermission: responseGlobalPermissionSet ? {
-          permissionSetId: responseGlobalPermissionSet.permissionSetId,
-          name: responseGlobalPermissionSet.name,
-          description: responseGlobalPermissionSet.description
-        } : null
-      }
+        permission: responsePermissionSet
+          ? {
+              permissionSetId: responsePermissionSet.permissionSetId,
+              name: responsePermissionSet.name,
+              description: responsePermissionSet.description,
+            }
+          : null,
+        globalPermission: responseGlobalPermissionSet
+          ? {
+              permissionSetId: responseGlobalPermissionSet.permissionSetId,
+              name: responseGlobalPermissionSet.name,
+              description: responseGlobalPermissionSet.description,
+            }
+          : null,
+      },
     });
-
   } catch (error) {
     console.error("Error setting master user permissions:", error);
-    
+
     await logAuditTrail(
       AuditTrail,
       PROGRAMS.MASTER_USER_MANAGEMENT,
@@ -1165,14 +1218,14 @@ exports.setMasterUserPermissions = async (req, res) => {
     );
 
     if (error.message.includes("not found")) {
-      return res.status(404).json({ 
-        message: error.message 
+      return res.status(404).json({
+        message: error.message,
       });
     }
 
-    res.status(500).json({ 
+    res.status(500).json({
       message: "Internal server error",
-      error: error.message 
+      error: error.message,
     });
   }
 };
@@ -1183,15 +1236,15 @@ exports.listMasterUserIds = async (req, res) => {
   try {
     const users = await MasterUser.findAll({
       attributes: [
-        'masterUserID',
-        'name', 
-        'email',
-        'userType',
-        'isActive',
-        'permissionSetId',
-        'globalPermissionSetId'
+        "masterUserID",
+        "name",
+        "email",
+        "userType",
+        "isActive",
+        "permissionSetId",
+        "globalPermissionSetId",
       ],
-      order: [['masterUserID', 'ASC']]
+      order: [["masterUserID", "ASC"]],
     });
 
     console.log(`[listMasterUserIds] 📋 Found ${users.length} total users`);
@@ -1199,22 +1252,21 @@ exports.listMasterUserIds = async (req, res) => {
     res.status(200).json({
       message: `Found ${users.length} master users`,
       totalUsers: users.length,
-      users: users.map(user => ({
+      users: users.map((user) => ({
         masterUserID: user.masterUserID,
         name: user.name,
         email: user.email,
         userType: user.userType,
         isActive: user.isActive,
         currentPermissionSetId: user.permissionSetId,
-        currentGlobalPermissionSetId: user.globalPermissionSetId
-      }))
+        currentGlobalPermissionSetId: user.globalPermissionSetId,
+      })),
     });
-
   } catch (error) {
     console.error("Error listing master users:", error);
-    res.status(500).json({ 
+    res.status(500).json({
       message: "Failed to list master users",
-      error: error.message 
+      error: error.message,
     });
   }
 };

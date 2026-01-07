@@ -1,8 +1,8 @@
 // const Lead = require("../../models/leads/leadsModel");
 const LeadFilter = require("../../models/leads/leadFiltersModel");
 //const LeadDetails = require("../../models/leads/leadDetailsModel"); // Import LeadDetails model
-const { Op } = require("sequelize"); // Import Sequelize operators
-const Sequelize = require("sequelize");
+const { Op, Sequelize } = require("sequelize"); // Import Sequelize operators
+// const Sequelize = require("sequelize");
 const sequelize = require("../../config/db"); // Import sequelize instance for transactions
 const { logAuditTrail } = require("../../utils/auditTrailLogger"); // Import the audit trail logger
 const PROGRAMS = require("../../utils/programConstants"); // Import program constants
