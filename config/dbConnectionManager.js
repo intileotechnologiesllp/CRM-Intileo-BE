@@ -1249,7 +1249,7 @@ class DatabaseConnectionManager {
     
     const dealColumnsData = await DealColumn.create({
     masterUserID: null,
-    columns: JSON.stringify(defaultColumns)
+    columns: defaultColumns  // Don't stringify - Sequelize handles JSON columns automatically
     });
     
     console.log(`✅ Default DealColumns created with ID: ${dealColumnsData.id}`);
@@ -1285,7 +1285,7 @@ class DatabaseConnectionManager {
     
     const activityColumnsData = await ActivityColumn.create({
     masterUserID: null,
-    columns: JSON.stringify(defaultColumns)
+    columns: defaultColumns  // Don't stringify - Sequelize handles JSON columns automatically
     });
     
     console.log(`✅ Default ActivityColumns created with ID: ${activityColumnsData.id}`);
@@ -1321,7 +1321,7 @@ class DatabaseConnectionManager {
     
     const productColumnsData = await ProductColumn.create({
     masterUserID: null,
-    columns: JSON.stringify(defaultColumns)
+    columns: defaultColumns  // Don't stringify - Sequelize handles JSON columns automatically
     });
     
     console.log(`✅ Default ProductColumns created with ID: ${productColumnsData.id}`);
@@ -1357,7 +1357,7 @@ class DatabaseConnectionManager {
     
     const personColumnsData = await PersonColumnPreference.create({
     masterUserID: null,
-    columns: JSON.stringify(defaultColumns)
+    columns: defaultColumns  // Don't stringify - Sequelize handles JSON columns automatically
     });
     
     console.log(`✅ Default PersonColumnPreferences created with ID: ${personColumnsData.id}`);

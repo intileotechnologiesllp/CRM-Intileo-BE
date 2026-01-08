@@ -235,6 +235,33 @@ Deal.belongsTo(LeadOrganization, {
 });
 Deal.belongsTo(MasterUser, { foreignKey: "ownerId", as: "Owner" });
 
+// Deal-DealDetail associations
+Deal.hasOne(DealDetail, { foreignKey: "dealId", as: "details" });
+DealDetail.belongsTo(Deal, { foreignKey: "dealId", as: "Deal" });
+
+// Deal-DealStageHistory associations
+Deal.hasMany(DealStageHistory, { foreignKey: "dealId", as: "stageHistory" });
+DealStageHistory.belongsTo(Deal, { foreignKey: "dealId", as: "Deal" });
+
+// Deal-DealNote associations
+Deal.hasMany(DealNote, { foreignKey: "dealId", as: "notes" });
+DealNote.belongsTo(Deal, { foreignKey: "dealId", as: "Deal" });
+DealNote.belongsTo(MasterUser, { foreignKey: "createdBy", as: "Author" });
+
+// Deal-DealParticipant associations
+Deal.hasMany(DealParticipant, { foreignKey: "dealId", as: "participants" });
+DealParticipant.belongsTo(Deal, { foreignKey: "dealId", as: "Deal" });
+DealParticipant.belongsTo(LeadPerson, { foreignKey: "personId", as: "Person" });
+DealParticipant.belongsTo(LeadOrganization, { foreignKey: "leadOrganizationId", as: "Organization" });
+
+// Deal-Product associations (through DealProduct)
+Deal.hasMany(DealProduct, { foreignKey: "dealId", as: "dealProducts" });
+DealProduct.belongsTo(Deal, { foreignKey: "dealId", as: "deal" });
+DealProduct.belongsTo(Product, { foreignKey: "productId", as: "product" });
+DealProduct.belongsTo(ProductVariation, { foreignKey: "variationId", as: "variation" });
+Product.hasMany(DealProduct, { foreignKey: "productId", as: "dealProducts" });
+ProductVariation.hasMany(DealProduct, { foreignKey: "variationId", as: "dealProducts" });
+
 // // Pipeline associations
 Pipeline.hasMany(PipelineStage, {
   foreignKey: "pipelineId",
