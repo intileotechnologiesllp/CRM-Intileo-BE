@@ -883,6 +883,15 @@ class DatabaseConnectionManager {
 
       await this.ensureDefaultPermissionSet(models);
       await this.ensureDefaultGroupVisibility(models);
+      await this.ensureDefaultLeadColumnPreferences(models);
+      await this.ensureDefaultOrganizationColumnPreferences(models);
+      await this.ensureDefaultDealColumnPreferences(models);
+      await this.ensureDefaultActivityColumnPreferences(models);
+      await this.ensureDefaultProductColumnPreferences(models);
+      await this.ensureDefaultPersonColumnPreferences(models);
+      await this.ensureDefaultCurrencies(models);
+      // Note: CustomFields are NOT seeded by default - users create them as needed
+      await this.ensureDefaultPrograms(models);
       
     } catch (error) {
       console.error("❌ Error syncing models:", error);
@@ -1089,6 +1098,601 @@ class DatabaseConnectionManager {
   }
   }
 
+  static async ensureDefaultLeadColumnPreferences(models) {
+  try {
+    const { LeadColumnPreference } = models;
+    
+    // Check if default lead column preferences already exist
+    const existingPreferences = await LeadColumnPreference.findOne({
+      where: { masterUserID: null }
+    });
+    
+    if (existingPreferences) {
+      console.log("✅ Default LeadColumnPreferences already exist, skipping creation");
+      return existingPreferences;
+    }
+    
+    // Default columns configuration from migration
+    const defaultColumns = [
+      {"key":"contactPerson","check":true},
+      {"key":"value","check":false},
+      {"key":"valueCurrency","check":true},
+      {"key":"organization","check":true},
+      {"key":"title","check":true},
+      {"key":"valueLabels","check":true},
+      {"key":"expectedCloseDate","check":true},
+      {"key":"sourceChannel","check":true},
+      {"key":"phone","check":true},
+      {"key":"email","check":true},
+      {"key":"organizationCountry","check":true},
+      {"key":"status","check":true},
+      {"key":"isArchived","check":true},
+      {"key":"archiveTime","check":true},
+      {"key":"ownerName","check":true},
+      {"key":"createdAt","check":false},
+      {"key":"updatedAt","check":false},
+      {"key":"numberOfReportsPrepared","check":false},
+      {"key":"sectoralSector","check":false},
+      {"key":"seen","check":false},
+      {"key":"visibleTo","check":false},
+      {"key":"RFP_receivedDate","check":false},
+      {"key":"statusSummary","check":false},
+      {"key":"responsiblePerson","check":false},
+      {"key":"organizationName","check":false},
+      {"key":"sourceOrgin","check":true},
+      {"key":"personName","check":false},
+      {"key":"notes","check":false},
+      {"key":"postalAddress","check":false},
+      {"key":"birthday","check":false},
+      {"key":"jobTitle","check":false},
+      {"key":"currency","check":false},
+      {"key":"nextActivityDate","check":false},
+      {"key":"nextActivityStatus","check":false},
+      {"key":"address","check":false},
+      {"key":"espl_proposal_no","label":"ESPL Proposal No","type":"text","isCustomField":true,"fieldId":29,"isRequired":true,"isImportant":true,"fieldSource":"custom","entityType":"lead","check":true},
+      {"key":"no._of_reports_prepared_for_the_project","label":"No. of reports prepared for the project","type":"singleselect","isCustomField":true,"fieldId":105,"isRequired":true,"isImportant":true,"fieldSource":"custom","entityType":"lead","check":false},
+      {"key":"organization_country","label":"Organization Country","type":"text","isCustomField":true,"fieldId":31,"isRequired":true,"isImportant":true,"fieldSource":"custom","entityType":"lead","check":false},
+      {"key":"project_location","label":"Project Location","type":"text","isCustomField":true,"fieldId":30,"isRequired":true,"isImportant":true,"fieldSource":"custom","entityType":"lead","check":false},
+      {"key":"proposal_sent_date","label":"Proposal Sent Date","type":"date","isCustomField":true,"fieldId":32,"isRequired":true,"isImportant":true,"fieldSource":"custom","entityType":"lead","check":false},
+      {"key":"proposal_value","label":"Proposal Value","type":"text","isCustomField":true,"fieldId":28,"isRequired":true,"isImportant":true,"fieldSource":"custom","entityType":"lead","check":false},
+      {"key":"questioner_shared?","label":"Questioner Shared?","type":"singleselect","isCustomField":true,"fieldId":104,"isRequired":false,"isImportant":true,"fieldSource":"custom","entityType":"lead","check":false},
+      {"key":"sbu_class","label":"SBU Class","type":"singleselect","isCustomField":true,"fieldId":35,"isRequired":true,"isImportant":true,"fieldSource":"custom","entityType":"lead","check":false},
+      {"key":"scope_of_service_type","label":"Scope of Service Type","type":"singleselect","isCustomField":true,"fieldId":27,"isRequired":false,"isImportant":true,"fieldSource":"custom","entityType":"lead","check":false},
+      {"key":"sectoral_sector","label":"Sectoral Sector","type":"multiselect","isCustomField":true,"fieldId":34,"isRequired":true,"isImportant":true,"fieldSource":"custom","entityType":"lead","check":false},
+      {"key":"service_type","label":"Service Type","type":"text","isCustomField":true,"fieldId":26,"isRequired":false,"isImportant":true,"fieldSource":"custom","entityType":"lead","check":false},
+      {"key":"source","label":"Source","type":"singleselect","isCustomField":true,"fieldId":33,"isRequired":true,"isImportant":true,"fieldSource":"custom","entityType":"lead","check":true}
+    ];
+    
+    const defaultPreferences = await LeadColumnPreference.create({
+      masterUserID: null,
+      columns: defaultColumns
+    });
+    
+    console.log(`✅ Default LeadColumnPreferences created with ID: ${defaultPreferences.id}`);
+    
+    return defaultPreferences;
+  } catch (error) {
+    console.error("❌ Error creating default lead column preferences:", error);
+    throw error;
+  }
+  }
+
+  static async ensureDefaultOrganizationColumnPreferences(models) {
+  try {
+    const { OrganizationColumnPreference } = models;
+    
+    // Check if default organization column preferences already exist
+    const existingPreferences = await OrganizationColumnPreference.findOne({
+      where: { masterUserID: null }
+    });
+    
+    if (existingPreferences) {
+      console.log("✅ Default OrganizationColumnPreferences already exist, skipping creation");
+      return existingPreferences;
+    }
+    
+    // Default columns configuration from migration
+    const defaultColumns = [
+      {"key":"organization","check":true},
+      {"key":"organizationLabels","check":true},
+      {"key":"address","check":true},
+      {"key":"visibleTo","check":true},
+      {"key":"ownerName","check":true},
+      {"key":"wonDeals","check":true},
+      {"key":"lostDeals","check":true},
+      {"key":"openDeals","check":true},
+      {"key":"peopleCount","check":true},
+      {"key":"lastActivityDate","check":true},
+      {"key":"nextActivityDate","check":true},
+      {"key":"doneActivitiesCount","check":true},
+      {"key":"totalActivitiesCount","check":true},
+      {"key":"activitiesTodoCount","check":false},
+      {"key":"createdAt","check":false},
+      {"key":"updatedAt","check":false}
+    ];
+    
+    const defaultPreferences = await OrganizationColumnPreference.create({
+      masterUserID: null,
+      columns: defaultColumns
+    });
+    
+    console.log(`✅ Default OrganizationColumnPreferences created with ID: ${defaultPreferences.id}`);
+    
+    return defaultPreferences;
+  } catch (error) {
+    console.error("❌ Error creating default organization column preferences:", error);
+    throw error;
+  }
+  }
+
+  /**
+    * Ensure default DealColumns exist in the database
+    */
+  static async ensureDefaultDealColumnPreferences(models) {
+  try {
+    const { DealColumn } = models;
+    
+    // Check if default preferences already exist
+    const existingPreferences = await DealColumn.findOne({
+    where: { masterUserID: null }
+    });
+    
+    if (existingPreferences) {
+    console.log("✅ Default DealColumns already exist, skipping creation");
+    return existingPreferences;
+    }
+    
+    // Create default deal column preferences with masterUserID = null (global defaults)
+    const defaultColumns = [
+    {"key":"contactPerson","check":true},{"key":"organization","check":true},{"key":"title","check":true},{"key":"value","check":true},{"key":"valueCurrency","check":true},{"key":"pipeline","check":false},{"key":"pipelineStage","check":true},{"key":"label","check":true},{"key":"expectedCloseDate","check":true},{"key":"sourceChannel","check":false},{"key":"sourceRequired","check":false},{"key":"phone","check":false},{"key":"email","check":true},{"key":"sourceOrgin","check":false},{"key":"isArchived","check":true},{"key":"status","check":true},{"key":"createdAt","check":true},{"key":"updatedAt","check":true},{"key":"statusSummary","check":false},{"key":"responsiblePerson","check":false},{"key":"rfpReceivedDate","check":false},{"key":"ownerName","check":true},{"key":"wonTime","check":false},{"key":"lostTime","check":false},{"key":"lostReason","check":true},{"key":"dealClosedOn","check":true},{"key":"nextActivityDate","check":false}
+    ];
+    
+    const dealColumnsData = await DealColumn.create({
+    masterUserID: null,
+    columns: JSON.stringify(defaultColumns)
+    });
+    
+    console.log(`✅ Default DealColumns created with ID: ${dealColumnsData.id}`);
+    return dealColumnsData;
+    
+  } catch (error) {
+    console.error("Error ensuring default DealColumns:", error);
+    throw error;
+  }
+  }
+
+  /**
+    * Ensure default ActivityColumns exist in the database
+    */
+  static async ensureDefaultActivityColumnPreferences(models) {
+  try {
+    const { ActivityColumn } = models;
+    
+    // Check if default preferences already exist
+    const existingPreferences = await ActivityColumn.findOne({
+    where: { masterUserID: null }
+    });
+    
+    if (existingPreferences) {
+    console.log("✅ Default ActivityColumns already exist, skipping creation");
+    return existingPreferences;
+    }
+    
+    // Create default activity column preferences with masterUserID = null (global defaults)
+    const defaultColumns = [
+    {"key":"subject","check":false,"entityType":"Activity"},{"key":"priority","check":false,"entityType":"Activity"},{"key":"location","check":false,"entityType":"Activity"},{"key":"videoCallIntegration","check":false,"entityType":"Activity"},{"key":"description","check":false,"entityType":"Activity"},{"key":"status","check":false,"entityType":"Activity"},{"key":"notes","check":false,"entityType":"Activity"},{"key":"assignedTo","check":true,"entityType":"Activity"},{"key":"isDone","check":true,"entityType":"Activity"},{"key":"contactPerson","check":true,"entityType":"Activity"},{"key":"email","check":true,"entityType":"Activity"},{"key":"organization","check":true,"entityType":"Activity"},{"key":"dueDate","check":true,"entityType":"Activity"},{"key":"markedAsDoneTime","check":false,"entityType":"Activity"},{"key":"createdAt","check":false,"entityType":"Activity"},{"key":"updatedAt","check":false,"entityType":"Activity"},{"key":"contactPerson","check":false,"entityType":"Deal"},{"key":"valueCurrency","check":false,"entityType":"Deal"},{"key":"organization","check":true,"entityType":"Deal"},{"key":"title","check":false,"entityType":"Deal"},{"key":"value","check":false,"entityType":"Deal"},{"key":"pipeline","check":false,"entityType":"Deal"},{"key":"pipelineStage","check":false,"entityType":"Deal"},{"key":"label","check":false,"entityType":"Deal"},{"key":"expectedCloseDate","check":false,"entityType":"Deal"},{"key":"sourceChannel","check":false,"entityType":"Deal"},{"key":"sourceRequired","check":false,"entityType":"Deal"},{"key":"sectorialSector","check":false,"entityType":"Deal"},{"key":"phone","check":false,"entityType":"Deal"},{"key":"email","check":true,"entityType":"Deal"},{"key":"sourceOrgin","check":false,"entityType":"Deal"},{"key":"isArchived","check":false,"entityType":"Deal"},{"key":"status","check":false,"entityType":"Deal"},{"key":"createdAt","check":false,"entityType":"Deal"},{"key":"updatedAt","check":false,"entityType":"Deal"},{"key":"statusSummary","check":false,"entityType":"Deal"},{"key":"responsiblePerson","check":false,"entityType":"Deal"},{"key":"rfpReceivedDate","check":false,"entityType":"Deal"},{"key":"ownerName","check":false,"entityType":"Deal"},{"key":"wonTime","check":false,"entityType":"Deal"},{"key":"lostTime","check":false,"entityType":"Deal"},{"key":"countryOfOrganizationCountry","check":false,"entityType":"Deal"},{"key":"lostReason","check":false,"entityType":"Deal"},{"key":"dealClosedOn","check":false,"entityType":"Deal"},{"key":"nextActivityDate","check":true,"entityType":"Deal"},{"key":"stateAndCountryProjectLocation","check":false,"entityType":"Deal"}
+    ];
+    
+    const activityColumnsData = await ActivityColumn.create({
+    masterUserID: null,
+    columns: JSON.stringify(defaultColumns)
+    });
+    
+    console.log(`✅ Default ActivityColumns created with ID: ${activityColumnsData.id}`);
+    return activityColumnsData;
+    
+  } catch (error) {
+    console.error("Error ensuring default ActivityColumns:", error);
+    throw error;
+  }
+  }
+
+  /**
+    * Ensure default ProductColumns exist in the database
+    */
+  static async ensureDefaultProductColumnPreferences(models) {
+  try {
+    const { ProductColumn } = models;
+    
+    // Check if default preferences already exist
+    const existingPreferences = await ProductColumn.findOne({
+    where: { masterUserID: null }
+    });
+    
+    if (existingPreferences) {
+    console.log("✅ Default ProductColumns already exist, skipping creation");
+    return existingPreferences;
+    }
+    
+    // Create default product column preferences with masterUserID = null (global defaults)
+    const defaultColumns = [
+    {"key":"name","check":true},{"key":"code","check":true},{"key":"unit","check":true},{"key":"quantity","check":false},{"key":"tax","check":true},{"key":"cost","check":true},{"key":"costCurrency","check":true},{"key":"pricePerUnit","check":false},{"key":"priceCurrency","check":false},{"key":"category","check":true},{"key":"description","check":false},{"key":"activeFlag","check":false},{"key":"customCategory","check":false},{"key":"customUnit","check":false},{"key":"ownerId","check":true},{"key":"ownerName","check":true},{"key":"createdAt","check":false},{"key":"updatedAt","check":false},{"key":"createdById","check":false},{"key":"createdBy","check":false},{"key":"dealCount","check":true},{"key":"totalRevenue","check":true},{"key":"wonDealsCount","check":false},{"key":"lostDealsCount","check":false}
+    ];
+    
+    const productColumnsData = await ProductColumn.create({
+    masterUserID: null,
+    columns: JSON.stringify(defaultColumns)
+    });
+    
+    console.log(`✅ Default ProductColumns created with ID: ${productColumnsData.id}`);
+    return productColumnsData;
+    
+  } catch (error) {
+    console.error("Error ensuring default ProductColumns:", error);
+    throw error;
+  }
+  }
+
+  /**
+    * Ensure default PersonColumnPreferences exist in the database
+    */
+  static async ensureDefaultPersonColumnPreferences(models) {
+  try {
+    const { PersonColumnPreference } = models;
+    
+    // Check if default preferences already exist
+    const existingPreferences = await PersonColumnPreference.findOne({
+    where: { masterUserID: null }
+    });
+    
+    if (existingPreferences) {
+    console.log("✅ Default PersonColumnPreferences already exist, skipping creation");
+    return existingPreferences;
+    }
+    
+    // Create default person column preferences with masterUserID = null (global defaults)
+    const defaultColumns = [
+    {"key":"contactPerson","check":false},{"key":"email","check":false},{"key":"phone","check":false},{"key":"notes","check":false},{"key":"postalAddress","check":false},{"key":"birthday","check":false},{"key":"jobTitle","check":false},{"key":"personLabels","check":false},{"key":"organization","check":false},{"key":"emails","check":false},{"key":"phones","check":false},{"key":"ownerName","check":false},{"key":"wonDeals","check":false},{"key":"lostDeals","check":false},{"key":"openDeals","check":false},{"key":"peopleCount","check":false},{"key":"lastActivityDate","check":false},{"key":"nextActivityDate","check":false},{"key":"doneActivitiesCount","check":false},{"key":"totalActivitiesCount","check":false},{"key":"activitiesTodoCount","check":false},{"key":"createdAt","check":true},{"key":"updatedAt","check":false}
+    ];
+    
+    const personColumnsData = await PersonColumnPreference.create({
+    masterUserID: null,
+    columns: JSON.stringify(defaultColumns)
+    });
+    
+    console.log(`✅ Default PersonColumnPreferences created with ID: ${personColumnsData.id}`);
+    return personColumnsData;
+    
+  } catch (error) {
+    console.error("Error ensuring default PersonColumnPreferences:", error);
+    throw error;
+  }
+  }
+
+  /**
+    * Ensure default Currencies exist in the database
+    */
+  static async ensureDefaultCurrencies(models) {
+  try {
+    const { Currency } = models;
+    
+    // Check if default currencies already exist
+    const existingCurrencies = await Currency.findAll();
+    
+    if (existingCurrencies && existingCurrencies.length > 0) {
+    console.log(`✅ Default Currencies already exist (${existingCurrencies.length} records), skipping creation`);
+    return existingCurrencies;
+    }
+    
+    // Create default currencies with all required fields
+    const defaultCurrencies = [
+    {
+      currency_desc: 'US Dollar',
+      symbol: '$',
+      code: 'USD',
+      decimalPoints: 2,
+      isActive: true,
+      isCustom: false,
+      creationDate: new Date(),
+      createdBy: 'system',
+      createdById: 0,
+      mode: 'added'
+    },
+    {
+      currency_desc: 'Indian Rupee',
+      symbol: '₹',
+      code: 'INR',
+      decimalPoints: 2,
+      isActive: true,
+      isCustom: false,
+      creationDate: new Date(),
+      createdBy: 'system',
+      createdById: 0,
+      mode: 'added'
+    },
+    {
+      currency_desc: 'Euro',
+      symbol: '€',
+      code: 'EUR',
+      decimalPoints: 2,
+      isActive: true,
+      isCustom: false,
+      creationDate: new Date(),
+      createdBy: 'system',
+      createdById: 0,
+      mode: 'added'
+    },
+    {
+      currency_desc: 'British Pound',
+      symbol: '£',
+      code: 'GBP',
+      decimalPoints: 2,
+      isActive: true,
+      isCustom: false,
+      creationDate: new Date(),
+      createdBy: 'system',
+      createdById: 0,
+      mode: 'added'
+    }
+    ];
+    
+    const currenciesData = await Currency.bulkCreate(defaultCurrencies);
+    
+    console.log(`✅ Default Currencies created (${currenciesData.length} records)`);
+    return currenciesData;
+    
+  } catch (error) {
+    console.error("Error ensuring default Currencies:", error);
+    throw error;
+  }
+  }
+
+  /**
+    * Ensure default CustomFields exist in the database
+    * @param {Object} models - The models object
+    * @param {number} masterUserID - The masterUserID to assign to the custom fields
+    */
+  static async ensureDefaultCustomFields(models, masterUserID) {
+  try {
+    const { CustomField } = models;
+    
+    // Check if default custom fields already exist (check for system-created fields)
+    const existingFields = await CustomField.findAll({
+      where: { fieldSource: 'system', masterUserID: masterUserID }
+    });
+    
+    if (existingFields && existingFields.length > 0) {
+      console.log(`✅ Default CustomFields already exist (${existingFields.length} records), skipping creation`);
+      return existingFields;
+    }
+    
+    // Create default custom fields - these are common fields that can be used across tenants
+    const defaultCustomFields = [
+      {
+        fieldName: 'service_type',
+        fieldLabel: 'Service Type',
+        fieldType: 'text',
+        fieldSource: 'system',
+        entityType: 'lead',
+        isRequired: false,
+        isActive: true,
+        displayOrder: 2,
+        isImportant: true,
+        category: 'Details',
+        fieldGroup: 'Digital',
+        masterUserID: masterUserID,
+        showInAddView: true,
+        showInDetailView: true,
+        showInListView: false,
+        leadView: true,
+        dealView: true,
+        check: false,
+        dealCheck: false,
+        sortOrder: 2
+      },
+      {
+        fieldName: 'proposal_value',
+        fieldLabel: 'Proposal Value',
+        fieldType: 'text',
+        fieldSource: 'system',
+        entityType: 'lead',
+        isRequired: true,
+        isActive: true,
+        displayOrder: 1,
+        isImportant: true,
+        category: 'Details',
+        fieldGroup: 'Digital',
+        description: 'Proposal Value',
+        masterUserID: masterUserID,
+        showInAddView: true,
+        showInDetailView: true,
+        showInListView: false,
+        leadView: true,
+        dealView: true,
+        check: true,
+        dealCheck: false,
+        sortOrder: 1
+      },
+      {
+        fieldName: 'espl_proposal_no',
+        fieldLabel: 'ESPL Proposal No',
+        fieldType: 'text',
+        fieldSource: 'system',
+        entityType: 'lead',
+        isRequired: true,
+        isActive: true,
+        displayOrder: 3,
+        isImportant: true,
+        category: 'Details',
+        fieldGroup: 'Digital',
+        description: 'ESPL Proposal No.',
+        masterUserID: masterUserID,
+        showInAddView: true,
+        showInDetailView: true,
+        showInListView: false,
+        leadView: true,
+        dealView: true,
+        check: true,
+        dealCheck: false,
+        sortOrder: 3
+      },
+      {
+        fieldName: 'project_location',
+        fieldLabel: 'Project Location',
+        fieldType: 'text',
+        fieldSource: 'system',
+        entityType: 'lead',
+        isRequired: true,
+        isActive: true,
+        displayOrder: 4,
+        isImportant: true,
+        category: 'Details',
+        fieldGroup: 'Digital',
+        description: 'Project Location',
+        masterUserID: masterUserID,
+        showInAddView: true,
+        showInDetailView: true,
+        showInListView: false,
+        leadView: true,
+        dealView: true,
+        check: false,
+        dealCheck: false,
+        sortOrder: 4
+      },
+      {
+        fieldName: 'organization_country',
+        fieldLabel: 'Organization Country',
+        fieldType: 'text',
+        fieldSource: 'system',
+        entityType: 'lead',
+        isRequired: true,
+        isActive: true,
+        displayOrder: 5,
+        isImportant: true,
+        category: 'Details',
+        fieldGroup: 'Digital',
+        description: 'Organization Country',
+        masterUserID: masterUserID,
+        showInAddView: true,
+        showInDetailView: true,
+        showInListView: false,
+        leadView: true,
+        dealView: true,
+        check: false,
+        dealCheck: false,
+        sortOrder: 5
+      },
+      {
+        fieldName: 'proposal_sent_date',
+        fieldLabel: 'Proposal Sent Date',
+        fieldType: 'date',
+        fieldSource: 'system',
+        entityType: 'lead',
+        isRequired: true,
+        isActive: true,
+        displayOrder: 6,
+        isImportant: true,
+        category: 'Details',
+        fieldGroup: 'Digital',
+        description: 'Proposal Sent Date',
+        masterUserID: masterUserID,
+        showInAddView: true,
+        showInDetailView: true,
+        showInListView: false,
+        leadView: true,
+        dealView: true,
+        check: false,
+        dealCheck: false,
+        sortOrder: 6
+      },
+      {
+        fieldName: 'source',
+        fieldLabel: 'Source',
+        fieldType: 'singleselect',
+        fieldSource: 'system',
+        entityType: 'lead',
+        options: ['InBound', 'Outbound', 'None'],
+        isRequired: true,
+        isActive: true,
+        displayOrder: 7,
+        isImportant: true,
+        category: 'Details',
+        fieldGroup: 'Digital',
+        description: 'Source',
+        masterUserID: masterUserID,
+        showInAddView: true,
+        showInDetailView: true,
+        showInListView: false,
+        leadView: true,
+        dealView: true,
+        check: false,
+        dealCheck: false,
+        sortOrder: 7
+      }
+    ];
+    
+    const customFieldsData = await CustomField.bulkCreate(defaultCustomFields);
+    
+    console.log(`✅ Default CustomFields created (${customFieldsData.length} records)`);
+    return customFieldsData;
+    
+  } catch (error) {
+    console.error("Error ensuring default CustomFields:", error);
+    throw error;
+  }
+  }
+
+  /**
+    * Ensure default Programs exist in the database
+    */
+  static async ensureDefaultPrograms(models) {
+  try {
+    const { Program } = models;
+    
+    // Check if default programs already exist
+    const existingPrograms = await Program.findAll();
+    
+    if (existingPrograms && existingPrograms.length > 0) {
+      console.log(`✅ Default Programs already exist (${existingPrograms.length} records), skipping creation`);
+      return existingPrograms;
+    }
+    
+    // Create default programs - these are system modules/features
+    const defaultPrograms = [
+      { program_desc: 'DASHBOARD', creationDate: new Date(), createdBy: 'system', createdById: 0, mode: 'added' },
+      { program_desc: 'LEADS', creationDate: new Date(), createdBy: 'system', createdById: 0, mode: 'added' },
+      { program_desc: 'DEALS', creationDate: new Date(), createdBy: 'system', createdById: 0, mode: 'added' },
+      { program_desc: 'SALES INBOX', creationDate: new Date(), createdBy: 'system', createdById: 0, mode: 'added' },
+      { program_desc: 'CONTACTS', creationDate: new Date(), createdBy: 'system', createdById: 0, mode: 'added' },
+      { program_desc: 'CALENDAR', creationDate: new Date(), createdBy: 'system', createdById: 0, mode: 'added' },
+      { program_desc: 'DESIGNATION', creationDate: new Date(), createdBy: 'system', createdById: 0, mode: 'added' },
+      { program_desc: 'DEPARTMENT', creationDate: new Date(), createdBy: 'system', createdById: 0, mode: 'added' },
+      { program_desc: 'STATUS', creationDate: new Date(), createdBy: 'system', createdById: 0, mode: 'added' },
+      { program_desc: 'ORGANIZATION', creationDate: new Date(), createdBy: 'system', createdById: 0, mode: 'added' },
+      { program_desc: 'CURRENCY', creationDate: new Date(), createdBy: 'system', createdById: 0, mode: 'added' },
+      { program_desc: 'SCOPE', creationDate: new Date(), createdBy: 'system', createdById: 0, mode: 'added' },
+      { program_desc: 'SECTORALSCOPE', creationDate: new Date(), createdBy: 'system', createdById: 0, mode: 'added' },
+      { program_desc: 'COUNTRY', creationDate: new Date(), createdBy: 'system', createdById: 0, mode: 'added' },
+      { program_desc: 'REGION', creationDate: new Date(), createdBy: 'system', createdById: 0, mode: 'added' },
+      { program_desc: 'LOGIN HISTORY', creationDate: new Date(), createdBy: 'system', createdById: 0, mode: 'added' },
+      { program_desc: 'AUDIT HISTORY', creationDate: new Date(), createdBy: 'system', createdById: 0, mode: 'added' },
+      { program_desc: 'HISTORY', creationDate: new Date(), createdBy: 'system', createdById: 0, mode: 'added' },
+      { program_desc: 'USER MASTER', creationDate: new Date(), createdBy: 'system', createdById: 0, mode: 'added' },
+      { program_desc: 'USER PRIVILEGES', creationDate: new Date(), createdBy: 'system', createdById: 0, mode: 'added' },
+      { program_desc: 'SETTINGS', creationDate: new Date(), createdBy: 'system', createdById: 0, mode: 'added' }
+    ];
+    
+    const programsData = await Program.bulkCreate(defaultPrograms);
+    
+    console.log(`✅ Default Programs created (${programsData.length} records)`);
+    return programsData;
+    
+  } catch (error) {
+    console.error("Error ensuring default Programs:", error);
+    throw error;
+  }
+  }
+
   /**
     * Connect to client database and ensure user exists
     */
@@ -1109,10 +1713,34 @@ class DatabaseConnectionManager {
     // Step 5: Create default permission set if it doesn't exist
     await this.ensureDefaultPermissionSet(models);
 
-    // Step 6: Create default permission set if it doesn't exist
+    // Step 6: Create default group visibility if it doesn't exist
     await this.ensureDefaultGroupVisibility(models);
     
-    // Step 7: Check if user exists, create if not (with permission set assignment)
+    // Step 7: Create default lead column preferences if it doesn't exist
+    await this.ensureDefaultLeadColumnPreferences(models);
+    
+    // Step 8: Create default organization column preferences if it doesn't exist
+    await this.ensureDefaultOrganizationColumnPreferences(models);
+    
+    // Step 9: Create default deal column preferences if it doesn't exist
+    await this.ensureDefaultDealColumnPreferences(models);
+    
+    // Step 10: Create default activity column preferences if it doesn't exist
+    await this.ensureDefaultActivityColumnPreferences(models);
+    
+    // Step 11: Create default product column preferences if it doesn't exist
+    await this.ensureDefaultProductColumnPreferences(models);
+    
+    // Step 12: Create default person column preferences if it doesn't exist
+    await this.ensureDefaultPersonColumnPreferences(models);
+    
+    // Step 13: Create default currencies if they don't exist
+    await this.ensureDefaultCurrencies(models);
+    
+    // Step 14: Create default programs if they don't exist
+    await this.ensureDefaultPrograms(models);
+    
+    // Step 15: Check if user exists, create if not (with permission set assignment)
     const userInfo = await this.ensureUserExists(
       models.MasterUser, 
       models.PermissionSet,
@@ -1121,6 +1749,8 @@ class DatabaseConnectionManager {
       password, 
       client
     );
+    
+    // Note: CustomFields are NOT seeded - users create them as needed via the UI
     
     return {
       clientConnection,
@@ -1237,6 +1867,32 @@ class DatabaseConnectionManager {
     // Ensure default group visibility exists
     await this.ensureDefaultGroupVisibility(models);
     
+    // Ensure default lead column preferences exist
+    await this.ensureDefaultLeadColumnPreferences(models);
+    
+    // Ensure default organization column preferences exist
+    await this.ensureDefaultOrganizationColumnPreferences(models);
+    
+    // Ensure default deal column preferences exist
+    await this.ensureDefaultDealColumnPreferences(models);
+    
+    // Ensure default activity column preferences exist
+    await this.ensureDefaultActivityColumnPreferences(models);
+    
+    // Ensure default product column preferences exist
+    await this.ensureDefaultProductColumnPreferences(models);
+    
+    // Ensure default person column preferences exist
+    await this.ensureDefaultPersonColumnPreferences(models);
+    
+    // Ensure default currencies exist
+    await this.ensureDefaultCurrencies(models);
+    
+    // Ensure default programs exist
+    await this.ensureDefaultPrograms(models);
+    
+    // Note: CustomFields are NOT seeded - users create them as needed
+    
     const user = await models.MasterUser.findOne({ 
       where: { email } 
     });
@@ -1252,7 +1908,7 @@ class DatabaseConnectionManager {
       }
 
       // User doesn't exist - create new user with default group visibility
-      const defaultGroupVisibility = await models.GroupVisibilityModel.findOne({
+      const defaultGroupVisibility = await models.GroupVisibility.findOne({
         where: { isDefault: 1 }
       });
       
@@ -1272,12 +1928,14 @@ class DatabaseConnectionManager {
         userType: 'admin',
         mobileNumber: '0000000000',
         isActive: true,
-        permissionSetId: defaultPermissionSet.permissionSetId,
+        permissionSetId: defaultPermissionSet.permissionSetId,  
         globalPermissionSetId: defaultPermissionSet.permissionSetId,
         groupId : defaultGroupVisibility.groupId
       });
       
       console.log(`✅ New user created during signin with permissionSetId: ${defaultPermissionSet.permissionSetId}`);
+      
+      // Note: CustomFields are NOT seeded - users create them as needed via the UI
       
       return {
         user: newUser.toJSON(),
@@ -1297,6 +1955,8 @@ class DatabaseConnectionManager {
     if (!isPasswordValid) {
       throw new Error("Invalid password");
     }
+    
+    // Note: CustomFields are NOT seeded - users create them as needed
     
     return {
       user: user.toJSON(),

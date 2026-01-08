@@ -49,7 +49,7 @@ exports.signIn = async (req, res) => {
     if (!user.isActive) {
       await logAuditTrail(
         AuditTrail,
-        "AUTHENTICATION",
+        PROGRAMS.AUTHENTICATION,
         "SIGN_IN",
         user.loginType,
         "User account is deactivated",
@@ -75,7 +75,7 @@ exports.signIn = async (req, res) => {
     if (user.twoFactorEnabled) {
       await logAuditTrail(
         AuditTrail,
-        "AUTHENTICATION",
+        PROGRAMS.AUTHENTICATION,
         "SIGN_IN_2FA_REQUIRED",
         "Password verified, awaiting 2FA",
         user.masterUserID
@@ -270,13 +270,17 @@ exports.signIn = async (req, res) => {
         ActualStartDate: clientConfig.ActualStartDate,
         ActualEndDate: clientConfig.ActualEndDate,
       },
-      creator: {
+    };
+
+    // Add creator info only if creator exists (null for first/admin user)
+    if (creator) {
+      response.creator = {
         id: creator.masterUserID,
         email: creator.email,
         name: creator.name,
         userType: creator.userType,
-      },
-    };
+      };
+    }
 
     // Add plan details if available
     if (planDetails) {
@@ -297,7 +301,7 @@ exports.signIn = async (req, res) => {
     // Log successful sign-in
     await logAuditTrail(
       AuditTrail,
-      "AUTHENTICATION",
+      PROGRAMS.AUTHENTICATION,
       "SIGN_IN",
       user.loginType,
       "Sign-in successful",
