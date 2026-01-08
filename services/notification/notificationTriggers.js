@@ -319,7 +319,7 @@ class NotificationTriggers {
   /**
    * Trigger notification when an activity is created
    */
-  static async activityCreated(activity, createdBy) {
+  static async activityCreated(activity, createdBy, Notification, MasterUser ) {
     try {
       if (activity.assignedTo && activity.assignedTo !== createdBy.userId) {
         await NotificationService.createNotification({
@@ -336,7 +336,7 @@ class NotificationTriggers {
             activityTitle: activity.activityTitle,
             dueDate: activity.dueDate,
           },
-        });
+        }, Notification, MasterUser);
       }
 
       return true;

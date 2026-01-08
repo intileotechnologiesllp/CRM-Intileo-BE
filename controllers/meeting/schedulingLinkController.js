@@ -30,7 +30,7 @@ exports.createOrUpdateLink = async (req, res) => {
       userId: masterUserID,
       linkData,
       linkId,
-    });
+    }, SchedulingLink);
 
     // Generate full booking URL
     const bookingUrl = `${
@@ -66,7 +66,7 @@ exports.getUserLinks = async (req, res) => {
       return res.status(401).json({ message: "Unauthorized" });
     }
 
-    const links = await schedulingLinkService.getUserLinks(masterUserID);
+    const links = await schedulingLinkService.getUserLinks(masterUserID, SchedulingLink);
 
     // Add booking URLs
     const linksWithUrls = links.map((link) => ({
@@ -152,7 +152,7 @@ exports.deleteLink = async (req, res) => {
     }
 
     const { id } = req.params;
-    await schedulingLinkService.deleteLink(masterUserID, id);
+    await schedulingLinkService.deleteLink(masterUserID, id, SchedulingLink);
 
     res.json({ message: "Scheduling link deleted successfully" });
   } catch (error) {
@@ -181,14 +181,14 @@ exports.getAvailableSlotsPublic = async (req, res) => {
     const { startDate, endDate, groupByDate, timezone } = req.query;
 
     // Get link details first to include in response
-    const link = await schedulingLinkService.getLinkByToken(token);
+    const link = await schedulingLinkService.getLinkByToken(token, SchedulingLink, MasterUser);
 
     // Get available slots
     const slots = await schedulingLinkService.getAvailableSlotsForLink({
       token,
       startDate: startDate ? new Date(startDate) : undefined,
       endDate: endDate ? new Date(endDate) : undefined,
-    });
+    }, SchedulingLink, MasterUser);
 
     // Format slots with additional information
     const formattedSlots = slots.map((slot) => ({
@@ -225,7 +225,7 @@ exports.getAvailableSlotsPublic = async (req, res) => {
     const source =
       slots.length > 0 && slots[0]._source
         ? slots[0]._source
-        : (await googleCalendarService.isConnected(link.masterUserID))
+        : (await googleCalendarService.isConnected(link.masterUserID, MasterUser))
         ? "google_calendar"
         : "working_hours";
 
@@ -298,7 +298,7 @@ exports.getLinkDetailsPublic = async (req, res) => {
   try {
     const { token } = req.params;
 
-    const link = await schedulingLinkService.getLinkByToken(token);
+    const link = await schedulingLinkService.getLinkByToken(token, SchedulingLink, MasterUser);
     const owner = link.owner;
 
     // Return public-facing information only
@@ -356,7 +356,7 @@ exports.bookMeeting = async (req, res) => {
       customFields,
       meetingTitle,
       meetingDescription,
-    });
+    }, SchedulingLink, MasterUser, Person, Activity, Meeting);
 
     res.status(201).json({
       message: result.message,
@@ -382,6 +382,7 @@ exports.bookMeeting = async (req, res) => {
 };
 
 exports.bookGoogleMeet = async (req, res) => {
+  const { SchedulingLink,  MasterUser } = req.models;
   try {
     const { masterUserId, summary, description, start, end, email } = req.body;
     const user = await MasterUser.findByPk(masterUserId);
@@ -442,6 +443,7 @@ exports.bookGoogleMeet = async (req, res) => {
 };
 
 exports.getTimeSlots = async (req, res) =>{
+  const { SchedulingLink,  MasterUser } = req.models;
   try{
     const { id, date } = req.query;
 

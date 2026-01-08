@@ -1617,7 +1617,7 @@ exports.createGoal = async (req, res) => {
             }
             return res;
           }
-
+          console.log(records)
           const flattened = JSON.parse(JSON.stringify(records, null, 2)).map(
             (item) => flattenObject(item)
           );
@@ -1912,7 +1912,7 @@ exports.createGoal = async (req, res) => {
     ) => {
       let result = 0;
       let recordCount = 0;
-
+      let records
       // Build where clause for this period
       const whereClause = {
         createdAt: {
@@ -2058,7 +2058,7 @@ exports.createGoal = async (req, res) => {
         );
         // Continue with default values if there's an error
       }
-
+      
       return { result, recordCount, records };
     };
 
@@ -2654,7 +2654,7 @@ exports.getAllGoalsDashboardWise = async (req, res) => {
             trackingMetric,
           },
           null,
-          period,
+          period, null, null,
           Dashboard, Goal, Report, MasterUser, DealStageHistory, Activity, ReportFolder, LeadPerson, Deal, Lead, LeadOrganization
         );
 
@@ -2693,6 +2693,7 @@ exports.getAllGoalsDashboardWise = async (req, res) => {
           },
           null,
           period,
+          null, null,
           Dashboard, Goal, Report, MasterUser, DealStageHistory, Activity, ReportFolder, LeadPerson, Deal, Lead, LeadOrganization
         );
 
@@ -2729,7 +2730,7 @@ exports.getAllGoalsDashboardWise = async (req, res) => {
             trackingMetric,
           },
           null,
-          period,
+          period, null, null,
           Dashboard, Goal, Report, MasterUser, DealStageHistory, Activity, ReportFolder, LeadPerson, Deal, Lead, LeadOrganization
         );
 
@@ -3333,7 +3334,7 @@ exports.getGoalData = async (req, res) => {
     }
 
     // Helper to get default columns for an entity (first 5 dynamic columns)
-    async function getDefaultColumns(entity) {
+    async function getDefaultColumns(entity, CustomField, Deal, LeadPerson, LeadOrganization, Activity) {
       const getModelColumns = (model) =>
         Object.keys(model.rawAttributes).filter(
           (col) =>
@@ -3403,13 +3404,15 @@ exports.getGoalData = async (req, res) => {
           entityColumns = selectedOrganization;
         else if (goal.entity === "Activity") entityColumns = selectedActivity;
         if (!entityColumns || entityColumns.length === 0) {
-          entityColumns = await getDefaultColumns(goal.entity);
+          entityColumns = await getDefaultColumns(goal.entity, CustomField, Deal, LeadPerson, LeadOrganization, Activity);
         }
         const goalData = await processGoalData(
           goal,
           ownerId,
           periodFilter,
-          entityColumns
+          entityColumns,
+          null,
+          Dashboard, Goal, Report, MasterUser, DealStageHistory, Activity, ReportFolder, LeadPerson, Deal, Lead, LeadOrganization
         );
         return goalData;
       })

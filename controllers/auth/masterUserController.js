@@ -91,6 +91,7 @@ exports.createMasterUser = async (req, res) => {
     Program,
     MasterUserPrivileges,
     GroupVisibility,
+    permissionSet
   } = req.models;
   const {
     name,
@@ -227,6 +228,12 @@ exports.createMasterUser = async (req, res) => {
       },
     });
 
+    const permission = await permissionSet.findOne({
+      where: {
+        name: "Default",
+      },
+    });
+
     // Create a new master user
     const masterUser = await MasterUser.create({
       name,
@@ -234,7 +241,7 @@ exports.createMasterUser = async (req, res) => {
       mobileNumber,
       designation: userType === "admin" ? null : designation, // Remove designation if userType is "admin"
       department: userType === "admin" ? null : department, // Remove department if userType is "admin"
-      password: userType === "admin" ? await bcrypt.hash(password, 10) : null, // Use provided password for admin
+      password: await bcrypt.hash(password, 10), // Use provided password for admin
       resetToken,
       resetTokenExpiry,
       loginType, // Dynamically set loginType based on userType
@@ -243,6 +250,8 @@ exports.createMasterUser = async (req, res) => {
       userType: userType === "admin" ? "admin" : "general", // Set userType based on the userType
       status, // Use status from req.body or default to "active"
       groupId: group.groupId,
+      permissionSetId: permission.permissionSetId,
+      globalPermissionSetId: permission.permissionSetId,
     });
 
     // If the userType is "general", send a password reset email
