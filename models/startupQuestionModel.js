@@ -10,39 +10,40 @@ const StartupQuestion = sequelize.define("StartupQuestion", {
   },
   masterUserID: {
     type: DataTypes.INTEGER,
-    allowNull: false,
-    references: { model: "masterusers", key: "masterUserID" },
-    onDelete: "CASCADE",
+    allowNull: true,
+    // references: { model: "masterusers", key: "masterUserID" },
+    // onDelete: "CASCADE",
   },
   jobTitle: {
     type: DataTypes.STRING,
-    allowNull: false,
+    allowNull: true,
     unique: true,
   },
   useCrmBefore: {
     type: DataTypes.STRING,
-    allowNull: false,
+    allowNull: true,
   },
   companySize: {
     type: DataTypes.STRING,
-    allowNull: false,
+    allowNull: true,
   },
   industry: {
     type: DataTypes.STRING,
-    allowNull: false,
+    allowNull: true,
   },
   companyName: {
     type: DataTypes.STRING,
-    allowNull: false,
+    allowNull: true,
   },
   totalEmployees: {
     type: DataTypes.STRING,
-    allowNull: false,
+    allowNull: true,
   },
   focus: {
     type: DataTypes.STRING,
-    allowNull: false,
+    allowNull: true,
   },
 });
 
+StartupQuestion.sync({ alter: false }); // Ensure the table is created
 module.exports = StartupQuestion;

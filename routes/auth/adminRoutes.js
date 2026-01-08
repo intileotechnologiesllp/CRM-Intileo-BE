@@ -6,6 +6,7 @@ const {
   validateCreateAdmin,
 } = require("../../middlewares/adminValidation");
 const { handleValidationErrors } = require("../../middlewares/errorMiddleware");
+const { saveStartUpQuestions } = require("../../controllers/common/commonController");
 
 const router = express.Router();
 
@@ -53,6 +54,7 @@ router.get("/get-miscsettings",adminController.getMiscSettings);
 router.post("/update-miscsettings",adminController.updateMiscSettings);
 router.post("/change-password", verifyToken,adminController.changePassword);
 router.post("/validate-password", verifyToken,adminController.validatePassword);
+router.post("/save-startup-question", saveStartUpQuestions);
 
 
 
