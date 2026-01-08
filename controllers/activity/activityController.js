@@ -26,7 +26,7 @@ exports.createActivity = async (req, res) => {
       return str && typeof str === 'string' && str.trim() !== '';
     };
 
-    const { LeadOrganization, LeadPerson, Activity, Lead, Deal, MasterUser } = req.models;
+    const { LeadOrganization, LeadPerson, Activity, Lead, Deal, MasterUser, LeadDetail, Notification, DealDetail } = req.models;
 
     const {
       type,
@@ -233,7 +233,7 @@ exports.createActivity = async (req, res) => {
         {
           userId: req.adminId,
           name: creator ? creator.name : 'Unknown User'
-        }
+        }, Notification, MasterUser
       );
     } catch (notifError) {
       console.error('Failed to send activity created notification:', notifError);
@@ -241,12 +241,12 @@ exports.createActivity = async (req, res) => {
 
     // Update nextActivity in Lead if leadId is present
     if (validatedLeadId) {
-      await updateNextActivityForLead(validatedLeadId);
+      await updateNextActivityForLead(validatedLeadId, Activity, LeadDetail,);
     }
 
     // Update nextActivity in Deal if dealId is present
     if (validatedDealId) {
-      await updateNextActivityForDeal(validatedDealId);
+      await updateNextActivityForDeal(validatedDealId, DealDetail, Activity, Deal,);
     }
 
     // Prepare response with contact persons information
@@ -300,7 +300,7 @@ exports.getActivities = async (req, res) => {
 
     let { entityType } = req.query; // Extract entityType from query parameters
 
-    const { LeadOrganization, LeadPerson, Activity, Lead, Deal, MasterUser, ActivityColumn, LeadFilter, Product, DealProduct, CustomField, CustomFieldValue } = req.models;
+    const { LeadOrganization, LeadPerson, Activity, Lead, Deal, MasterUser, ActivityColumn, LeadFilter, Product, DealProduct, CustomField, CustomFieldValue, LeadDetail, DealDetail } = req.models;
 
     const pref = await ActivityColumn.findOne();
     let attributes = [];
@@ -1271,7 +1271,7 @@ exports.getActivityById = async (req, res) => {
     const masterUserID = req.adminId;
     const role = req.role;
 
-     const { LeadOrganization, LeadPerson, Activity, Lead, Deal, MasterUser, ActivityColumn, LeadFilter, Product, DealProduct, CustomField, CustomFieldValue } = req.models;
+     const { LeadOrganization, LeadPerson, Activity, Lead, Deal, CustomField, CustomFieldValue, LeadDetail, DealDetail } = req.models;
 
     // Build the where condition based on role
     const whereCondition = { activityId: activityId };
@@ -1742,7 +1742,7 @@ exports.deleteActivity = async (req, res) => {
 exports.markActivityAsDone = async (req, res) => {
   try {
     const { activityId } = req.params;
-    const {  Activity } = req.models;
+    const {  Activity, LeadDetail, DealDetail, Deal, Lead} = req.models;
     const activity = await Activity.findByPk(activityId);
     if (!activity) {
       return res.status(404).json({ message: "Activity not found" });
@@ -1754,12 +1754,12 @@ exports.markActivityAsDone = async (req, res) => {
 
     // Update next activity date for the lead if this activity was linked to a lead
     if (activity.leadId) {
-      await updateNextActivityForLead(activity.leadId);
+      await updateNextActivityForLead(activity.leadId, Activity, LeadDetail,);
     }
 
     // Update next activity date for the deal if this activity was linked to a deal
     if (activity.dealId) {
-      await updateNextActivityForDeal(activity.dealId);
+      await updateNextActivityForDeal(activity.dealId, DealDetail, Activity, Deal,);
     }
 
     // --- Activity popup settings logic ---
@@ -1793,7 +1793,7 @@ exports.updateActivity = async (req, res) => {
   try {
     const { activityId } = req.params;
     const updateFields = req.body;
-    const { LeadOrganization, LeadPerson, Activity, Lead, Deal, MasterUser } = req.models;
+    const { LeadOrganization, LeadPerson, Activity, Lead, Deal, MasterUser, LeadDetail, DealDetail } = req.models;
     // Helper function to safely check if a string is valid and not empty
     const isValidString = (str) => {
       return str && typeof str === 'string' && str.trim() !== '';
@@ -2158,13 +2158,13 @@ exports.updateActivity = async (req, res) => {
         updateFields.isDone !== undefined ||
         updateFields.leadId)
     ) {
-      await updateNextActivityForLead(activity.leadId);
+      await updateNextActivityForLead(activity.leadId, Activity, LeadDetail,);
 
       // If leadId was changed, also update the previous lead
       if (updateFields.leadId && updateFields.leadId !== activity.leadId) {
         const originalLeadId = activity.getDataValue("leadId"); // Get original value before update
         if (originalLeadId) {
-          await updateNextActivityForLead(originalLeadId);
+          await updateNextActivityForLead(originalLeadId, Activity, LeadDetail,);
         }
       }
     }
@@ -2180,10 +2180,10 @@ exports.updateActivity = async (req, res) => {
       await updateNextActivityForDeal(activity.dealId);
 
       // If dealId was changed, also update the previous deal
-      if (updateFields.dealId && updateFields.dealId !== activity.dealId) {
+      if (updateFields.dealId && updateFields.dealId !== activity.dealId, DealDetail, Activity, Deal) {
         const originalDealId = activity.getDataValue("dealId"); // Get original value before update
         if (originalDealId) {
-          await updateNextActivityForDeal(originalDealId);
+          await updateNextActivityForDeal(originalDealId, DealDetail, Activity, Deal,);
         }
       }
     }
@@ -2235,7 +2235,7 @@ exports.updateActivity = async (req, res) => {
 exports.saveAllActivityFieldsWithCheck = async (req, res) => {
   // Accept checked fields from req.body
   const { checkedFields } = req.body || {};
-  const {  Activity, Deal, DealColumn, ActivityColumn, } = req.models;
+  const {  Activity, Deal, DealColumn, ActivityColumn, LeadDetail, DealDetail, Lead} = req.models;
   try {
     // Get all field names from Activity model
     const activityFields = Object.keys(Activity.rawAttributes);
@@ -2311,7 +2311,7 @@ exports.saveAllActivityFieldsWithCheck = async (req, res) => {
 exports.updateActivityColumnChecks = async (req, res) => {
   // Expecting: { columns: [ { key: "columnName", check: true/false }, ... ] }
   const { columns } = req.body;
-  const { LeadOrganization, LeadPerson, Activity, Lead, Deal, MasterUser, ActivityColumn, LeadFilter, Product, DealProduct, CustomField, CustomFieldValue } = req.models;
+  const { LeadDetail, DealDetail, ActivityColumn, Lead, Deal, Activity } = req.models;
 
   if (!Array.isArray(columns)) {
     return res.status(400).json({ message: "Columns array is required." });
@@ -2349,7 +2349,7 @@ exports.updateActivityColumnChecks = async (req, res) => {
 };
 
 exports.getActivityFields = async (req, res) => {
-   const { LeadOrganization, LeadPerson, Activity, Lead, Deal, MasterUser, ActivityColumn, LeadFilter, Product, DealProduct, CustomField, CustomFieldValue } = req.models;
+   const { LeadDetail, DealDetail, ActivityColumn, Lead, Deal, Activity } = req.models;
   try {
     // Fetch data from ActivityColumnPreference table
     const pref = await ActivityColumn.findOne();
@@ -2394,7 +2394,7 @@ exports.getActivityFields = async (req, res) => {
 };
 
 exports.getAllLeadsAndDeals = async (req, res) => {
-  const { LeadOrganization, LeadPerson, Activity, Lead, Deal, MasterUser, ActivityColumn, LeadFilter, Product, DealProduct, CustomField, CustomFieldValue } = req.models;
+  const { LeadOrganization, LeadPerson, Activity, Lead, Deal, LeadDetail, DealDetail, } = req.models;
   try {
     // Pagination and search params
     const { page = 1, limit = 20, search = "" } = req.query;
@@ -2453,7 +2453,7 @@ exports.getAllLeadsAndDeals = async (req, res) => {
 };
 
 exports.getAllOrganizations = async (req, res) => {
-  const { LeadOrganization, LeadPerson, Activity, Lead, Deal, MasterUser, ActivityColumn, LeadFilter, Product, DealProduct, CustomField, CustomFieldValue } = req.models;
+  const { LeadOrganization, LeadDetail, DealDetail, Lead, Deal, Activity } = req.models;
   try {
     // Pagination and search params
     const {
@@ -2499,7 +2499,7 @@ exports.getAllOrganizations = async (req, res) => {
 };
 
 exports.getCalendarActivities = async (req, res) => {
-  const { LeadOrganization, LeadPerson, Activity, Lead, Deal, MasterUser, ActivityColumn, LeadFilter, Product, DealProduct, CustomField, CustomFieldValue } = req.models;
+  const { LeadOrganization, LeadPerson, Activity, Lead, Deal, LeadDetail, DealDetail, MasterUser,} = req.models;
   try {
     // Optional filters: user, date range, type, etc.
     const {
@@ -2557,8 +2557,7 @@ exports.getCalendarActivities = async (req, res) => {
 };
 
 // Helper function to update next activity date for a lead
-const updateNextActivityForLead = async (leadId) => {
-  const { LeadOrganization, LeadPerson, Activity, LeadDetail, Lead, Deal, MasterUser, ActivityColumn, LeadFilter, Product, DealProduct, CustomField, CustomFieldValue } = req.models;
+const updateNextActivityForLead = async (leadId, Activity, LeadDetail,) => {
   try {
     // Find the earliest upcoming activity for this lead that is not done
     const nextActivity = await Activity.findOne({
@@ -2612,8 +2611,7 @@ const updateNextActivityForLead = async (leadId) => {
 };
 
 // Helper function to update next activity date for a deal
-const updateNextActivityForDeal = async (dealId) => {
-  const { LeadOrganization, LeadPerson, DealDetail, Activity, Lead, Deal, MasterUser, ActivityColumn, LeadFilter, Product, DealProduct, CustomField, CustomFieldValue } = req.models;
+const updateNextActivityForDeal = async (dealId, DealDetail, Activity, Deal,) => {
   try {
     // Find the earliest upcoming activity for this deal that is not done
     const nextActivity = await Activity.findOne({
@@ -2679,7 +2677,7 @@ const updateNextActivityForDeal = async (dealId) => {
 
 // Utility function to update next activity dates for all leads (can be called via API)
 exports.updateAllLeadsNextActivity = async (req, res) => {
-  const { LeadOrganization, LeadPerson, DealDetail, Activity, Lead, Deal, MasterUser, ActivityColumn, LeadFilter, Product, DealProduct, CustomField, CustomFieldValue } = req.models;
+  const { Activity, LeadDetail, } = req.models;
   try {
     // Get all leads that have activities
     const leadsWithActivities = await Activity.findAll({
@@ -2695,7 +2693,7 @@ exports.updateAllLeadsNextActivity = async (req, res) => {
     let updatedCount = 0;
 
     for (const leadId of leadIds) {
-      await updateNextActivityForLead(leadId);
+      await updateNextActivityForLead(leadId, Activity, LeadDetail,);
       updatedCount++;
     }
 
@@ -2711,7 +2709,7 @@ exports.updateAllLeadsNextActivity = async (req, res) => {
 
 // Utility function to update next activity dates for all deals (can be called via API)
 exports.updateAllDealsNextActivity = async (req, res) => {
-  const { LeadOrganization, LeadPerson, DealDetail, Activity, Lead, Deal, MasterUser, ActivityColumn, LeadFilter, Product, DealProduct, CustomField, CustomFieldValue } = req.models;
+  const { LeadOrganization, LeadPerson, DealDetail, Activity, Lead, Deal, MasterUser, LeadDetail,} = req.models;
   try {
     // Get all deals that have activities
     const dealsWithActivities = await Activity.findAll({
@@ -2727,7 +2725,7 @@ exports.updateAllDealsNextActivity = async (req, res) => {
     let updatedCount = 0;
 
     for (const dealId of dealIds) {
-      await updateNextActivityForDeal(dealId);
+      await updateNextActivityForDeal(dealId, DealDetail, Activity, Deal,);
       updatedCount++;
     }
 
@@ -2744,7 +2742,7 @@ exports.updateAllDealsNextActivity = async (req, res) => {
 // Bulk edit activities functionality
 exports.bulkEditActivities = async (req, res) => {
   const { activityIds, updateData } = req.body;
-    const { LeadOrganization, LeadPerson, DealDetail, Activity, Lead, Deal, MasterUser, ActivityColumn, LeadFilter, Product, DealProduct, CustomField, CustomFieldValue } = req.models;
+    const { LeadOrganization, LeadPerson, DealDetail, Activity, Lead, Deal, MasterUser, ActivityColumn, LeadFilter, Product, DealProduct, CustomField, CustomFieldValue, LeadDetail} = req.models;
 
   // Validate input
   if (!activityIds || !Array.isArray(activityIds) || activityIds.length === 0) {
@@ -2915,11 +2913,11 @@ exports.bulkEditActivities = async (req, res) => {
             updateData.isDone !== undefined ||
             updateData.leadId)
         ) {
-          await updateNextActivityForLead(activity.leadId);
+          await updateNextActivityForLead(activity.leadId, Activity, LeadDetail,);
 
           // If leadId was changed, also update the previous lead
           if (updateData.leadId && updateData.leadId !== activity.leadId) {
-            await updateNextActivityForLead(activity.leadId);
+            await updateNextActivityForLead(activity.leadId, Activity, LeadDetail,);
           }
         }
 
@@ -2931,11 +2929,11 @@ exports.bulkEditActivities = async (req, res) => {
             updateData.isDone !== undefined ||
             updateData.dealId)
         ) {
-          await updateNextActivityForDeal(activity.dealId);
+          await updateNextActivityForDeal(activity.dealId, DealDetail, Activity, Deal,);
 
           // If dealId was changed, also update the previous deal
           if (updateData.dealId && updateData.dealId !== activity.dealId) {
-            await updateNextActivityForDeal(activity.dealId);
+            await updateNextActivityForDeal(activity.dealId, DealDetail, Activity, Deal,);
           }
         }
 
@@ -3061,7 +3059,7 @@ exports.bulkEditActivities = async (req, res) => {
 // Bulk delete activities functionality
 exports.bulkDeleteActivities = async (req, res) => {
   const { activityIds } = req.body;
- const { LeadOrganization, LeadPerson, DealDetail, Activity, Lead, Deal, MasterUser, ActivityColumn, LeadFilter, Product, DealProduct, CustomField, CustomFieldValue } = req.models;
+ const { LeadOrganization, LeadPerson, DealDetail, Activity, Lead, Deal, MasterUser, ActivityColumn, LeadFilter, Product, DealProduct, CustomField, CustomFieldValue, LeadDetail } = req.models;
   // Validate input
   if (!activityIds || !Array.isArray(activityIds) || activityIds.length === 0) {
     return res.status(400).json({
@@ -3125,12 +3123,12 @@ exports.bulkDeleteActivities = async (req, res) => {
 
         // Update next activity date for the lead if this activity was linked to a lead
         if (leadId) {
-          await updateNextActivityForLead(leadId);
+          await updateNextActivityForLead(leadId, Activity, LeadDetail,);
         }
 
         // Update next activity date for the deal if this activity was linked to a deal
         if (dealId) {
-          await updateNextActivityForDeal(dealId);
+          await updateNextActivityForDeal(dealId, DealDetail, Activity, Deal,);
         }
 
         deleteResults.successful.push({
@@ -3196,7 +3194,7 @@ exports.bulkDeleteActivities = async (req, res) => {
 // Bulk mark activities as done/undone
 exports.bulkMarkActivities = async (req, res) => {
   const { activityIds, isDone } = req.body;
-  const { LeadOrganization, LeadPerson, DealDetail, Activity, Lead, Deal, MasterUser, ActivityColumn, LeadFilter, Product, DealProduct, CustomField, CustomFieldValue } = req.models;
+  const { LeadOrganization, LeadPerson, DealDetail, Activity, Lead, Deal, MasterUser, ActivityColumn, LeadFilter, Product, DealProduct, CustomField, CustomFieldValue, LeadDetail } = req.models;
   // Validate input
   if (!activityIds || !Array.isArray(activityIds) || activityIds.length === 0) {
     return res.status(400).json({
@@ -3276,12 +3274,12 @@ exports.bulkMarkActivities = async (req, res) => {
 
         // Update next activity date for the lead if this activity was linked to a lead
         if (leadId) {
-          await updateNextActivityForLead(leadId);
+          await updateNextActivityForLead(leadId, Activity, LeadDetail,);
         }
 
         // Update next activity date for the deal if this activity was linked to a deal
         if (dealId) {
-          await updateNextActivityForDeal(dealId);
+          await updateNextActivityForDeal(dealId, DealDetail, Activity, Deal,);
         }
 
         markResults.successful.push({
@@ -3353,7 +3351,7 @@ exports.bulkMarkActivities = async (req, res) => {
 // Bulk reassign activities to different users
 exports.bulkReassignActivities = async (req, res) => {
   const { activityIds, assignedTo } = req.body;
-  const { LeadOrganization, LeadPerson, DealDetail, Activity, Lead, Deal, MasterUser, ActivityColumn, LeadFilter, Product, DealProduct, CustomField, CustomFieldValue } = req.models;
+  const { LeadOrganization, LeadPerson, DealDetail, Activity, Lead, Deal, MasterUser, ActivityColumn, LeadFilter, Product, DealProduct, CustomField, CustomFieldValue, LeadDetail } = req.models;
   // Validate input
   if (!activityIds || !Array.isArray(activityIds) || activityIds.length === 0) {
     return res.status(400).json({
@@ -3428,12 +3426,12 @@ exports.bulkReassignActivities = async (req, res) => {
 
         // Update next activity date for the lead if this activity was linked to a lead
         if (leadId) {
-          await updateNextActivityForLead(leadId);
+          await updateNextActivityForLead(leadId, Activity, LeadDetail,);
         }
 
         // Update next activity date for the deal if this activity was linked to a deal
         if (dealId) {
-          await updateNextActivityForDeal(dealId);
+          await updateNextActivityForDeal(dealId, DealDetail, Activity, Deal,);
         }
 
         reassignResults.successful.push({
@@ -3500,7 +3498,7 @@ exports.bulkReassignActivities = async (req, res) => {
 };
 
 exports.getActivityFilterFields = async (req, res) => {
-  const { LeadOrganization, LeadPerson, DealDetail, Activity, Lead, Deal, MasterUser, ActivityColumn, LeadFilter, Product, DealProduct, CustomField, CustomFieldValue } = req.models;
+  const { LeadOrganization, LeadPerson, DealDetail, Activity, Lead, Deal, MasterUser, ActivityColumn, LeadFilter, Product, DealProduct, CustomField, CustomFieldValue, LeadDetail } = req.models;
   try {
     // Helper function to convert field type to readable format
     const getFieldType = (sequelizeType) => {
@@ -3626,7 +3624,7 @@ exports.getConnectedData = async (req, res) => {
   try {
     const { leadId, dealId } = req.query;
     const masterUserID = req.adminId;
-    const { LeadOrganization, LeadPerson, DealDetail, Activity, Lead, Deal, MasterUser, ActivityColumn, LeadFilter, Product, DealProduct, CustomField, CustomFieldValue } = req.models;
+    const { LeadOrganization, LeadPerson, DealDetail, Activity, Lead, Deal, MasterUser, ActivityColumn, LeadFilter, Product, DealProduct, CustomField, CustomFieldValue, LeadDetail } = req.models;
     console.log(`🔍 [CONNECTED-DATA] Request for user ${masterUserID}:`, { leadId, dealId });
 
     // Validate that at least one ID is provided

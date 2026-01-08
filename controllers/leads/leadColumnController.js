@@ -210,7 +210,7 @@ exports.deleteLeadColumn = async (req, res) => {
 };
 
 exports.saveAllLeadFieldsWithCheck = async (req, res) => {
-  const {LeadColumnPreference, LeadDetail, } = req.models;
+  const {LeadColumnPreference, LeadDetail, Lead} = req.models;
   let LeadDetails;
   // try {
   //   LeadDetails = require("../../models/leads/leadDetailsModel");
@@ -221,7 +221,7 @@ exports.saveAllLeadFieldsWithCheck = async (req, res) => {
   // Get all field names from Lead and LeadDetails models
   const leadFields = Object.keys(Lead.rawAttributes);
   const leadDetailsFields = LeadDetails
-    ? Object.keys(LeadDetails.rawAttributes)
+    ? Object.keys(LeadDetail.rawAttributes)
     : [];
   const allFieldNames = Array.from(
     new Set([...leadFields, ...leadDetailsFields])

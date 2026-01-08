@@ -10,6 +10,14 @@ const dbContextMiddleware = require("../../middlewares/dbContext");
 const router = express.Router();
 
 // Admin routes
+
+router.post(
+  "/registerLoginUser",
+  handleValidationErrors,
+  adminController.registerLoginUser
+);
+
+
 router.post(
   "/signin",
   validateSignIn,

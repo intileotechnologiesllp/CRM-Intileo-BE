@@ -16,6 +16,92 @@ const { google } = require("googleapis");
 const DatabaseConnectionManager = require("../../config/dbConnectionManager.js");
 const { getClientDbConnection } = require("../../config/db");
 
+
+exports.registerLoginUser = async (req, res) => {
+  const {
+    name,
+    email,
+    password,
+    organizationName
+  } = req.body;
+
+  try {
+    // Calculate dates based on current date
+    const currentDate = new Date();
+    
+    // Start date = current date
+    const startDate = currentDate;
+    
+    // End date = start date + 30 days
+    const endDate = new Date(startDate);
+    endDate.setDate(endDate.getDate() + 30);
+    
+    // Actual end date = start date + 30 days (same as end date)
+    const actualEndDate = new Date(startDate);
+    actualEndDate.setDate(actualEndDate.getDate() + 30);
+
+    // Prepare data for third-party API
+    const thirdPartyData = {
+      name: name,
+      email: email,
+      password: password,
+      organizationName: organizationName,
+      planId: 4,
+      startDate: startDate.toISOString(), // Convert to ISO string for API
+      endDate: endDate.toISOString(), // Add end date
+      actualEndDate: actualEndDate.toISOString(), // Add actual end date
+    };
+
+    // Call third-party API
+    let thirdPartyResponse;
+    try {
+      thirdPartyResponse = await axios.post(
+        `${process.env.FRONTEND_ADMIN_URL}/api/v1/public/clients/registerLoginClient`,
+        thirdPartyData,
+      );
+    } catch (thirdPartyError) {
+      console.error(
+        "Third-party API error:",
+        thirdPartyError.response?.data || thirdPartyError.message
+      );
+
+      // Return appropriate error message
+      let errorMessage = "Failed to create client in third-party system";
+      if (thirdPartyError.response?.status === 429) {
+        errorMessage = "Rate limit exceeded. Please try again later.";
+      } else if (thirdPartyError.response?.data?.message) {
+        errorMessage = thirdPartyError.response.data.message;
+      }
+
+      return res.status(thirdPartyError.response?.status || 500).json({
+        message: errorMessage,
+      });
+    }
+
+    // Check if third-party API was successful
+    if (!thirdPartyResponse.data.success) {
+      return res.status(thirdPartyResponse.status || 400).json({
+        message:
+          thirdPartyResponse.data.message ||
+          "Failed to create client in third-party system",
+      });
+    }
+
+    // Extract data from third-party response
+    const thirdPartyClient = thirdPartyResponse.data.data;
+
+    // Send response
+    res.status(201).json({
+      message: `Client created successfully`,
+      data: thirdPartyClient
+    });
+  } catch (error) {
+    console.error("Error creating master user:", error);
+    res.status(500).json({ message: "Internal server error" });
+  }
+};
+
+
 exports.signIn = async (req, res) => {
   const {
     email,
