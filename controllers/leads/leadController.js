@@ -4821,13 +4821,7 @@ exports.getAllLeadDetails = async (req, res) => {
           "userEmail",
           [Sequelize.fn("LEFT", Sequelize.col("body"), maxBodyLength), "body"],
         ],
-        include: [
-          {
-            model: Attachment,
-            as: "attachments",
-            attributes: ["attachmentID", "filename", "size", "contentType"],
-          },
-        ],
+        // Note: Attachment association removed - fetch separately if needed
         order: [["createdAt", "DESC"]],
         limit: maxEmailLimit,
         offset: emailOffset,
