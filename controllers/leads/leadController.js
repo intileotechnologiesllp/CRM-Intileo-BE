@@ -3899,6 +3899,26 @@ exports.updateLead = async (req, res) => {
         }
       });
       
+      // Sanitize date fields - convert invalid dates to null
+      const dateFields = ['expectedCloseDate', 'proposalSentDate', 'birthday', 'createdAt', 'updatedAt'];
+      dateFields.forEach(field => {
+        if (leadData.hasOwnProperty(field)) {
+          const value = leadData[field];
+          // Check for invalid date strings
+          if (value === '' || value === 'Invalid date' || value === null || value === undefined) {
+            leadData[field] = null;
+            console.log(`Sanitized date field "${field}" to null (was: ${value})`);
+          } else if (typeof value === 'string') {
+            // Validate the date string
+            const dateObj = new Date(value);
+            if (isNaN(dateObj.getTime())) {
+              leadData[field] = null;
+              console.log(`Sanitized invalid date field "${field}" to null (was: ${value})`);
+            }
+          }
+        }
+      });
+      
       // 🔔 IMPORTANT: Store original ownerId BEFORE updating the lead
       const originalOwnerId = lead.ownerId;
       console.log('🔔 Original ownerId stored:', originalOwnerId);
@@ -4048,6 +4068,27 @@ exports.updateLead = async (req, res) => {
           }
         }
       });
+      
+      // Sanitize date fields in LeadDetails
+      const dateFields = ['rfpReceivedDate', 'wonTime', 'lostTime', 'dealClosedOn', 'nextActivityDate', 'createdAt', 'updatedAt'];
+      dateFields.forEach(field => {
+        if (leadDetailsData.hasOwnProperty(field)) {
+          const value = leadDetailsData[field];
+          // Check for invalid date strings
+          if (value === '' || value === 'Invalid date' || value === null || value === undefined) {
+            leadDetailsData[field] = null;
+            console.log(`Sanitized LeadDetails date field "${field}" to null (was: ${value})`);
+          } else if (typeof value === 'string') {
+            // Validate the date string
+            const dateObj = new Date(value);
+            if (isNaN(dateObj.getTime())) {
+              leadDetailsData[field] = null;
+              console.log(`Sanitized invalid LeadDetails date field "${field}" to null (was: ${value})`);
+            }
+          }
+        }
+      });
+      
       console.log("Sanitized leadDetailsData:", leadDetailsData);
     }
     
