@@ -39,6 +39,7 @@ const WebFormTracking = require("./webForm/webFormTrackingModel");
 const Automation = require("./automation/automation");
 const StartupQuestion = require("./startupQuestionModel");
 const LeadCaptureAnalytics = require("./leads/leadCaptureAnalytics");
+const Follower = require("./follower/followerModel");
 
 // GroupVisibility.belongsTo(Person, { as: "GroupPerson", foreignKey: "personId" });
 // Person.hasMany(GroupVisibility, { foreignKey: "personId", as: "GroupVisibility" });
@@ -348,6 +349,26 @@ MasterUser.hasMany(WebForm, {
   as: "webForms",
 });
 
+// ===================================================================
+// FOLLOWER ASSOCIATIONS
+// ===================================================================
+
+// Follower belongs to MasterUser (the user who is following)
+Follower.belongsTo(MasterUser, {
+  foreignKey: "userId",
+  as: "user",
+});
+
+// MasterUser can follow many entities
+MasterUser.hasMany(Follower, {
+  foreignKey: "userId",
+  as: "following",
+});
+
+// Note: We don't create direct associations with Deal, Lead, Person, Organization
+// because Follower uses a polymorphic pattern (entityType + entityId)
+// Queries will be done by filtering entityType and entityId directly
+
 module.exports = {
   Lead,
   LeadDetails,
@@ -386,5 +407,6 @@ module.exports = {
   WebFormTracking,
   Automation,
   StartupQuestion,
-  LeadCaptureAnalytics
+  LeadCaptureAnalytics,
+  Follower,
 };

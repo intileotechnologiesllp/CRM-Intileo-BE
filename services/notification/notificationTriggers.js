@@ -1,4 +1,5 @@
 const NotificationService = require("./notificationService");
+const FollowerNotificationService = require("./followerNotificationService");
 
 /**
  * Notification trigger helpers for different entities
@@ -32,6 +33,9 @@ class NotificationTriggers {
           },
         });
       }
+
+      // Notify followers
+      await FollowerNotificationService.notifyFollowersDealCreated(deal, createdBy);
 
       // Notify team members if visibility group is set
       // TODO: Add team notification logic based on visibility groups
@@ -68,6 +72,9 @@ class NotificationTriggers {
         });
       }
 
+      // Notify followers
+      await FollowerNotificationService.notifyFollowersDealUpdated(deal, updatedBy, changes);
+
       return true;
     } catch (error) {
       console.error("Error sending deal updated notification:", error);
@@ -96,6 +103,14 @@ class NotificationTriggers {
             dealValue: deal.dealValue,
           },
         });
+        
+        // Auto-follow when assigned as owner
+        await FollowerNotificationService.autoFollowOnOwnerAssignment(
+          "deal",
+          deal.dealId,
+          assignedTo,
+          deal.masterUserID
+        );
       }
 
       return true;
@@ -129,6 +144,9 @@ class NotificationTriggers {
         });
       }
 
+      // Notify followers
+      await FollowerNotificationService.notifyFollowersDealWon(deal, wonBy);
+
       // TODO: Notify team members
       return true;
     } catch (error) {
@@ -159,6 +177,9 @@ class NotificationTriggers {
           },
         });
       }
+
+      // Notify followers
+      await FollowerNotificationService.notifyFollowersDealLost(deal, lostBy, reason);
 
       return true;
     } catch (error) {
