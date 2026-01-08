@@ -9880,3 +9880,84 @@ exports.getContactPerson = async (req, res) =>{
     res.status(500).json({message: "Internal server error", error: e.message});
   }
 }
+
+exports.getLeadStats = async (req, res) => {
+  try {
+    const masterUserID  = req.adminId; // adapt based on auth
+
+    if (!masterUserID) {
+      return res.status(400).json({
+        success: false,
+        message: "masterUserID is required",
+      });
+    }
+
+    // 1️⃣ Total Leads
+    const totalLeads = await LeadPerson.count({
+      where: { masterUserID },
+    });
+
+    // 2️⃣ Today's Leads
+    const todayStart = new Date();
+    todayStart.setHours(0, 0, 0, 0);
+
+    const todayEnd = new Date();
+    todayEnd.setHours(23, 59, 59, 999);
+
+    const todayLeads = await LeadPerson.count({
+      where: {
+        masterUserID,
+        createdAt: {
+          [Op.between]: [todayStart, todayEnd],
+        },
+      },
+    });
+
+    // 3️⃣ Lead → Deal Conversion
+    // We assume: wonDeals > 0 means converted
+    const convertedLeads = await LeadPerson.count({
+      where: {
+        masterUserID,
+        wonDeals: {
+          [Op.gt]: 0,
+        },
+      },
+    });
+
+    const conversionRate =
+      totalLeads > 0 ? ((convertedLeads / totalLeads) * 100).toFixed(2) : 0;
+
+    // 4️⃣ Optional: Deal stats summary
+    // const dealStats = await LeadPerson.findOne({
+    //   where: { masterUserID },
+    //   attributes: [
+    //     [fn("SUM", col("wonDeals")), "totalWonDeals"],
+    //     [fn("SUM", col("lostDeals")), "totalLostDeals"],
+    //     [fn("SUM", col("openDeals")), "totalOpenDeals"],
+    //   ],
+    //   raw: true,
+    // });
+
+    res.status(200).json({
+      success: true,
+      message: "Lead analytics fetched successfully",
+      data: {
+        totalLeads,
+        todayLeads,
+        convertedLeads,
+        conversionRate: `${conversionRate}%`,
+        // dealStats: {
+        //   totalWonDeals: Number(dealStats.totalWonDeals || 0),
+        //   totalLostDeals: Number(dealStats.totalLostDeals || 0),
+        //   totalOpenDeals: Number(dealStats.totalOpenDeals || 0),
+        // },
+      },
+    });
+  } catch (error) {
+    console.error("Lead analytics error:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to fetch lead analytics",
+    });
+  }
+};

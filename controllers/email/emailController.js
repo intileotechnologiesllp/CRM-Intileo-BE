@@ -66,7 +66,7 @@ const fs = require("fs");
 const UserCredential = require("../../models/email/userCredentialModel");
 const DefaultEmail = require("../../models/email/defaultEmailModel");
 const MasterUser = require("../../models/master/masterUserModel");
-const { Lead, Deal, Person, Organization, Label } = require("../../models/index");
+const { Lead, Deal, Person, Organization, Label, CampaignsSender } = require("../../models/index");
 const Activity = require("../../models/activity/activityModel");
 const CustomField = require("../../models/customFieldModel");
 const CustomFieldValue = require("../../models/customFieldValueModel");
@@ -12210,6 +12210,37 @@ exports.deleteCampaignTemplate = async (req, res) => {
     res.status(500).json({ success: false, message: error.message });
   }
 };
+
+exports.createCampaignSender = async (req,res) =>{
+  try{
+    const { senderName, senderEmail, replyToMail,createdBy } = req.body;
+
+    await CampaignsSender.create({
+      createdBy,
+      name: senderName, 
+      email: senderEmail,
+      replyToMail: replyToMail
+    });
+
+    res.status(201).json({
+      success: true,
+      message: "Campaign sender created successfully",
+    });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+}
+
+exports.getAllCampaignSenders = async (req, res) =>{
+  try{
+    const senders = await CampaignsSender.findAll({
+      order: [["createdAt", "DESC"]],
+    });
+    res.json({ success: true, data: senders });
+  }catch(e){
+    res.status(500).json({ success: false, message: error.message });
+  }
+}
 
 
 //hello

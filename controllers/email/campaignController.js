@@ -1,22 +1,174 @@
 const Campaigns = require("../../models/email/campaignsModel");
+const EmailTemplate = require("../../models/email/emailTemplateModel");
+const MasterUser = require("../../models/master/masterUserModel");
 
 // Manual flag sync trigger for specific user
 exports.createCampaign = async (req, res) => {
   try {
-    const { to, from, subject, templateId, sendingTime, engagement } = req.body;
+    const {
+      receivers,
+      sender,
+      subject,
+      emailContent,
+      sendingTime,
+      Engagement,
+      campaignName,
+      createdBy,
+    } = req.body;
 
     await Campaigns.create({
-      to,
-      from,
+      campaignName,
+      receivers,
+      sender,
       subject,
-      templateId,
+      emailContent,
       sendingTime,
-      engagement,
+      Engagement,
+      createdBy,
     });
 
     res.status(200).json({
       success: true,
-      message: `Manual flag sync queued for user ${userID}`,
+      message: `Manual flag sync queued for user`,
+    });
+  } catch (error) {
+    console.error("Manual flag sync error:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to queue manual flag sync",
+      error: error.message,
+    });
+  }
+};
+
+exports.editCampaign = async (req, res) => {
+  try {
+    const {
+      receivers,
+      sender,
+      subject,
+      emailContent,
+      sendingTime,
+      engagement,
+      campaignName,
+      createdBy,
+    } = req.body;
+
+    const [updatedRows] = await Campaigns.update(
+      {
+        campaignName,
+        receivers,
+        sender,
+        subject,
+        emailContent,
+        sendingTime,
+        engagement,
+        createdBy,
+      },
+      {
+        where: {
+          campaignId: req.params.id,
+        },
+      }
+    );
+
+    if (updatedRows === 0) {
+      return res.status(404).json({
+        success: false,
+        message: "Campaign not found or no changes made",
+      });
+    }
+
+    res.status(200).json({
+      success: true,
+      message: "Campaign updated successfully",
+    });
+  } catch (error) {
+    console.error("Edit campaign error:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to update campaign",
+      error: error.message,
+    });
+  }
+};
+
+exports.getCampaign = async (req, res) => {
+  try {
+    const campaign = await Campaigns.findAll({
+      include: [
+        {
+          model: MasterUser,
+          as: "creator",
+          attributes: ["name", "email"], // choose fields you want
+        },
+      ],
+    });
+
+    res.status(200).json({
+      success: true,
+      message: `fetch successfully`,
+      data: campaign,
+    });
+  } catch (error) {
+    console.error("Manual flag sync error:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to queue manual flag sync",
+      error: error.message,
+    });
+  }
+};
+exports.getSingleCampaign = async (req, res) => {
+  try {
+    const campaign = await Campaigns.findOne({
+      where: {
+        campaignId: req.params.id,
+      },
+      include: [
+        {
+          model: MasterUser,
+          as: "creator",
+          attributes: ["name", "email"], // choose fields you want
+        },
+        {
+          model: EmailTemplate,
+          as: "template",
+          attributes: ["html", "body", "templateName", "createdAt", "templateId"], // choose fields you want
+        },
+      ],
+    });
+
+    res.status(200).json({
+      success: true,
+      message: `fetch successfully`,
+      data: {
+        ...campaign.dataValues,
+        sendingTime: JSON.parse(campaign.sendingTime),
+        Engagement: campaign.Engagement ? JSON.parse(campaign.Engagement) : null,
+      },
+    });
+  } catch (error) {
+    console.error("Manual flag sync error:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to queue manual flag sync",
+      error: error.message,
+    });
+  }
+};
+
+exports.deleteCampaign = async (req, res) => {
+  try {
+    const campaign = await Campaigns.destroy({
+      where: {
+        campaignId: req.params.id,
+      },
+    });
+
+    res.status(200).json({
+      success: true,
+      message: `Manual flag sync queued for user`,
     });
   } catch (error) {
     console.error("Manual flag sync error:", error);

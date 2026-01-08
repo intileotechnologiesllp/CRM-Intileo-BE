@@ -40,6 +40,7 @@ const Automation = require("./automation/automation");
 const StartupQuestion = require("./startupQuestionModel");
 const LeadCaptureAnalytics = require("./leads/leadCaptureAnalytics");
 const Follower = require("./follower/followerModel");
+const CampaignsSender = require("./email/campaignSenderModel");
 
 // GroupVisibility.belongsTo(Person, { as: "GroupPerson", foreignKey: "personId" });
 // Person.hasMany(GroupVisibility, { foreignKey: "personId", as: "GroupVisibility" });
@@ -409,4 +410,5 @@ module.exports = {
   StartupQuestion,
   LeadCaptureAnalytics,
   Follower,
+  CampaignsSender
 };
