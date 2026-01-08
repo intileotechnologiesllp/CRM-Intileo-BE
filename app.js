@@ -72,6 +72,7 @@ const mergeRoutes = require('./routes/merge/mergeRoute.js'); // Import schedulin
 const webFormRoutes = require('./routes/webForm/webFormRoutes.js'); // Import web form routes
 const webFormPublicRoutes = require('./routes/webForm/webFormPublicRoutes.js'); // Import web form public routes
 const leadAnalyticsRoutes = require("./routes/leads/leadCaptureRoutes.js");
+const followerRoutes = require('./routes/followerRoutes.js'); // Import follower routes
 
 const { loadPrograms } = require("./utils/programCache");
 const imapIdleManager = require('./services/imapIdleManager'); // IMAP IDLE for real-time sync
@@ -199,6 +200,7 @@ app.use('/api/meetings/scheduling-links', schedulingLinkRoutes); // Register sch
 app.use('/api/webforms', webFormRoutes); // Register web form admin routes
 app.use('/api/public/webforms', webFormPublicRoutes); // Register web form public routes (no auth)
 app.use('/embed-form', webFormPublicRoutes); // Register embed form route (for iframe embedding)
+app.use('/api/followers', followerRoutes); // Register follower routes
 app.use('/api/merge', mergeRoutes); // Register merge routes
 app.use("/api/lead-analytics", leadAnalyticsRoutes);
 // Public scheduling link routes (must be registered separately for public access)

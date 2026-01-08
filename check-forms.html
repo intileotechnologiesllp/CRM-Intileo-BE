@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>Check Available Forms</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            padding: 20px;
+            background: #f5f5f5;
+        }
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        h1 {
+            color: #333;
+        }
+        button {
+            background: #4CAF50;
+            color: white;
+            padding: 10px 20px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 16px;
+        }
+        button:hover {
+            background: #45a049;
+        }
+        #result {
+            margin-top: 20px;
+            padding: 15px;
+            background: #f9f9f9;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            white-space: pre-wrap;
+            font-family: monospace;
+        }
+        .form-item {
+            background: #e3f2fd;
+            padding: 10px;
+            margin: 10px 0;
+            border-radius: 4px;
+            border-left: 4px solid #2196F3;
+        }
+        .iframe-test {
+            margin-top: 20px;
+            border: 2px solid #4CAF50;
+            padding: 10px;
+            border-radius: 4px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🔍 Check Available Web Forms</h1>
+        
+        <p>This will check what forms exist in your CRM database.</p>
+        
+        <button onclick="checkForms()">Check Forms</button>
+        
+        <div id="result"></div>
+    </div>
+
+    <script>
+        async function checkForms() {
+            const resultDiv = document.getElementById('result');
+            resultDiv.innerHTML = '⏳ Checking forms...';
+            
+            try {
+                // You need to be authenticated to list forms
+                // This is just to test - you'll need to add your auth token
+                const response = await fetch('http://localhost:4001/api/webforms', {
+                    method: 'GET',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        // Add your auth token here if needed
+                        // 'Authorization': 'Bearer YOUR_TOKEN'
+                    }
+                });
+                
+                const data = await response.json();
+                
+                if (response.ok && data.data && data.data.length > 0) {
+                    let html = `<h3>✅ Found ${data.data.length} form(s):</h3>`;
+                    
+                    data.data.forEach(form => {
+                        const embedUrl = `http://localhost:4001/embed-form/${form.uniqueKey}`;
+                        html += `
+                            <div class="form-item">
+                                <strong>📋 ${form.formName || form.formTitle}</strong><br>
+                                Status: ${form.status}<br>
+                                UniqueKey: <code>${form.uniqueKey}</code><br>
+                                <br>
+                                <strong>Embed URL:</strong><br>
+                                <input type="text" value="${embedUrl}" style="width: 100%; padding: 5px;" readonly onclick="this.select()">
+                                <br><br>
+                                <button onclick="testInIframe('${form.uniqueKey}')">Test in Iframe</button>
+                            </div>
+                        `;
+                    });
+                    
+                    resultDiv.innerHTML = html;
+                } else {
+                    resultDiv.innerHTML = `
+                        <h3>⚠️ No forms found</h3>
+                        <p>You need to create a web form first through your CRM admin panel.</p>
+                        <p>Error: ${data.message || 'No forms available'}</p>
+                        <p><strong>Steps to create a form:</strong></p>
+                        <ol>
+                            <li>Login to your CRM</li>
+                            <li>Go to Web Forms section</li>
+                            <li>Create a new form</li>
+                            <li>Get the uniqueKey from the form</li>
+                            <li>Use it in your iframe</li>
+                        </ol>
+                    `;
+                }
+            } catch (error) {
+                resultDiv.innerHTML = `
+                    <h3>❌ Error checking forms</h3>
+                    <p>${error.message}</p>
+                    <p><strong>Note:</strong> You may need authentication to list forms. Try accessing the CRM admin panel first.</p>
+                `;
+                console.error('Error:', error);
+            }
+        }
+        
+        function testInIframe(uniqueKey) {
+            const url = `http://localhost:4001/embed-form/${uniqueKey}`;
+            const testWindow = window.open('', '_blank', 'width=800,height=600');
+            testWindow.document.write(`
+                <!DOCTYPE html>
+                <html>
+                <head>
+                    <title>Testing Form: ${uniqueKey}</title>
+                    <style>
+                        body { margin: 0; padding: 20px; font-family: Arial; }
+                        h1 { color: #333; }
+                        iframe { border: 2px solid #4CAF50; border-radius: 4px; }
+                    </style>
+                </head>
+                <body>
+                    <h1>🧪 Testing Form in Iframe</h1>
+                    <p><strong>Form URL:</strong> ${url}</p>
+                    <iframe src="${url}" width="100%" height="600"></iframe>
+                </body>
+                </html>
+            `);
+        }
+    </script>
+</body>
+</html>

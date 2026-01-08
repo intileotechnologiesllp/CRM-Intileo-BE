@@ -2418,6 +2418,7 @@ exports.getAllLeadsAndDeals = async (req, res) => {
     }));
 
     res.status(200).json({
+      statusCode: 200,
       pagination: {
         page: parseInt(page),
         limit: parseInt(limit),
@@ -2431,7 +2432,10 @@ exports.getAllLeadsAndDeals = async (req, res) => {
     });
   } catch (error) {
     console.error("Error fetching leads and deals:", error);
-    res.status(500).json({ message: "Internal server error" });
+    res.status(500).json({ 
+      statusCode: 500,
+      message: "Internal server error" 
+    });
   }
 };
 
