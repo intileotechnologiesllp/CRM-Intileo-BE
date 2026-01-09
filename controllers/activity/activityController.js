@@ -159,6 +159,7 @@ exports.createActivity = async (req, res) => {
       const lead = await Lead.findByPk(leadId);
       if (!lead) {
         return res.status(400).json({ 
+          statusCode: 400,
           message: "Invalid leadId. Lead not found.",
           error: "LEAD_NOT_FOUND",
           leadId: leadId
@@ -173,6 +174,7 @@ exports.createActivity = async (req, res) => {
       const deal = await Deal.findByPk(dealId);
       if (!deal) {
         return res.status(400).json({ 
+          statusCode: 400,
           message: "Invalid dealId. Deal not found.",
           error: "DEAL_NOT_FOUND",
           dealId: dealId
@@ -263,6 +265,7 @@ exports.createActivity = async (req, res) => {
     }
 
     res.status(201).json({ 
+      statusCode: 201,
       message: "Activity created successfully", 
       activity: responseActivity,
       multiContactSupport: true,
@@ -270,7 +273,10 @@ exports.createActivity = async (req, res) => {
     });
   } catch (error) {
     console.error("Error creating activity:", error);
-    res.status(500).json({ message: "Internal server error" });
+    res.status(500).json({ 
+      statusCode: 500,
+      message: "Internal server error" 
+    });
   }
 };
 

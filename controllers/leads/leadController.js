@@ -4561,7 +4561,10 @@ exports.getAllLeadDetails = async (req, res) => {
       null
     );
     console.error("leadId is required in params.");
-    return res.status(400).json({ message: "leadId is required in params." });
+    return res.status(400).json({ 
+      statusCode: 400,
+      message: "leadId is required in params." 
+    });
   }
 
   try {
@@ -4575,7 +4578,10 @@ exports.getAllLeadDetails = async (req, res) => {
         "Lead details fetch failed: Lead not found.",
         null
       );
-      return res.status(404).json({ message: "Lead not found." });
+      return res.status(404).json({ 
+        statusCode: 404,
+        message: "Lead not found." 
+      });
     }
 
     // Allow leads without email: proceed but warn and skip email-specific data later
@@ -5193,6 +5199,7 @@ exports.getAllLeadDetails = async (req, res) => {
     console.log(`[getAllLeadDetails] Email visibility breakdown:`, emailVisibilityStats);
 
     res.status(200).json({
+      statusCode: 200,
       message: "Lead details fetched successfully.",
       lead: filteredLead,
       leadDetails,
@@ -5270,7 +5277,10 @@ exports.getAllLeadDetails = async (req, res) => {
       `Lead details fetch failed: ${error.message}`,
       null
     );
-    res.status(500).json({ message: "Internal server error." });
+    res.status(500).json({ 
+      statusCode: 500,
+      message: "Internal server error." 
+    });
   }
 };
 
