@@ -4,7 +4,7 @@
  * @param {Object} models - Object containing all models for a connection
  */
 const setupAssociations = (models) => {
-  const { MasterUser, AuditTrail, History, LoginHistory, RecentLoginHistory, Admin, CustomField, CustomFieldValue, PermissionSet, RecentSearch, UserInterfacePreference, Country, Currency, Department, Designation, Label, Organization, Program, Region, Scope, Sectoralscope, Status, GroupVisibility, ItemVisibilityRule, GroupMembership, VisibilityGroup, Pipeline, PipelineStage, PipelineVisibilityRule, LeadColumn, LeadOrganization, OrganizationColumnPreference, OrganizationFile, OrganizationNote, OrganizationSidebarPreference, LeadPerson, PersonColumnPreference, PersonFile, PersonNote, PersonSidebarPreference, Lead, LeadNote, LeadFilter, LeadDetail, LeadColumnPreference, EntityFile, Dashboard, Card, Goal, ReportFolder, Report, ImportData, UserGoogleToken, UserFavorite, Email, Attachment, DefaultEmail, Template, UserCredential, DeviceActivity, LostReason, LostReasonSetting, Deal, DealStageHistory, DealNote, DealDetail, DealParticipant, DealFile, DealColumn, ContactChangeLog, ContactSyncHistory, ContactSyncConfig, ContactSyncMapping, CompanySetting, Activity, ActivityColumn, ActivitySetting, ActivityType, Meeting, SchedulingLink, MiscSetting, Notification, NotificationPreference, PushSubscription, MasterUserPrivileges, Product, ProductVariation, DealProduct, ProductColumn } = models;
+  const { MasterUser, AuditTrail, History, LoginHistory, RecentLoginHistory, Admin, CustomField, CustomFieldValue, PermissionSet, RecentSearch, UserInterfacePreference, Country, Currency, Department, Designation, Label, Organization, Program, Region, Scope, Sectoralscope, Status, GroupVisibility, ItemVisibilityRule, GroupMembership, VisibilityGroup, Pipeline, PipelineStage, PipelineVisibilityRule, LeadColumn, LeadOrganization, OrganizationColumnPreference, OrganizationFile, OrganizationNote, OrganizationSidebarPreference, LeadPerson, PersonColumnPreference, PersonFile, PersonNote, PersonSidebarPreference, Lead, LeadNote, LeadFilter, LeadDetail, LeadColumnPreference, EntityFile, Dashboard, Card, Goal, ReportFolder, Report, ImportData, UserGoogleToken, UserFavorite, Email, Attachment, DefaultEmail, Template, UserCredential, DeviceActivity, LostReason, LostReasonSetting, Deal, DealStageHistory, DealNote, DealDetail, DealParticipant, DealFile, DealColumn, ContactChangeLog, ContactSyncHistory, ContactSyncConfig, ContactSyncMapping, CompanySetting, Activity, ActivityColumn, ActivitySetting, ActivityType, Meeting, SchedulingLink, MiscSetting, Notification, NotificationPreference, PushSubscription, MasterUserPrivileges, Product, ProductVariation, DealProduct, ProductColumn, WebFormField, WebForm } = models;
   
 
 Region.belongsTo(Country, { foreignKey: "countryId", as: "country" });
@@ -520,6 +520,17 @@ Deal.hasMany(DealProduct, {
 Product.hasMany(DealProduct, {
   foreignKey: "productId",
   as: "dealProducts",
+});
+
+
+WebFormField.belongsTo(WebForm, {
+  foreignKey: "formId",
+  as: "webfields",
+});
+
+WebForm.hasMany(WebFormField, {
+  foreignKey: "formId",
+  as: "fields",
 });
 
 console.log("✅ Associations set up successfully");

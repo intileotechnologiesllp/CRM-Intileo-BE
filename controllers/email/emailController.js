@@ -10386,7 +10386,7 @@ const imapIdleManager = require('../../services/imapIdleManager');
  * GET /api/email/get-emails-realtime
  */
 exports.getEmailsRealtime = async (req, res) => {
-  const {  Email, Label } = models;
+  const {  Email, Label, UserCredential } =  req.models;
   try {
     const userID = req.adminId; // Only use authenticated user ID from token
     
@@ -10425,7 +10425,7 @@ exports.getEmailsRealtime = async (req, res) => {
       // Only try to start IDLE if no connection exists
       try {
         console.log(`🔄 [REALTIME-EMAILS] No existing connection, starting IMAP IDLE for user ${userID}...`);
-        await imapIdleManager.startIdleForUser(userID);
+        await imapIdleManager.startIdleForUser(userID, Email, UserCredential);
         console.log(`✅ [REALTIME-EMAILS] New IMAP IDLE started for user ${userID}`);
       } catch (idleError) {
         console.warn(`⚠️ [REALTIME-EMAILS] IDLE start failed (continuing with regular getEmails):`, idleError.message);

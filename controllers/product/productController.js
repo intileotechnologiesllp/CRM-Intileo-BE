@@ -492,7 +492,7 @@ exports.getProductById = async (req, res) => {
           include: [
             {
               model: MasterUser,
-              as: "DealOwner",
+              as: "owner",
               attributes: ["masterUserID", "name", "email"],
               required: false,
             },
