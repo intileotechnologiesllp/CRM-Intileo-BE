@@ -94,11 +94,11 @@ router.get("/google/debug", (req, res) => {
 // Master user routes
 
 router.post("/logout", dbContextMiddleware, verifyToken, adminController.logout);
-router.get("/login-history/:userId",adminController.getLoginHistory);
-router.get("/login-history",adminController.getAllLoginHistory);
-router.get("/getRecentLoginHistory",adminController.getRecentLoginHistory);
-router.get("/get-miscsettings",adminController.getMiscSettings);
-router.post("/update-miscsettings",adminController.updateMiscSettings);
+router.get("/login-history/:userId", dbContextMiddleware, adminController.getLoginHistory);
+router.get("/login-history", dbContextMiddleware, adminController.getAllLoginHistory);
+router.get("/getRecentLoginHistory", dbContextMiddleware, adminController.getRecentLoginHistory);
+router.get("/get-miscsettings", dbContextMiddleware, adminController.getMiscSettings);
+router.post("/update-miscsettings", dbContextMiddleware, adminController.updateMiscSettings);
 router.post("/change-password", dbContextMiddleware, verifyToken, adminController.changePassword);
 router.post("/validate-password", dbContextMiddleware, verifyToken, adminController.validatePassword);
 

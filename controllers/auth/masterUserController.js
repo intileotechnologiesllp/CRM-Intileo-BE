@@ -91,7 +91,7 @@ exports.createMasterUser = async (req, res) => {
     Program,
     MasterUserPrivileges,
     GroupVisibility,
-    permissionSet
+    PermissionSet
   } = req.models;
   const {
     name,
@@ -228,7 +228,7 @@ exports.createMasterUser = async (req, res) => {
       },
     });
 
-    const permission = await permissionSet.findOne({
+    const permission = await PermissionSet.findOne({
       where: {
         name: "Default",
       },
@@ -343,6 +343,7 @@ exports.getMasterUsers = async (req, res) => {
     MasterUserPrivileges,
     GroupVisibility,
     LoginHistory,
+    PermissionSet
   } = req.models;
   const {
     page = 1,
@@ -460,7 +461,7 @@ exports.getMasterUsers = async (req, res) => {
     };
 
     // Function to format user data with privileges, permission sets, and last login
-    const formatUserData = async (user) => {
+    const formatUserData = async (user, PermissionSet) => {
       const privileges = user.privileges
         ? {
             ...user.privileges.toJSON(),
@@ -482,7 +483,7 @@ exports.getMasterUsers = async (req, res) => {
 
       if (user.permissionSetId) {
         try {
-          permission = await permissionSet.findOne({
+          permission = await PermissionSet.findOne({
             where: {
               permissionSetId: user.permissionSetId,
             },
@@ -497,7 +498,7 @@ exports.getMasterUsers = async (req, res) => {
 
       if (user.globalPermissionSetId) {
         try {
-          globalPermission = await permissionSet.findOne({
+          globalPermission = await PermissionSet.findOne({
             where: {
               permissionSetId: user.globalPermissionSetId,
             },
@@ -1015,7 +1016,7 @@ exports.updateProfile = async (req, res) => {
 
 // Set Permission Sets for Master User
 exports.setMasterUserPermissions = async (req, res) => {
-  const { MasterUser, AuditTrail, History } = req.models;
+  const { MasterUser, AuditTrail, History, PermissionSet } = req.models;
   // const masterUserID = req.adminId; // Get from authenticated user context
   const { permissionSetId, masterUserID, globalPermissionSetId, groupId } =
     req.body;
@@ -1086,7 +1087,7 @@ exports.setMasterUserPermissions = async (req, res) => {
 
     if (permissionSetId) {
       validationPromises.push(
-        permissionSet
+        PermissionSet
           .findOne({
             where: { permissionSetId },
           })
@@ -1104,7 +1105,7 @@ exports.setMasterUserPermissions = async (req, res) => {
 
     if (globalPermissionSetId) {
       validationPromises.push(
-        permissionSet
+        PermissionSet
           .findOne({
             where: { permissionSetId: globalPermissionSetId },
           })
@@ -1176,13 +1177,13 @@ exports.setMasterUserPermissions = async (req, res) => {
     let responseGlobalPermissionSet = null;
 
     if (updatedUser.permissionSetId) {
-      responsePermissionSet = await permissionSet.findOne({
+      responsePermissionSet = await PermissionSet.findOne({
         where: { permissionSetId: updatedUser.permissionSetId },
       });
     }
 
     if (updatedUser.globalPermissionSetId) {
-      responseGlobalPermissionSet = await permissionSet.findOne({
+      responseGlobalPermissionSet = await PermissionSet.findOne({
         where: { permissionSetId: updatedUser.globalPermissionSetId },
       });
     }
