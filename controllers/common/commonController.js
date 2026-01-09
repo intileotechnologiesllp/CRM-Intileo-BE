@@ -11,17 +11,17 @@ exports.saveStartUpQuestions = async (req, res) => {
     focus,
   } = req.body;
 
-  if (
-    !jobTitle ||
-    !useCrmBefore ||
-    !companySize ||
-    !industry ||
-    !companyName ||
-    !totalEmployees ||
-    !focus
-  ) {
-    return res.status(400).json({ error: "All fields are required." });
-  }
+  // if (
+  //   !jobTitle ||
+  //   !useCrmBefore ||
+  //   !companySize ||
+  //   !industry ||
+  //   !companyName ||
+  //   !totalEmployees ||
+  //   !focus
+  // ) {
+  //   return res.status(400).json({ error: "All fields are required." });
+  // }
   const userId = req.adminId;
 
   await StartupQuestion.create({

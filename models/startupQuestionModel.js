@@ -16,8 +16,7 @@ const StartupQuestion = sequelize.define("StartupQuestion", {
   },
   jobTitle: {
     type: DataTypes.STRING,
-    allowNull: true,
-    unique: true,
+    allowNull: true
   },
   useCrmBefore: {
     type: DataTypes.STRING,
