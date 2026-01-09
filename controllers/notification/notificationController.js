@@ -42,10 +42,10 @@ exports.getNotifications = async (req, res) => {
  * Get unread notification count
  */
 exports.getUnreadCount = async (req, res) => {
-  const { PushSubscription,  MasterUser } = req.models;
+  const { PushSubscription,  MasterUser, Notification } = req.models;
   try {
     const userId = req.user?.userId || req.adminId; // Support both auth formats
-    const count = await NotificationService.getUnreadCount(userId);
+    const count = await NotificationService.getUnreadCount(userId, Notification);
 
     res.status(200).json({
       success: true,
@@ -65,14 +65,14 @@ exports.getUnreadCount = async (req, res) => {
  * Mark a notification as read
  */
 exports.markAsRead = async (req, res) => {
-  const { PushSubscription,  MasterUser } = req.models;
+  const { PushSubscription,  MasterUser, Notification } = req.models;
   try {
     const userId = req.user?.userId || req.adminId; // Support both auth formats
     const { notificationId } = req.params;
 
     const notification = await NotificationService.markAsRead(
       notificationId,
-      userId
+      userId, Notification,  PushSubscription, MasterUser
     );
 
     res.status(200).json({
@@ -94,10 +94,10 @@ exports.markAsRead = async (req, res) => {
  * Mark all notifications as read
  */
 exports.markAllAsRead = async (req, res) => {
-  const { PushSubscription,  MasterUser } = req.models;
+  const { PushSubscription,  MasterUser, Notification } = req.models;
   try {
     const userId = req.user?.userId || req.adminId; // Support both auth formats
-    const updated = await NotificationService.markAllAsRead(userId);
+    const updated = await NotificationService.markAllAsRead(userId, Notification, PushSubscription,  MasterUser);
 
     res.status(200).json({
       success: true,
@@ -118,12 +118,12 @@ exports.markAllAsRead = async (req, res) => {
  * Delete a notification
  */
 exports.deleteNotification = async (req, res) => {
-  const { PushSubscription,  MasterUser } = req.models;
+  const { PushSubscription,  MasterUser, Notification } = req.models;
   try {
     const userId = req.user?.userId || req.adminId; // Support both auth formats
     const { notificationId } = req.params;
 
-    await NotificationService.deleteNotification(notificationId, userId);
+    await NotificationService.deleteNotification(notificationId, userId, Notification, PushSubscription,  MasterUser);
 
     res.status(200).json({
       success: true,
@@ -143,10 +143,10 @@ exports.deleteNotification = async (req, res) => {
  * Delete all notifications for a user
  */
 exports.deleteAllNotifications = async (req, res) => {
-  const { PushSubscription,  MasterUser } = req.models;
+  const { PushSubscription,  MasterUser, Notification } = req.models;
   try {
     const userId = req.user?.userId || req.adminId; // Support both auth formats
-    const result = await NotificationService.deleteAllNotifications(userId);
+    const result = await NotificationService.deleteAllNotifications(userId, Notification, PushSubscription,  MasterUser);
 
     res.status(200).json({
       success: true,
@@ -167,10 +167,10 @@ exports.deleteAllNotifications = async (req, res) => {
  * Get notification preferences
  */
 exports.getPreferences = async (req, res) => {
-  const { PushSubscription,  MasterUser } = req.models;
+  const { NotificationPreference,  MasterUser } = req.models;
   try {
     const userId = req.user?.userId || req.adminId; // Support both auth formats
-    const preferences = await NotificationService.getPreferences(userId);
+    const preferences = await NotificationService.getPreferences(userId, NotificationPreference);
 
     res.status(200).json({
       success: true,
@@ -190,14 +190,15 @@ exports.getPreferences = async (req, res) => {
  * Update notification preferences
  */
 exports.updatePreferences = async (req, res) => {
-  const { PushSubscription,  MasterUser } = req.models;
+  const { NotificationPreference,  MasterUser } = req.models;
   try {
     const userId = req.user?.userId || req.adminId; // Support both auth formats
     const updates = req.body;
 
     const preferences = await NotificationService.updatePreferences(
       userId,
-      updates
+      updates,
+      NotificationPreference
     );
 
     res.status(200).json({
@@ -312,7 +313,7 @@ exports.unsubscribeFromPush = async (req, res) => {
  * Test notification (for development)
  */
 exports.sendTestNotification = async (req, res) => {
-  const { PushSubscription,  MasterUser } = req.models;
+  const { Notification, NotificationPreference, PushSubscription,  MasterUser } = req.models;
   try {
     const userId = req.user?.userId || req.adminId; // Support both auth formats
     const {
@@ -329,7 +330,7 @@ exports.sendTestNotification = async (req, res) => {
       message,
       priority,
       actionBy: userId,
-    });
+    },  Notification, NotificationPreference, PushSubscription, MasterUser);
 
     res.status(200).json({
       success: true,

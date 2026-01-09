@@ -33,7 +33,7 @@ class NotificationService {
       console.log('🔔 [NotificationService] Step 1: Checking user preferences for userId:', userId, 'type:', type);
 
       // Check user's notification preferences
-      const shouldSend = await this.checkUserPreferences(userId, type);
+      const shouldSend = await this.checkUserPreferences(userId, type, NotificationPreference);
       
       console.log('🔔 [NotificationService] Step 2: User preferences check result:', shouldSend);
       
@@ -91,13 +91,13 @@ class NotificationService {
       // Send real-time notification via Socket.IO
       emitToUser(userId, "new_notification", {
         notification: fullNotification,
-        unreadCount: await this.getUnreadCount(userId),
+        unreadCount: await this.getUnreadCount(userId, Notification),
       });
 
       console.log(`✅ [NotificationService] Notification sent to user ${userId}: ${type}`);
 
       // Send push notification if enabled
-      await this.sendPushNotification(userId, fullNotification);
+      await this.sendPushNotification(userId, fullNotification, PushSubscription, NotificationPreference);
 
       console.log('🔔 [NotificationService] Step 8: Push notification sent (if applicable)');
 
@@ -117,7 +117,7 @@ class NotificationService {
     try {
       const notifications = await Promise.all(
         userIds.map((userId) =>
-          this.createNotification({ ...data, userId })
+          this.createNotification({ ...data, userId },)
         )
       );
 
@@ -207,7 +207,7 @@ class NotificationService {
    * @param {Number} userId - User ID (for security)
    * @returns {Promise<Object>} Updated notification
    */
-  static async markAsRead(notificationId, userId,PushSubscription,  MasterUser ) {
+  static async markAsRead(notificationId, userId, Notification, PushSubscription,  MasterUser ) {
     try {
       const notification = await Notification.findOne({
         where: { notificationId, userId },
@@ -226,7 +226,7 @@ class NotificationService {
         // Emit update to user
         emitToUser(userId, "notification_read", {
           notificationId,
-          unreadCount: await this.getUnreadCount(userId),
+          unreadCount: await this.getUnreadCount(userId, Notification),
         });
       }
 
@@ -242,7 +242,7 @@ class NotificationService {
    * @param {Number} userId - User ID
    * @returns {Promise<Number>} Number of notifications marked as read
    */
-  static async markAllAsRead(userId, PushSubscription,  MasterUser) {
+  static async markAllAsRead(userId, Notification, PushSubscription,  MasterUser) {
     try {
       const [updated] = await Notification.update(
         { isRead: true, readAt: new Date() },
@@ -273,7 +273,7 @@ class NotificationService {
    * @param {Number} notificationId - Notification ID
    * @param {Number} userId - User ID (for security)
    */
-  static async deleteNotification(notificationId, userId,PushSubscription,  MasterUser) {
+  static async deleteNotification(notificationId, userId, Notification,  PushSubscription,  MasterUser) {
     try {
       const notification = await Notification.findOne({
         where: { notificationId, userId },
@@ -300,7 +300,7 @@ class NotificationService {
    * Delete all notifications for a user
    * @param {Number} userId - User ID
    */
-  static async deleteAllNotifications(userId,PushSubscription,  MasterUser ) {
+  static async deleteAllNotifications(userId, Notification, PushSubscription,  MasterUser ) {
     try {
       const [updated] = await Notification.update(
         { isDeleted: true, deletedAt: new Date() },
@@ -350,7 +350,7 @@ class NotificationService {
    * @param {Number} userId - User ID
    * @returns {Promise<Object>} Notification preferences
    */
-  static async getPreferences(userId) {
+  static async getPreferences(userId, NotificationPreference) {
     try {
       let preferences = await NotificationPreference.findOne({
         where: { userId },
@@ -374,7 +374,7 @@ class NotificationService {
    * @param {Object} updates - Preference updates
    * @returns {Promise<Object>} Updated preferences
    */
-  static async updatePreferences(userId, updates,PushSubscription,  MasterUser ) {
+  static async updatePreferences(userId, updates, NotificationPreference,  MasterUser ) {
     try {
       let preferences = await NotificationPreference.findOne({
         where: { userId },
@@ -403,9 +403,9 @@ class NotificationService {
    * @param {String} type - Notification type
    * @returns {Promise<Boolean>} Whether to send notification
    */
-  static async checkUserPreferences(userId, type) {
+  static async checkUserPreferences(userId, type, NotificationPreference) {
     try {
-      const preferences = await this.getPreferences(userId);
+      const preferences = await this.getPreferences(userId, NotificationPreference);
 
       // Check if in-app notifications are enabled
       if (!preferences.inAppEnabled) return false;
@@ -461,10 +461,10 @@ class NotificationService {
    * @param {Number} userId - User ID
    * @param {Object} notification - Notification data
    */
-  static async sendPushNotification(userId, notification) {
+  static async sendPushNotification(userId, notification, PushSubscription, NotificationPreference) {
     try {
       // Check if user has push enabled
-      const preferences = await this.getPreferences(userId);
+      const preferences = await this.getPreferences(userId, NotificationPreference );
       if (!preferences.pushEnabled) return;
 
       // Get user's push subscriptions
@@ -513,7 +513,7 @@ class NotificationService {
   /**
    * Clean up expired notifications
    */
-  static async cleanupExpiredNotifications() {
+  static async cleanupExpiredNotifications(Notification) {
     try {
       const [deleted] = await Notification.update(
         { isDeleted: true, deletedAt: new Date() },
