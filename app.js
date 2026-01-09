@@ -73,7 +73,7 @@ const webFormRoutes = require('./routes/webForm/webFormRoutes.js'); // Import we
 const webFormPublicRoutes = require('./routes/webForm/webFormPublicRoutes.js'); // Import web form public routes
 const leadAnalyticsRoutes = require("./routes/leads/leadCaptureRoutes.js");
 const followerRoutes = require('./routes/followerRoutes.js'); // Import follower routes
-
+const planRoutes = require('./routes/plans/planRoutes.js')
 const { loadPrograms } = require("./utils/programCache");
 const imapIdleManager = require('./services/imapIdleManager'); // IMAP IDLE for real-time sync
 const { initializeSocket, getIO } = require('./config/socket'); // Socket.IO for real-time notifications
@@ -137,6 +137,7 @@ app.use("/api/auth/2fa", (req, res, next) => {
 
 app.use("/api/auth/2fa", twoFactorRoutes); // Register 2FA routes FIRST
 app.use("/api", adminRoutes);
+app.use("/api/plans", planRoutes);
 app.use("/api/designations", designationRoutes);
 app.use("/api/departments", departmentRoutes);
 app.use("/api/organizations", organizationRoutes); // Register organization routes
